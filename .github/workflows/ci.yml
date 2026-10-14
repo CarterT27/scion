@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *" # nightly: full and external jobs
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: check.sh
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: scripts/check.sh
+        run: scripts/check.sh
+      - name: Layer check self-test
+        run: scripts/check-layers.sh --self-test
+      - name: Docs build without warnings
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+  full:
+    name: check.sh --full (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: scripts/check.sh --full
+        run: scripts/check.sh --full
+
+  external:
+    name: external backends (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Start CockroachDB and MinIO
+        run: docker compose -f docker/compose.test.yml up -d --wait
+      - name: scripts/test-external.sh --all
+        run: scripts/test-external.sh --all
+      - name: Stop backends
+        if: always()
+        run: docker compose -f docker/compose.test.yml down -v

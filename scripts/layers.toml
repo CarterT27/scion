@@ -1,0 +1,54 @@
+# PLAN 1.3 layer allow-table, enforced by scripts/check-layers.sh.
+#
+# [allow]: for every workspace crate, the workspace crates it may depend on as a NORMAL or BUILD
+# dependency (optional dependencies count as normal). Exactly the "Internal deps" column of
+# docs/PLAN.md section 1.2. Every workspace crate must be listed.
+[allow]
+scion-core = []
+scion-object = ["scion-core"]
+scion-store = ["scion-core", "scion-object"]
+scion-store-crdb = ["scion-core", "scion-object", "scion-store"]
+scion-store-s3 = ["scion-core", "scion-store"]
+scion-merge = ["scion-core"]
+scion-history = ["scion-core", "scion-object", "scion-store", "scion-merge"]
+scion-derived = ["scion-core", "scion-object", "scion-store", "scion-merge", "scion-history"]
+scion-redaction = ["scion-core", "scion-object", "scion-store", "scion-derived"]
+scion-policy = ["scion-core", "scion-object"]
+scion-auth = ["scion-core"]
+scion-config = ["scion-core"]
+scion-obs = ["scion-core"]
+scion-proto = ["scion-core", "scion-object"]
+scion-server = [
+    "scion-core", "scion-object", "scion-store", "scion-store-crdb", "scion-store-s3",
+    "scion-merge", "scion-history", "scion-derived", "scion-redaction", "scion-policy",
+    "scion-auth", "scion-config", "scion-obs", "scion-proto",
+]
+scion-cache = ["scion-core", "scion-object"]
+scion-daemon = [
+    "scion-core", "scion-object", "scion-cache", "scion-auth", "scion-config", "scion-obs",
+    "scion-proto",
+]
+scion-wc = [
+    "scion-core", "scion-object", "scion-merge", "scion-cache", "scion-config", "scion-proto",
+    "scion-auth",
+]
+scion-cli = ["scion-core", "scion-object", "scion-config", "scion-proto", "scion-auth", "scion-wc"]
+scion-import = ["scion-core", "scion-object", "scion-proto", "scion-auth"]
+scion-refmodel = []
+scion-testkit = ["scion-core", "scion-object", "scion-proto", "scion-refmodel"]
+# "all of the above"
+scion-conformance = ["*"]
+
+# Hard check 1: crates with no scion-* dependency of ANY kind (normal, build or dev).
+[isolated]
+crates = ["scion-refmodel"]
+
+# Hard check 2: none of `from` may depend (normal or build) on any of `to`.
+[[forbidden]]
+from = ["scion-core", "scion-object", "scion-store", "scion-merge", "scion-history", "scion-derived"]
+to = ["scion-policy", "scion-auth", "scion-server", "scion-proto", "scion-config", "scion-obs"]
+
+# Hard check 3 (PLAN 1.2 dev-dependency rule): crates in the normal-dependency closure of
+# `crate` must not dev-depend on `crate` (it would create duplicate crate instances).
+[[no_dev_dependency_on_closure_of]]
+crate = "scion-testkit"

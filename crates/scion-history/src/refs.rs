@@ -24,7 +24,9 @@ impl History {
         todo!("P20")
     }
 
-    /// Create a ref at version 1 (INVALID_ARGUMENT/ref_exists); the caller checks admin.refs.
+    /// Create a ref (INVALID_ARGUMENT/ref_exists when it exists). Its version is 1, or continues
+    /// after the last logged version of a previously deleted ref (storage-semantics 4.3). The
+    /// caller checks admin.refs.
     pub async fn create_ref(
         &self,
         name: &RefName,

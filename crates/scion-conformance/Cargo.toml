@@ -22,7 +22,7 @@ scion-history = { workspace = true }
 scion-derived = { workspace = true }
 scion-redaction = { workspace = true }
 scion-policy = { workspace = true }
-scion-auth = { workspace = true }
+scion-auth = { workspace = true, features = ["test-hooks"] }
 scion-config = { workspace = true }
 scion-obs = { workspace = true }
 scion-proto = { workspace = true }
