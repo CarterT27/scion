@@ -145,6 +145,8 @@ reason (SPEC 17; PLAN 6.8).
 4. **Decide during quarantine.** If the redaction was a mistake, `Unredact(ids)` (permission
    `admin.redact`) restores the bytes byte-identically and bumps the epoch. It works only while
    the objects are quarantined; after a purge it fails with `INVALID_ARGUMENT/not_quarantined`.
+   The same holds once a purge has started deleting bytes but was interrupted before marking
+   the object purged: unredact refuses it and a re-run of the purge completes it.
 5. **Purge.** Either let the scheduled job purge the objects when `purge_after` passes, or
    issue `PurgeNow(ids, reason)` (permission `admin.purge`). Purge deletes the live and
    quarantine keys, the inline data in the `objects` rows, and content-bearing derived records

@@ -20,6 +20,7 @@ use scion_store::{
     Area, AuditRow, Consistency, ObjectRepo, ObjectRow, ObjectState, RedactTxn, RedactionRow,
     RedactionState,
 };
+use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
@@ -49,8 +50,20 @@ pub struct Redactor {
     clock: Arc<dyn Clock>,
     cfg: RedactionConfig,
     /// Serializes transitions and byte moves inside this process, so the background mover can
-    /// never move bytes of an object that a concurrent unredact is restoring.
-    lock: Mutex<()>,
+    /// never move bytes of an object that a concurrent unredact is restoring. The guarded state
+    /// remembers which quarantined objects the mover already confirmed moved.
+    lock: Mutex<MoverState>,
+}
+
+/// State guarded by [`Redactor::lock`].
+#[derive(Default)]
+struct MoverState {
+    /// Quarantined ids whose live key the mover has confirmed absent, with the redaction epoch
+    /// of that check. The mover skips them while their redaction row keeps that epoch, so a
+    /// steady-state run costs one metadata read instead of one object-storage HEAD per
+    /// quarantined object. Entries are dropped whenever this process may put bytes back at the
+    /// live key (unredact) and when the id leaves the quarantined set.
+    confirmed: HashMap<ObjectId, u64>,
 }
 
 impl Redactor {
@@ -66,7 +79,7 @@ impl Redactor {
             derived,
             clock,
             cfg,
-            lock: Mutex::new(()),
+            lock: Mutex::new(MoverState::default()),
         })
     }
 
@@ -176,6 +189,9 @@ impl Redactor {
     /// are restored first, then one `MetaStore::unredact` transaction bumps the epoch, deletes
     /// the redaction rows, sets the objects live and appends the audit row. If that transaction
     /// fails, the bytes are moved back to quarantine (best effort; the mover finishes it).
+    ///
+    /// An object whose purge already deleted its bytes (a purge interrupted after
+    /// `purge.after_bytes`) is INVALID_ARGUMENT/not_quarantined: purge is irreversible.
     pub async fn unredact_with_reason(
         &self,
         ids: &[ObjectId],
@@ -183,7 +199,7 @@ impl Redactor {
         reason: &str,
     ) -> Result<u64> {
         let ids = normalize(ids)?;
-        let _guard = self.lock.lock().await;
+        let mut state = self.lock.lock().await;
         let rows = self.strong_rows(&ids).await?;
         for (id, row) in ids.iter().zip(&rows) {
             if !matches!(row, Some(r) if r.state == ObjectState::Quarantined) {
@@ -199,8 +215,30 @@ impl Redactor {
             .filter(|r| has_stored_bytes(r))
             .map(|r| r.id)
             .collect();
+        // A purge that crashed after deleting the bytes (checkpoint `purge.after_bytes`) leaves
+        // the object quarantined with no bytes anywhere. Purge is irreversible (SPEC 13.2 step
+        // 4): such an object must not become live again (a live row implies durable bytes), so
+        // it is not quarantined for unredact purposes. Checked before any side effect.
+        let blobs = &self.objects.storage().blobs;
         for id in &stored {
-            self.objects.restore_bytes(id).await?;
+            let q = blobs
+                .exists(&self.objects.key(id, Area::Quarantine))
+                .await?;
+            if !q && !blobs.exists(&self.objects.key(id, Area::Live)).await? {
+                return Err(ScionError::invalid(
+                    subcode::NOT_QUARANTINED,
+                    format!("object {id} is being purged; its bytes are gone"),
+                ));
+            }
+        }
+        for id in &ids {
+            state.confirmed.remove(id);
+        }
+        for (i, id) in stored.iter().enumerate() {
+            if let Err(e) = self.objects.restore_bytes(id).await {
+                self.requarantine(&stored[..i]).await;
+                return Err(e);
+            }
         }
         let audit = AuditRow {
             at: self.clock.now(),
@@ -219,17 +257,23 @@ impl Redactor {
                 Ok(epoch)
             }
             Err(e) => {
-                for id in &stored {
-                    if let Err(e2) = self.objects.quarantine_bytes(id).await {
-                        warn!(
-                            event = "quarantine_move_deferred",
-                            object = %id,
-                            error = %e2,
-                            "re-quarantine after a failed unredact failed; the mover will finish it"
-                        );
-                    }
-                }
+                self.requarantine(&stored).await;
                 Err(e)
+            }
+        }
+    }
+
+    /// Move restored bytes back to quarantine after a failed unredact (best effort; the mover
+    /// finishes whatever fails here).
+    async fn requarantine(&self, ids: &[ObjectId]) {
+        for id in ids {
+            if let Err(e) = self.objects.quarantine_bytes(id).await {
+                warn!(
+                    event = "quarantine_move_deferred",
+                    object = %id,
+                    error = %e,
+                    "re-quarantine after a failed unredact failed; the mover will finish it"
+                );
             }
         }
     }
@@ -267,10 +311,15 @@ impl Redactor {
 
     /// SPEC 13.2 scheduled purge: purge every quarantined id whose `purge_after` has passed
     /// (`due_purges(now)`); returns how many were purged.
+    ///
+    /// One failing id does not block the others in its batch: every id of the batch is
+    /// attempted, then the first error is returned (and no further batch is fetched, since the
+    /// failed ids would head it again). The next run retries them.
     pub async fn run_due_purges(&self) -> Result<usize> {
         let _guard = self.lock.lock().await;
         let now = self.clock.now();
         let mut purged = 0;
+        let mut first_err: Option<ScionError> = None;
         loop {
             let due = self
                 .objects
@@ -279,11 +328,18 @@ impl Redactor {
                 .due_purges(now, PURGE_BATCH)
                 .await?;
             for id in &due {
-                self.purge_one(id, SCHEDULER_ACTOR, SCHEDULED_PURGE_REASON)
-                    .await?;
-                purged += 1;
+                match self
+                    .purge_one(id, SCHEDULER_ACTOR, SCHEDULED_PURGE_REASON)
+                    .await
+                {
+                    Ok(()) => purged += 1,
+                    Err(e) => {
+                        warn!(event = "scheduled_purge_failed", object = %id, error = %e, "scheduled purge failed; will retry");
+                        first_err.get_or_insert(e);
+                    }
+                }
             }
-            if due.len() < PURGE_BATCH {
+            if due.len() < PURGE_BATCH || first_err.is_some() {
                 break;
             }
         }
@@ -294,31 +350,55 @@ impl Redactor {
                 "purged due redactions"
             );
         }
-        Ok(purged)
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(purged),
+        }
     }
 
     /// SPEC 13.2 step 2: finish pending quarantine copies (idempotent, resumable after a crash
     /// at `quarantine.after_copy` or before the move started); returns how many were moved.
     /// Every quarantined object whose live key still exists is moved; inline objects have no
-    /// bytes to move (their inline data is never served).
+    /// bytes to move (their inline data is never served). Objects this process already
+    /// confirmed moved (at the same redaction epoch) are not re-checked, so a steady-state run
+    /// is one metadata read; the first run after start checks every quarantined object, which
+    /// covers moves left unfinished by a crashed process.
     pub async fn move_pending_bytes(&self) -> Result<usize> {
-        let _guard = self.lock.lock().await;
+        let mut state = self.lock.lock().await;
         let meta = &self.objects.storage().meta;
         let (redactions, _) = meta.list_redactions(0).await?;
-        let pending: Vec<ObjectId> = redactions
+        let quarantined: HashMap<ObjectId, u64> = redactions
             .iter()
             .filter(|r| r.state == RedactionState::Quarantined)
-            .map(|r| r.object)
+            .map(|r| (r.object, r.epoch))
+            .collect();
+        // Forget ids that left the quarantined set (purged or unredacted).
+        state
+            .confirmed
+            .retain(|id, epoch| quarantined.get(id) == Some(epoch));
+        let mut pending: Vec<ObjectId> = quarantined
+            .keys()
+            .filter(|id| !state.confirmed.contains_key(id))
+            .copied()
             .collect();
         if pending.is_empty() {
             return Ok(0);
         }
+        pending.sort();
         let rows = meta.get_objects(&pending, Consistency::Strong).await?;
         let blobs = &self.objects.storage().blobs;
         let mut moved = 0;
         let mut first_err: Option<ScionError> = None;
         for row in rows.iter().flatten() {
-            if row.state != ObjectState::Quarantined || !has_stored_bytes(row) {
+            if row.state != ObjectState::Quarantined {
+                continue;
+            }
+            let Some(&epoch) = quarantined.get(&row.id) else {
+                continue;
+            };
+            if !has_stored_bytes(row) {
+                // Inline: nothing to move, ever.
+                state.confirmed.insert(row.id, epoch);
                 continue;
             }
             let step = async {
@@ -330,11 +410,13 @@ impl Redactor {
                 }
             };
             match step.await {
-                Ok(true) => {
-                    debug!(object = %row.id, "moved bytes to quarantine");
-                    moved += 1;
+                Ok(was_pending) => {
+                    if was_pending {
+                        debug!(object = %row.id, "moved bytes to quarantine");
+                        moved += 1;
+                    }
+                    state.confirmed.insert(row.id, epoch);
                 }
-                Ok(false) => {}
                 Err(e) => {
                     warn!(object = %row.id, error = %e, "quarantine move failed");
                     first_err.get_or_insert(e);

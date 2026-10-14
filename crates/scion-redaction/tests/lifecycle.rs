@@ -30,6 +30,7 @@ struct Env {
     mem: MemHandles,
     clock: Arc<ManualClock>,
     root: ObjectId,
+    derived: Arc<DerivedEngine>,
     red: Arc<Redactor>,
 }
 
@@ -53,13 +54,14 @@ async fn env_with(cfg: RedactionConfig) -> Env {
         DeriveConfig::default(),
         clock.clone(),
     );
-    let red = Redactor::new(objects.clone(), derived, clock.clone(), cfg);
+    let red = Redactor::new(objects.clone(), derived.clone(), clock.clone(), cfg);
     Env {
         h,
         objects,
         mem,
         clock,
         root,
+        derived,
         red,
     }
 }
@@ -899,4 +901,150 @@ async fn background_task_stops_when_the_redactor_is_dropped() {
         .await
         .expect("task ends")
         .expect("no panic");
+}
+
+#[tokio::test]
+async fn unredact_after_an_interrupted_purge_fails_and_the_purge_completes() {
+    let e = env().await;
+    let (secret, _, _) = sample(&e).await;
+    let out = e
+        .red
+        .redact(&[secret], "leak", &admin(), Some(HOUR))
+        .await
+        .unwrap();
+    let faults = e.objects.storage().faults.clone();
+    faults.arm(points::PURGE_AFTER_BYTES, FaultAction::Crash, Some(1));
+    assert!(e.red.purge_now(&[secret], &admin(), "r").await.is_err());
+    faults.reset();
+    assert_eq!(state(&e, &secret), ObjectState::Quarantined);
+    let audit_before = e.objects.storage().meta.audit_log(100).await.unwrap();
+
+    // Purge is irreversible: the bytes are gone, so the object must not become live again.
+    assert_err(
+        &e.red.unredact(&[secret], &admin()).await.unwrap_err(),
+        ErrorCode::InvalidArgument,
+        Some(subcode::NOT_QUARANTINED),
+    );
+    assert_eq!(state(&e, &secret), ObjectState::Quarantined);
+    assert_eq!(e.red.list(0).await.unwrap().1, out.epoch);
+    assert_eq!(
+        e.objects.storage().meta.audit_log(100).await.unwrap(),
+        audit_before
+    );
+    assert!(!has_key(&e, &live_key(&e, &secret)));
+    assert!(!has_key(&e, &q_key(&e, &secret)));
+
+    e.red.purge_now(&[secret], &admin(), "r").await.unwrap();
+    assert_eq!(state(&e, &secret), ObjectState::Purged);
+}
+
+#[tokio::test]
+async fn unredact_of_bytes_never_moved_keeps_them_live() {
+    // The redact transaction committed but the move never ran (crash at redact.after_commit):
+    // unredact finds the bytes still at the live key and restores the object.
+    let e = env().await;
+    let (secret, _, _) = sample(&e).await;
+    let faults = e.objects.storage().faults.clone();
+    faults.arm(points::REDACT_AFTER_COMMIT, FaultAction::Crash, Some(1));
+    assert!(
+        e.red
+            .redact(&[secret], "leak", &admin(), None)
+            .await
+            .is_err()
+    );
+    faults.reset();
+    e.red.unredact(&[secret], &admin()).await.unwrap();
+    assert_eq!(state(&e, &secret), ObjectState::Live);
+    assert_eq!(
+        e.objects.get(&secret).await.unwrap(),
+        Bytes::from_static(b"password=hunter2\n")
+    );
+    assert_eq!(e.red.move_pending_bytes().await.unwrap(), 0);
+    assert!(has_key(&e, &live_key(&e, &secret)));
+}
+
+#[tokio::test]
+async fn steady_state_mover_runs_do_not_probe_object_storage() {
+    let e = env().await;
+    let (secret, c1, _) = sample(&e).await;
+    let b2 = upload(&e, "second\n").await;
+    let faults = e.objects.storage().faults.clone();
+    faults.arm(points::REDACT_AFTER_COMMIT, FaultAction::Crash, Some(1));
+    assert!(
+        e.red
+            .redact(&[secret, b2, c1.meta_id], "leak", &admin(), None)
+            .await
+            .is_err()
+    );
+    faults.reset();
+    assert_eq!(e.red.move_pending_bytes().await.unwrap(), 2);
+
+    let exists = scion_core::points::blob_before("exists");
+    faults.reset_hits();
+    assert_eq!(e.red.move_pending_bytes().await.unwrap(), 0);
+    assert_eq!(faults.hits(&exists), 0, "confirmed moves are not re-probed");
+
+    // Unredact + re-redact (crashing before the move again) makes the object pending anew.
+    e.red.unredact(&[b2], &admin()).await.unwrap();
+    faults.arm(points::REDACT_AFTER_COMMIT, FaultAction::Crash, Some(1));
+    assert!(e.red.redact(&[b2], "again", &admin(), None).await.is_err());
+    faults.reset();
+    assert!(has_key(&e, &live_key(&e, &b2)));
+    faults.reset_hits();
+    assert_eq!(e.red.move_pending_bytes().await.unwrap(), 1);
+    assert_eq!(faults.hits(&exists), 1);
+    assert!(!has_key(&e, &live_key(&e, &b2)));
+    assert!(has_key(&e, &q_key(&e, &b2)));
+}
+
+#[tokio::test]
+async fn one_failing_scheduled_purge_does_not_block_the_others() {
+    let e = env().await;
+    let a = upload(&e, "a secret\n").await;
+    let b = upload(&e, "b secret\n").await;
+    e.red
+        .redact(&[a, b], "leak", &admin(), Some(Duration::ZERO))
+        .await
+        .unwrap();
+    let mut ids = [a, b];
+    ids.sort();
+    let faults = e.objects.storage().faults.clone();
+    // The first purge's first blob delete fails.
+    faults.arm(
+        &scion_core::points::blob_before("delete"),
+        FaultAction::Error(ErrorCode::Unavailable),
+        Some(1),
+    );
+    assert_err(
+        &e.red.run_due_purges().await.unwrap_err(),
+        ErrorCode::Unavailable,
+        Some(subcode::INJECTED),
+    );
+    assert_eq!(state(&e, &ids[0]), ObjectState::Quarantined);
+    assert_eq!(state(&e, &ids[1]), ObjectState::Purged);
+    // The next run retries the failed one.
+    assert_eq!(e.red.run_due_purges().await.unwrap(), 1);
+    assert_eq!(state(&e, &ids[0]), ObjectState::Purged);
+    assert!(!has_key(&e, &q_key(&e, &ids[0])));
+}
+
+#[tokio::test]
+async fn re_derivation_reads_redacted_and_purged_content_as_empty() {
+    // SPEC 13.5 / 19.13: non-content-bearing values stay, and later re-derivation is
+    // deterministic because quarantined and purged content both read as empty.
+    let e = env().await;
+    let (secret, _, _) = sample(&e).await;
+    let ctx = e.derived.ctx();
+    assert_eq!(
+        ctx.blob_or_empty(&secret).await.unwrap(),
+        Bytes::from_static(b"password=hunter2\n")
+    );
+    e.red
+        .redact(&[secret], "leak", &admin(), None)
+        .await
+        .unwrap();
+    let quarantined = ctx.blob_or_empty(&secret).await.unwrap();
+    assert!(quarantined.is_empty());
+    e.red.purge_now(&[secret], &admin(), "r").await.unwrap();
+    assert_eq!(ctx.blob_or_empty(&secret).await.unwrap(), quarantined);
 }
