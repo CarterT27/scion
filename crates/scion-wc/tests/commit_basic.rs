@@ -42,6 +42,18 @@ async fn commit_uploads_only_missing_blobs() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn commit_delta_equals_refmodel_file_diff() {
+    delta_vs_refmodel(4).await;
+}
+
+/// Spec-scale variant (SCION_FULL=1 runs it with --include-ignored).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn full_commit_delta_equals_refmodel_file_diff() {
+    delta_vs_refmodel(200).await;
+}
+
+#[allow(clippy::unwrap_used, clippy::panic)] // test helper
+async fn delta_vs_refmodel(rounds: u64) {
     let srv = server().await;
     let s = scenario(&srv, &alice()).await;
     let r = main_ref();
@@ -62,7 +74,7 @@ async fn commit_delta_equals_refmodel_file_diff() {
     seed_files(&s, &r, &specs, &[]).await.unwrap();
     let objects_before = srv.mem.as_ref().unwrap().meta.all_objects().len();
 
-    for seed_no in 0..4u64 {
+    for seed_no in 0..rounds {
         let mut rng = StdRng::seed_from_u64(seed_no);
         let mut wc = checkout_at(&s, r.as_str(), None).await.unwrap();
         let before = wc_snapshot(&wc).unwrap();
@@ -354,5 +366,16 @@ async fn amend_of_root_is_refused_and_amend_message_only() {
     assert_eq!(a.change_id, c.change_id);
     assert_eq!(a.delta, c.delta);
     assert_ne!(a.changeset, c.changeset);
+    validate_server(&srv).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn placeholder_scenario() {
+    let srv = server().await;
+    let s = scenario(&srv, &alice()).await;
+    let admin_client = srv.client(Some(&admin())).await;
+    scion_wc::testing::redacted_placeholder_commit(&s, &admin_client, &main_ref())
+        .await
+        .unwrap();
     validate_server(&srv).await;
 }

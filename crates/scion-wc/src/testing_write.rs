@@ -780,3 +780,67 @@ pub async fn crash_recovery_all(s: &Scenario, r: &RefName) -> Result<Vec<(String
 pub fn is_path_refusal(e: &scion_core::ScionError) -> bool {
     e.subcode() == Some(WorkingCopy::SUBCODE_OUT_OF_SCOPE) || e.code == ErrorCode::PermissionDenied
 }
+
+/// SPEC 13.7 / 19.13: a redacted file is materialized as its placeholder, which is clean (an
+/// unmodified placeholder commits nothing); editing the placeholder and committing creates new
+/// content normally. `admin` must hold `admin.redact`. Returns the new changeset.
+pub async fn redacted_placeholder_commit(
+    s: &Scenario,
+    admin: &ScionClient,
+    r: &RefName,
+) -> Result<ObjectId> {
+    let n = nonce();
+    let secret = format!("leaked secret {n}\n").into_bytes();
+    seed_files(s, r, &[("red/secret.txt", Mode::File, &secret)], &[]).await?;
+    let blob = ObjectId::hash_blob(&secret);
+    admin
+        .admin()
+        .redact(v1::RedactRequest {
+            object_ids: vec![blob.as_bytes().to_vec()],
+            reason: "scenario".into(),
+            purge_after_seconds: None,
+        })
+        .await
+        .map_err(|e| error_from_status(&e))?;
+    let mut wc = checkout_at(s, r.as_str(), None).await?;
+    let placeholder = crate::placeholder_bytes(&blob);
+    let path = rp("red/secret.txt")?;
+    if wc_snapshot(&wc)?.get(&path).map(|(_, c)| c) != Some(&placeholder) {
+        return Err(expectation("the redacted file is not a placeholder"));
+    }
+    match wc.commit(b"noop\n", b"Red <red@example.com>", None).await {
+        Err(e) if e.code == ErrorCode::EmptyChange => {}
+        other => {
+            return Err(expectation(format!(
+                "an unmodified placeholder was committed: {other:?}"
+            )));
+        }
+    }
+    let mut edited = placeholder;
+    edited.extend_from_slice(format!("rotated {n}\n").as_bytes());
+    write_files(&wc, &[("red/secret.txt", Mode::File, &edited)])?;
+    let report = wc
+        .commit_with_report(b"replace secret\n", b"Red <red@example.com>", None)
+        .await?;
+    let entry = |id: ObjectId, size: usize| EntryInfo {
+        mode: Mode::File,
+        id,
+        size: size as u64,
+    };
+    let old: FlatTree = [(path.clone(), entry(blob, secret.len()))]
+        .into_iter()
+        .collect();
+    let new: FlatTree = [(
+        path.clone(),
+        entry(ObjectId::hash_blob(&edited), edited.len()),
+    )]
+    .into_iter()
+    .collect();
+    if report.delta != file_diff(&old, &new) || report.uploaded != 1 {
+        return Err(expectation(
+            "the edited placeholder was not committed as new content",
+        ));
+    }
+    expect_committed_state(s, &mut wc, "placeholder edit").await?;
+    Ok(report.changeset)
+}
