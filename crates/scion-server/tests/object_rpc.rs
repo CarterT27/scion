@@ -247,7 +247,11 @@ async fn corrupt_server_copy_is_an_integrity_item_with_alert() {
     let ctx = srv.ctx();
     let cs = commit(
         &srv,
-        &[("a.txt", b"first"), ("b.txt", b"corrupt me"), ("c.txt", b"third")],
+        &[
+            ("a.txt", b"first"),
+            ("b.txt", b"corrupt me"),
+            ("c.txt", b"third"),
+        ],
     )
     .await;
     let (a, b, c3) = (cs.blobs["a.txt"], cs.blobs["b.txt"], cs.blobs["c.txt"]);
@@ -275,7 +279,10 @@ async fn corrupt_server_copy_is_an_integrity_item_with_alert() {
             .get(),
         1
     );
-    assert_eq!(ctx.storage.counters.snapshot().integrity_failures, before + 1);
+    assert_eq!(
+        ctx.storage.counters.snapshot().integrity_failures,
+        before + 1
+    );
     assert!(
         ctx.metrics
             .render()
@@ -458,7 +465,10 @@ async fn check_access_answers_for_the_subject() {
         .unwrap()
         .into_inner();
     assert_eq!(r.allowed, vec![false, true]);
-    assert_eq!(r.access_class, vec![A::Unspecified as i32, A::Restricted as i32]);
+    assert_eq!(
+        r.access_class,
+        vec![A::Unspecified as i32, A::Restricted as i32]
+    );
 
     // Subject token problems.
     let err = ask("garbage".into(), vec![a]).await.unwrap_err();

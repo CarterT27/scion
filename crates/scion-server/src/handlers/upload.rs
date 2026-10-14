@@ -46,7 +46,10 @@ pub fn error_result(id: &[u8], e: &ScionError) -> v1::UploadResult {
 /// Errors that fail the whole call rather than one item: dependency outages and load
 /// shedding, which are retryable and say nothing about the item.
 fn is_fatal(e: &ScionError) -> bool {
-    matches!(e.code, ErrorCode::Unavailable | ErrorCode::ResourceExhausted)
+    matches!(
+        e.code,
+        ErrorCode::Unavailable | ErrorCode::ResourceExhausted
+    )
 }
 
 /// Kinds a client may upload: blobs, plus trees and metas (validated in decoded form).
@@ -89,7 +92,10 @@ async fn store_one(
     if ctx.redactions.contains(&id) {
         return Err(ScionError::redacted(&id));
     }
-    let outcome = ctx.objects.put_verified(&id, Bytes::from(item.data)).await?;
+    let outcome = ctx
+        .objects
+        .put_verified(&id, Bytes::from(item.data))
+        .await?;
     ctx.storage
         .meta
         .record_upload(&id, &p.id_string(), ctx.clock.now())

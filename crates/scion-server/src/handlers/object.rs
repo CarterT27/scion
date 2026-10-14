@@ -129,13 +129,21 @@ async fn serve_one(
         ctx.objects.get(id).await.map(|raw| {
             let (start, end) = clamp_range(offset, length, raw.len());
             let total = raw.len() as u64;
-            (v1::Encoding::Raw, raw.slice(start..end), start as u64, total)
+            (
+                v1::Encoding::Raw,
+                raw.slice(start..end),
+                start as u64,
+                total,
+            )
         })
     } else {
-        ctx.objects.get_frame(id).await.map(|(frame, row)| match frame {
-            StoredFrame::Zstd(b) => (v1::Encoding::Zstd, b, 0, row.size),
-            StoredFrame::Raw(b) => (v1::Encoding::Raw, b, 0, row.size),
-        })
+        ctx.objects
+            .get_frame(id)
+            .await
+            .map(|(frame, row)| match frame {
+                StoredFrame::Zstd(b) => (v1::Encoding::Zstd, b, 0, row.size),
+                StoredFrame::Raw(b) => (v1::Encoding::Raw, b, 0, row.size),
+            })
     };
     let (encoding, data, base, total) = match loaded {
         Ok(v) => v,
@@ -316,14 +324,7 @@ mod tests {
         assert_eq!(one.len(), 1);
         assert!(one[0].r#final);
         let big = Bytes::from(vec![7u8; CHUNK_BYTES * 2 + 3]);
-        let parts = data_chunks(
-            &id,
-            v1::Encoding::Zstd,
-            &big,
-            5,
-            9,
-            AccessClass::Restricted,
-        );
+        let parts = data_chunks(&id, v1::Encoding::Zstd, &big, 5, 9, AccessClass::Restricted);
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[1].offset, 5 + CHUNK_BYTES as u64);
         assert_eq!(parts[2].data.len(), 3);

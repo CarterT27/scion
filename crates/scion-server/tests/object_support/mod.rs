@@ -142,7 +142,11 @@ pub struct Committed {
 /// CreateChangeset RPC belongs to another package). The ref is not moved.
 pub async fn commit(srv: &InProcessServer, files: &[(&str, &[u8])]) -> Committed {
     let ctx = srv.ctx();
-    let main = ctx.history.resolve_ref(&RefName::main(), None).await.unwrap();
+    let main = ctx
+        .history
+        .resolve_ref(&RefName::main(), None)
+        .await
+        .unwrap();
     let mut blobs = BTreeMap::new();
     let mut delta = Vec::new();
     for (path, content) in files {
