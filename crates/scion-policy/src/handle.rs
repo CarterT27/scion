@@ -131,7 +131,7 @@ impl PolicyHandle {
             let Some(path) = path else {
                 return;
             };
-            watch_loop(weak, path).await;
+            watch_loop(weak, path, true).await;
         })
     }
 
@@ -148,22 +148,24 @@ enum Seen {
     Error(String),
 }
 
-async fn watch_loop(weak: Weak<PolicyHandle>, path: PathBuf) {
+/// Counts watcher file checks (tests assert the polling fallback does not spin).
+#[cfg(test)]
+static WATCH_CHECKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Start a notify watcher on `dir` that signals `tx` on every event; `None` when notify is
+/// unavailable (the caller then relies on polling alone).
+fn start_notify(
+    dir: &Path,
+    tx: tokio::sync::mpsc::UnboundedSender<()>,
+) -> Option<notify::RecommendedWatcher> {
     use notify::Watcher;
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-    // Watch the parent directory: editors and config managers replace the file atomically.
-    let dir = path
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let _watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+    match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if res.is_ok() {
             let _ = tx.send(());
         }
     }) {
-        Ok(mut w) => match w.watch(&dir, notify::RecursiveMode::NonRecursive) {
+        Ok(mut w) => match w.watch(dir, notify::RecursiveMode::NonRecursive) {
             Ok(()) => Some(w),
             Err(e) => {
                 tracing::warn!(error = %e, "policy file watch failed; using polling only");
@@ -174,7 +176,36 @@ async fn watch_loop(weak: Weak<PolicyHandle>, path: PathBuf) {
             tracing::warn!(error = %e, "policy watcher unavailable; using polling only");
             None
         }
+    }
+}
+
+/// Wait for the next notify event: `Some(true)` on an event, `Some(false)` when the event
+/// channel has closed. Pends forever when there is no event source (polling only), so a
+/// missing or failed watcher never turns the loop into a busy spin.
+async fn next_event(rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<()>>) -> bool {
+    match rx {
+        Some(r) => r.recv().await.is_some(),
+        None => std::future::pending().await,
+    }
+}
+
+async fn watch_loop(weak: Weak<PolicyHandle>, path: PathBuf, use_notify: bool) {
+    // Watch the parent directory: editors and config managers replace the file atomically.
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let watcher = if use_notify {
+        start_notify(&dir, tx)
+    } else {
+        drop(tx);
+        None
     };
+    // Without a live watcher the sender is gone; drop the receiver too so the event branch
+    // pends instead of completing immediately with `None` on every iteration.
+    let mut events = watcher.as_ref().map(|_| rx);
 
     // Nothing seen yet: the first check (immediately) re-applies the file, which also covers a
     // change made between `load` and the watcher starting.
@@ -182,18 +213,28 @@ async fn watch_loop(weak: Weak<PolicyHandle>, path: PathBuf) {
     let mut tick = tokio::time::interval(POLL_INTERVAL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        tokio::select! {
-            ev = rx.recv() => {
-                if ev.is_some() {
-                    tokio::time::sleep(EVENT_DEBOUNCE).await;
-                    while rx.try_recv().is_ok() {}
+        let event = tokio::select! {
+            ev = next_event(&mut events) => Some(ev),
+            _ = tick.tick() => None,
+        };
+        match event {
+            Some(true) => {
+                tokio::time::sleep(EVENT_DEBOUNCE).await;
+                if let Some(r) = events.as_mut() {
+                    while r.try_recv().is_ok() {}
                 }
             }
-            _ = tick.tick() => {}
+            Some(false) => {
+                tracing::warn!("policy file watcher stopped; using polling only");
+                events = None;
+            }
+            None => {}
         }
         let Some(handle) = weak.upgrade() else {
             return;
         };
+        #[cfg(test)]
+        WATCH_CHECKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let read = tokio::fs::read(&path).await;
         let now = match &read {
             Ok(b) => Seen::Content(*blake3::hash(b).as_bytes()),
@@ -212,5 +253,55 @@ async fn watch_loop(weak: Weak<PolicyHandle>, path: PathBuf) {
         drop(handle);
         // Parsing is cheap but synchronous; keep it off the async worker.
         let _ = tokio::task::spawn_blocking(move || h.apply(text)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scion_core::Principal;
+    use std::sync::atomic::Ordering;
+    use std::time::Instant;
+
+    fn text(reader: &str) -> String {
+        format!("version = 1\n[[paths]]\nprefix = \"/\"\nread = [\"github:{reader}\"]\n")
+    }
+
+    /// The polling-only fallback (no notify) must tick once per second rather than spin, must
+    /// still pick up changes, and must exit when the handle is dropped (SPEC 6.2 reload).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn polling_fallback_does_not_spin_and_applies_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("acl.toml");
+        std::fs::write(&path, text("a")).unwrap();
+        let h = PolicyHandle::load(&path).unwrap();
+        let e0 = h.epoch();
+        let before = WATCH_CHECKS.load(Ordering::Relaxed);
+        let task = tokio::spawn(watch_loop(Arc::downgrade(&h), path.clone(), false));
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let checks = WATCH_CHECKS.load(Ordering::Relaxed) - before;
+        assert!(
+            (1..=4).contains(&checks),
+            "polling fallback ran {checks} checks in 1.5 s"
+        );
+
+        std::fs::write(&path, text("b")).unwrap();
+        let start = Instant::now();
+        while h.epoch() == e0 && start.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_ne!(h.epoch(), e0, "polling fallback did not apply the change");
+        let b = Principal::GitHub {
+            login: "b".into(),
+            id: None,
+        };
+        assert!(h.current().can_read_bytes(&b, b"x"));
+
+        drop(h);
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("polling watcher did not exit")
+            .unwrap();
     }
 }
