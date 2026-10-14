@@ -14,6 +14,7 @@ use scion_refmodel::{MDelta, MFile, MTree};
 use scion_store::{
     AuditRow, MemHandles, MemOptions, ObjectRepo, ObjectRepoConfig, RedactTxn, Storage,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -270,6 +271,36 @@ pub async fn snapshot(h: &History, root: &ObjectId) -> MTree {
         }
     }
     out
+}
+
+/// File-level `(mode byte, blob id)` of a stored root tree, without reading any blob (works
+/// with redacted content).
+pub async fn snapshot_ids(h: &History, root: &ObjectId) -> BTreeMap<Vec<u8>, (u8, ObjectId)> {
+    let mut out = BTreeMap::new();
+    let mut stack = vec![(Vec::<u8>::new(), *root)];
+    while let Some((prefix, id)) = stack.pop() {
+        let tree = h.tree(&id).await.expect("tree");
+        for e in &tree.entries {
+            let mut path = prefix.clone();
+            if !path.is_empty() {
+                path.push(b'/');
+            }
+            path.extend_from_slice(e.name.as_bytes());
+            if e.mode == Mode::Tree {
+                stack.push((path, e.id));
+            } else {
+                out.insert(path, (e.mode as u8, e.id));
+            }
+        }
+    }
+    out
+}
+
+/// The `(mode byte, blob id)` view of a structural tree (compare with [`snapshot_ids`]).
+pub fn model_ids(t: &MTree) -> BTreeMap<Vec<u8>, (u8, ObjectId)> {
+    t.iter()
+        .map(|(p, f)| (p.clone(), (f.mode, ObjectId::hash_blob(&f.content))))
+        .collect()
 }
 
 pub fn mode_of(m: u8) -> Mode {

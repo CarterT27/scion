@@ -3,6 +3,7 @@
 //! content (19.13), write authorization against `a`, unrelated roots (empty base, PLAN 6.14),
 //! criss-cross histories (AMBIGUOUS_MERGE_BASE, Appendix A), the result shape, and the marker
 //! scan (19.4).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod merge_support;
 

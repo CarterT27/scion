@@ -4,6 +4,7 @@
 //!
 //! Every test builds `P` (base), `X = P + ours` and `C = P + theirs` and rebases `C` onto `X`.
 //! Row 2 (`t == b`) cannot occur for a delta path of `C`; it is covered by `merge_rules.rs`.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod merge_support;
 

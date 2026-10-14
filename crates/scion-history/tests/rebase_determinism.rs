@@ -2,6 +2,7 @@
 //! storage handles, independent of clock and caller), the `X == P` fast path, EMPTY_CHANGE,
 //! multi_parent, result correctness, and the access-counter checks (zero blob reads when `X`
 //! changed only unrelated paths; O(|delta| x depth) tree reads).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod merge_support;
 

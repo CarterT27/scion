@@ -1,6 +1,7 @@
 //! SPEC 19.18 unit gate: on shared-subtree repositories of 10^3 and 10^5 files (10^7 in the
 //! ignored `full_` variant) with equal depth, `Rebase` of a 1-file change over an unrelated tip
 //! reads zero blobs and O(|delta| x depth) trees, independent of repository size.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod merge_support;
 
