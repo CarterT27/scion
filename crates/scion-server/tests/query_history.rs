@@ -579,3 +579,39 @@ async fn revisions_resolve() {
         ErrorCode::NotFound,
     );
 }
+
+/// SPEC 12.6: a Delete of a restricted path is a delta entry too; it is removed from the
+/// filtered view and omitted from Diff, so the restricted path name never reaches the caller.
+#[tokio::test(flavor = "multi_thread")]
+async fn restricted_deletes_are_filtered() {
+    let r = repo().await;
+    let c4 = commit(
+        &r.ctx,
+        &[r.c3],
+        &[("README", b"bye\n")],
+        &["secret/sub/deep.txt"],
+    )
+    .await;
+    let items = get_changesets(&r.srv, &alice(), &[c4]).await;
+    match items[0].view.as_ref().unwrap() {
+        v1::changeset_item::View::FilteredView(f) => {
+            assert!(f.filtered);
+            let paths: Vec<&[u8]> = f.delta.iter().map(|d| d.path.as_slice()).collect();
+            assert_eq!(paths, vec![b"README".as_slice()]);
+        }
+        other => panic!("expected a filtered view, got {other:?}"),
+    }
+    let items = get_changesets(&r.srv, &carol(), &[c4]).await;
+    assert!(matches!(
+        items[0].view,
+        Some(v1::changeset_item::View::Encoded(_))
+    ));
+    assert_eq!(
+        diff_paths(&r.srv, &alice(), &r.c3, &c4).await,
+        vec!["README"]
+    );
+    assert_eq!(
+        diff_paths(&r.srv, &carol(), &r.c3, &c4).await,
+        vec!["README", "secret/sub/deep.txt"]
+    );
+}

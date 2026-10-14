@@ -187,21 +187,28 @@ async fn blob_content(ctx: &AppContext, id: &ObjectId) -> scion_core::Result<Byt
     ctx.objects.get(id).await
 }
 
-fn read_path_chunks(entry: &EntryInfo, data: Bytes) -> Vec<v1::ReadPathChunk> {
-    let mut chunks: Vec<v1::ReadPathChunk> = Vec::new();
-    let mut rest = data;
-    loop {
-        let take = rest.len().min(READ_PATH_CHUNK_BYTES);
-        let piece = rest.split_to(take);
-        chunks.push(v1::ReadPathChunk {
-            entry: chunks.is_empty().then(|| v1::EntryInfo::from(entry)),
-            data: piece.to_vec(),
-            r#final: rest.is_empty(),
-        });
-        if rest.is_empty() {
-            return chunks;
+/// The `ReadPathChunk`s of one entry, produced lazily so that only one chunk copy of the
+/// content exists at a time (the entry rides on the first chunk, `final` on the last; an empty
+/// content still yields one chunk).
+fn read_path_chunks(
+    entry: &EntryInfo,
+    data: Bytes,
+) -> impl Iterator<Item = v1::ReadPathChunk> + Send + 'static {
+    let mut entry = Some(v1::EntryInfo::from(entry));
+    let mut rest = Some(data);
+    std::iter::from_fn(move || {
+        let mut data = rest.take()?;
+        let piece = data.split_to(data.len().min(READ_PATH_CHUNK_BYTES));
+        let last = data.is_empty();
+        if !last {
+            rest = Some(data);
         }
-    }
+        Some(v1::ReadPathChunk {
+            entry: entry.take(),
+            data: piece.to_vec(),
+            r#final: last,
+        })
+    })
 }
 
 /// `QueryService.ReadPath` (SPEC 7.4, 12.6, 13.4).
@@ -229,9 +236,8 @@ pub async fn read_path(
     } else {
         Bytes::new()
     };
-    let chunks = read_path_chunks(&entry, data);
     let stream: BoxStream<v1::ReadPathChunk> = Box::pin(futures::stream::iter(
-        chunks.into_iter().map(Ok::<_, Status>),
+        read_path_chunks(&entry, data).map(Ok::<_, Status>),
     ));
     Ok(Response::new(stream))
 }
@@ -471,12 +477,12 @@ mod tests {
             id: ObjectId::hash_blob(b""),
             size: 0,
         };
-        let c = read_path_chunks(&e, Bytes::new());
+        let c: Vec<_> = read_path_chunks(&e, Bytes::new()).collect();
         assert_eq!(c.len(), 1);
         assert!(c[0].entry.is_some() && c[0].r#final && c[0].data.is_empty());
 
         let data = Bytes::from(vec![7u8; READ_PATH_CHUNK_BYTES * 2 + 5]);
-        let c = read_path_chunks(&e, data.clone());
+        let c: Vec<_> = read_path_chunks(&e, data.clone()).collect();
         assert_eq!(c.len(), 3);
         assert!(c[0].entry.is_some());
         assert!(c[1].entry.is_none() && c[2].entry.is_none());
