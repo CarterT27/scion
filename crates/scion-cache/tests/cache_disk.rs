@@ -169,6 +169,9 @@ fn bit_flip_detected_on_read_deleted_and_refetched() {
         assert_eq!(c.usage(), 0);
     }
 
+    // Each detected corruption is counted for scion_integrity_failures_total (PLAN 6.10).
+    assert_eq!(c.integrity_failures(), 4);
+
     // A clobbered header is treated as corruption too.
     c.insert(&id, raw(&content)).unwrap();
     let path = c.entry_path_of(&id);
@@ -177,6 +180,10 @@ fn bit_flip_detected_on_read_deleted_and_refetched() {
     fs::write(&path, data).unwrap();
     assert_eq!(c.get(&id).unwrap(), None);
     assert!(!path.exists());
+    assert_eq!(c.integrity_failures(), 5);
+    // A corrupt upstream response is not a corrupt stored copy and is not counted.
+    assert!(c.insert(&id, raw(b"garbage")).is_err());
+    assert_eq!(c.integrity_failures(), 5);
 }
 
 #[test]

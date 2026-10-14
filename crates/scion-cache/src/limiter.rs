@@ -53,6 +53,11 @@ impl UpstreamLimiter {
                 (w < self.max_queue).then_some(w + 1)
             });
         if reserved.is_err() {
+            // A slot may have been released since the fast path; take it rather than
+            // rejecting a caller that would not have had to wait.
+            if let Ok(p) = Arc::clone(&self.sem).try_acquire_owned() {
+                return Ok(LimiterPermit { _permit: Some(p) });
+            }
             tracing::debug!(
                 max_queue = self.max_queue,
                 "upstream limiter queue full; rejecting"

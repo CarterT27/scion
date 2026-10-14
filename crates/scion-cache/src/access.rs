@@ -11,8 +11,11 @@ const SWEEP_MIN: usize = 1024;
 /// All cached state, behind one lock so an epoch change clears it atomically.
 #[derive(Debug, Default)]
 struct State {
-    /// `(principal, object) -> (allowed, recorded_at)`.
-    decisions: HashMap<(String, ObjectId), (bool, Instant)>,
+    /// `principal -> object -> (allowed, recorded_at)`; nested so lookups by `&str` need no
+    /// allocation.
+    decisions: HashMap<String, HashMap<ObjectId, (bool, Instant)>>,
+    /// Total number of `(principal, object)` decisions in `decisions`.
+    count: usize,
     /// `principal -> (is_root_reader, recorded_at)`.
     root_readers: HashMap<String, (bool, Instant)>,
     /// The last policy epoch seen; `None` before the first.
@@ -51,28 +54,46 @@ impl AccessCache {
     /// is ever returned.
     pub fn get(&self, principal: &str, id: &ObjectId, now: Instant) -> Option<bool> {
         let mut st = self.state.lock();
-        let key = (principal.to_owned(), *id);
-        let (allowed, at) = *st.decisions.get(&key)?;
+        let per = st.decisions.get_mut(principal)?;
+        let (allowed, at) = *per.get(id)?;
         if self.fresh(at, now) {
-            Some(allowed)
-        } else {
-            st.decisions.remove(&key);
-            None
+            return Some(allowed);
         }
+        per.remove(id);
+        if per.is_empty() {
+            st.decisions.remove(principal);
+        }
+        st.count = st.count.saturating_sub(1);
+        None
     }
 
     /// Record a decision for `(principal, id)` made at `now`.
     pub fn put(&self, principal: &str, id: &ObjectId, allowed: bool, now: Instant) {
         let mut st = self.state.lock();
-        st.decisions
-            .insert((principal.to_owned(), *id), (allowed, now));
-        if st.decisions.len() >= st.sweep_at {
+        let previous = match st.decisions.get_mut(principal) {
+            Some(per) => per.insert(*id, (allowed, now)),
+            None => {
+                let mut per = HashMap::new();
+                per.insert(*id, (allowed, now));
+                st.decisions.insert(principal.to_owned(), per);
+                None
+            }
+        };
+        if previous.is_none() {
+            st.count += 1;
+        }
+        if st.count >= st.sweep_at {
             let ttl = self.ttl;
-            st.decisions
-                .retain(|_, (_, at)| now.saturating_duration_since(*at) < ttl);
+            let mut count = 0;
+            st.decisions.retain(|_, per| {
+                per.retain(|_, (_, at)| now.saturating_duration_since(*at) < ttl);
+                count += per.len();
+                !per.is_empty()
+            });
+            st.count = count;
             st.root_readers
                 .retain(|_, (_, at)| now.saturating_duration_since(*at) < ttl);
-            st.sweep_at = (st.decisions.len() * 2).max(SWEEP_MIN);
+            st.sweep_at = (count * 2).max(SWEEP_MIN);
         }
     }
 
@@ -107,6 +128,7 @@ impl AccessCache {
                 tracing::debug!(old = ?st.epoch, new = epoch, "access cache cleared on policy epoch change");
             }
             st.decisions.clear();
+            st.count = 0;
             st.root_readers.clear();
             st.sweep_at = SWEEP_MIN;
             st.epoch = Some(epoch);
@@ -120,7 +142,7 @@ impl AccessCache {
 
     /// Number of cached `(principal, object)` decisions, fresh or not yet swept.
     pub fn len(&self) -> usize {
-        self.state.lock().decisions.len()
+        self.state.lock().count
     }
 
     /// True when no decision is cached.
@@ -132,6 +154,27 @@ impl AccessCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_tracks_overwrites_and_expiry() {
+        let c = AccessCache::new(Duration::from_secs(10));
+        let t0 = Instant::now();
+        let a = ObjectId::hash_blob(b"a");
+        let b = ObjectId::hash_blob(b"b");
+        c.put("p1", &a, true, t0);
+        c.put("p1", &a, false, t0);
+        c.put("p1", &b, true, t0);
+        c.put("p2", &a, true, t0);
+        assert_eq!(c.len(), 3);
+        assert_eq!(c.get("p1", &a, t0), Some(false));
+        let later = t0 + Duration::from_secs(10);
+        assert_eq!(c.get("p1", &a, later), None);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c.get("p1", &b, later), None);
+        assert_eq!(c.get("p2", &a, later), None);
+        assert!(c.is_empty());
+        assert!(c.state.lock().decisions.is_empty());
+    }
 
     #[test]
     fn sweep_keeps_fresh_entries() {

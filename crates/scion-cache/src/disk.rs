@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 /// Header byte of an entry holding raw content.
@@ -59,6 +60,13 @@ struct Index {
     usage: u64,
     tick: u64,
     next_generation: u64,
+    /// Inserts between their first index check and their rename, per key: the number of
+    /// such inserts and the sequence number of the last `remove` of the key seen while any
+    /// was in flight. An insert that began before that `remove` does not publish its entry,
+    /// so a removal (redaction, SPEC 13.3) is never undone by an earlier-started insert.
+    pending: HashMap<Key, (u32, u64)>,
+    /// Sequence counter for `pending`.
+    seq: u64,
 }
 
 impl Index {
@@ -86,6 +94,48 @@ impl Index {
         self.usage = self.usage.saturating_sub(e.size);
         Some(e)
     }
+
+    /// Register an in-flight insert of `key`; returns its start sequence number.
+    fn begin_pending(&mut self, key: Key) -> u64 {
+        self.seq = self.seq.wrapping_add(1);
+        self.pending.entry(key).or_insert((0, 0)).0 += 1;
+        self.seq
+    }
+
+    /// True when a `remove` of `key` happened after the insert that began at `started`.
+    fn pending_cancelled(&self, key: &Key, started: u64) -> bool {
+        self.pending.get(key).is_some_and(|p| p.1 > started)
+    }
+
+    /// Unregister an in-flight insert of `key`.
+    fn end_pending(&mut self, key: &Key) {
+        if let Some(p) = self.pending.get_mut(key) {
+            p.0 = p.0.saturating_sub(1);
+            if p.0 == 0 {
+                self.pending.remove(key);
+            }
+        }
+    }
+
+    /// Cancel every in-flight insert of `key` (called by `remove`).
+    fn cancel_pending(&mut self, key: &Key) {
+        if let Some(p) = self.pending.get_mut(key) {
+            self.seq = self.seq.wrapping_add(1);
+            p.1 = self.seq;
+        }
+    }
+}
+
+/// Unregisters an in-flight insert on every exit path.
+struct PendingGuard<'a> {
+    index: &'a Mutex<Index>,
+    key: Key,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.index.lock().end_pending(&self.key);
+    }
 }
 
 /// Where an insert stops; anything but `Complete` exists to simulate crashes in tests.
@@ -96,6 +146,9 @@ enum InsertStop {
     /// Leave the fsynced temp file behind and return before the rename (a crash).
     #[cfg_attr(not(test), allow(dead_code))]
     BeforeRename,
+    /// Run a concurrent `remove` of the same id just before the rename (a race).
+    #[cfg_attr(not(test), allow(dead_code))]
+    RemoveBeforeRename,
 }
 
 /// `<dir>/objects/<kind_letter>/<hex[0:2]>/<hex>` with approximate-LRU eviction to the low
@@ -109,6 +162,8 @@ pub struct DiskCache {
     low_watermark: f64,
     verify_on_read: bool,
     index: Mutex<Index>,
+    /// Stored entries found corrupt on read (SPEC 16.1 class 7; PLAN 6.10).
+    integrity_failures: AtomicU64,
 }
 
 impl std::fmt::Debug for DiskCache {
@@ -119,13 +174,14 @@ impl std::fmt::Debug for DiskCache {
             .field("low_watermark", &self.low_watermark)
             .field("verify_on_read", &self.verify_on_read)
             .field("usage", &self.usage())
+            .field("integrity_failures", &self.integrity_failures())
             .finish()
     }
 }
 
 fn io_err(ctx: &str, path: &Path, e: io::Error) -> ScionError {
-    ScionError::new(
-        ErrorCode::Unavailable,
+    ScionError::unavailable(
+        "cache_io",
         format!("disk cache: {ctx} {}: {e}", path.display()),
     )
 }
@@ -209,8 +265,8 @@ impl DiskCache {
         verify_on_read: bool,
     ) -> Result<Self> {
         if !(0.0..=1.0).contains(&low_watermark) {
-            return Err(ScionError::new(
-                ErrorCode::InvalidArgument,
+            return Err(ScionError::invalid(
+                "cache_low_watermark",
                 format!("disk cache: low_watermark {low_watermark} is outside 0.0..=1.0"),
             ));
         }
@@ -222,6 +278,7 @@ impl DiskCache {
             low_watermark,
             verify_on_read,
             index: Mutex::new(Index::default()),
+            integrity_failures: AtomicU64::new(0),
         };
         cache.rebuild()?;
         Ok(cache)
@@ -347,7 +404,7 @@ impl DiskCache {
     /// re-fetches upstream (SPEC 10.2, 16.1 class 7).
     pub fn get(&self, id: &ObjectId) -> Result<Option<Bytes>> {
         let key = key_of(id);
-        let Some((generation, payload)) = self.read_payload(&key)? else {
+        let Some((generation, payload)) = self.read_payload(id, &key)? else {
             return Ok(None);
         };
         let content = match payload {
@@ -367,7 +424,7 @@ impl DiskCache {
     /// and returns `Ok(None)`, as for [`DiskCache::get`]).
     pub fn get_payload(&self, id: &ObjectId) -> Result<Option<Payload>> {
         let key = key_of(id);
-        let Some((generation, payload)) = self.read_payload(&key)? else {
+        let Some((generation, payload)) = self.read_payload(id, &key)? else {
             return Ok(None);
         };
         if self.verify_on_read && !payload_matches(id, &payload) {
@@ -379,7 +436,7 @@ impl DiskCache {
 
     /// Look up and read an entry, bumping its access time. A missing file drops the index
     /// entry; a file with a bad header is discarded as corrupt.
-    fn read_payload(&self, key: &Key) -> Result<Option<(u64, Payload)>> {
+    fn read_payload(&self, id: &ObjectId, key: &Key) -> Result<Option<(u64, Payload)>> {
         let generation = {
             let mut idx = self.index.lock();
             let tick = idx.next_tick();
@@ -403,18 +460,7 @@ impl DiskCache {
         match decode_file(data) {
             Some(p) => Ok(Some((generation, p))),
             None => {
-                let mut idx = self.index.lock();
-                if idx.entries.get(key).map(|e| e.generation) == Some(generation) {
-                    idx.remove(key);
-                    drop(idx);
-                    let _ = remove_if_exists(&path);
-                }
-                tracing::error!(
-                    event = "integrity_alert",
-                    tier = "daemon",
-                    path = %path.display(),
-                    "disk cache entry has an invalid header; deleted"
-                );
+                self.discard_corrupt(id, key, generation);
                 Ok(None)
             }
         }
@@ -428,9 +474,10 @@ impl DiskCache {
         }
     }
 
-    /// Delete a corrupt entry (unless it was replaced meanwhile) and raise the SPEC 16.1
-    /// class 7 integrity alert (PLAN 6.10).
+    /// Delete a corrupt entry (unless it was replaced meanwhile), count it and raise the
+    /// SPEC 16.1 class 7 integrity alert (PLAN 6.10).
     fn discard_corrupt(&self, id: &ObjectId, key: &Key, generation: u64) {
+        self.integrity_failures.fetch_add(1, Ordering::Relaxed);
         let mut idx = self.index.lock();
         if idx.entries.get(key).map(|e| e.generation) == Some(generation) {
             idx.remove(key);
@@ -473,9 +520,17 @@ impl DiskCache {
             return Ok(());
         }
         let key = key_of(id);
-        if self.index.lock().entries.contains_key(&key) {
-            return Ok(());
-        }
+        let started = {
+            let mut idx = self.index.lock();
+            if idx.entries.contains_key(&key) {
+                return Ok(());
+            }
+            idx.begin_pending(key)
+        };
+        let _pending = PendingGuard {
+            index: &self.index,
+            key,
+        };
         let shard = self.shard_dir(&key);
         fs::create_dir_all(&shard).map_err(|e| io_err("create", &shard, e))?;
         let mut tmp = tempfile::Builder::new()
@@ -498,11 +553,20 @@ impl DiskCache {
                 ),
             ));
         }
+        if stop == InsertStop::RemoveBeforeRename {
+            self.remove(id)?;
+        }
         let path = self.entry_path(&key);
         {
             let mut idx = self.index.lock();
             if idx.entries.contains_key(&key) {
                 // A concurrent insert won; the temp file is deleted on drop.
+                return Ok(());
+            }
+            if idx.pending_cancelled(&key, started) {
+                // Removed (for example redacted) while this insert was in flight; the temp
+                // file is deleted on drop and nothing becomes visible.
+                tracing::debug!(object = %id, "disk cache: insert cancelled by a concurrent remove");
                 return Ok(());
             }
             if idx.usage.saturating_add(size) > self.max_bytes {
@@ -526,10 +590,13 @@ impl DiskCache {
     }
 
     /// Remove an entry (used on redaction, SPEC 13.3). Removing an absent id is a no-op.
+    /// An insert of the same id that is in flight when `remove` runs does not publish its
+    /// entry, so a removal is never undone by an earlier-started insert.
     pub fn remove(&self, id: &ObjectId) -> Result<()> {
         let key = key_of(id);
         let mut idx = self.index.lock();
         idx.remove(&key);
+        idx.cancel_pending(&key);
         remove_if_exists(&self.entry_path(&key))
     }
 
@@ -551,6 +618,13 @@ impl DiskCache {
     /// True when nothing is cached.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Number of stored entries found corrupt on read since `open` (each was deleted and
+    /// reported as a miss). The daemon exports it as `scion_integrity_failures_total{tier}`
+    /// (SPEC 16.1 class 7; PLAN 6.10).
+    pub fn integrity_failures(&self) -> u64 {
+        self.integrity_failures.load(Ordering::Relaxed)
     }
 
     /// The configured capacity (`max_cache_bytes`, SPEC 10.2).
@@ -645,6 +719,30 @@ mod tests {
     }
 
     #[test]
+    fn remove_during_insert_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = DiskCache::open(dir.path(), 1 << 20, 0.9, true).unwrap();
+        let raw = b"redacted while in flight".to_vec();
+        let id = ObjectId::hash_blob(&raw);
+        c.insert_inner(
+            &id,
+            Payload::Raw(Bytes::from(raw.clone())),
+            InsertStop::RemoveBeforeRename,
+        )
+        .unwrap();
+        assert!(!c.contains(&id));
+        assert!(!c.entry_path_of(&id).exists());
+        assert!(temp_files(dir.path()).is_empty());
+        assert_eq!(c.usage(), 0);
+        assert!(c.index.lock().pending.is_empty());
+        // A later insert (after the remove) is published normally.
+        c.insert(&id, Payload::Raw(Bytes::from(raw.clone())))
+            .unwrap();
+        assert_eq!(c.get(&id).unwrap().unwrap(), Bytes::from(raw));
+        assert!(c.index.lock().pending.is_empty());
+    }
+
+    #[test]
     fn hex_roundtrip() {
         let d = [0xabu8; 32];
         let h = hex_of(&d);
@@ -679,7 +777,10 @@ mod tests {
     #[test]
     fn rejects_bad_watermark() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(DiskCache::open(dir.path(), 10, 1.5, false).is_err());
-        assert!(DiskCache::open(dir.path(), 10, f64::NAN, false).is_err());
+        for wm in [1.5, -0.1, f64::NAN] {
+            let e = DiskCache::open(dir.path(), 10, wm, false).unwrap_err();
+            assert_eq!(e.code, ErrorCode::InvalidArgument);
+            assert_eq!(e.subcode(), Some("cache_low_watermark"));
+        }
     }
 }
