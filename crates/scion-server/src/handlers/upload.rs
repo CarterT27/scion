@@ -52,10 +52,15 @@ fn is_fatal(e: &ScionError) -> bool {
     )
 }
 
-/// Kinds a client may upload: blobs, plus trees and metas (validated in decoded form).
-/// Changesets are created only by CreateChangeset and derived objects only by the server.
+/// Kinds a client may upload: blobs, plus trees (validated in decoded form).
+///
+/// Changesets and Metas are created only by the server (CreateChangeset builds the Meta and
+/// sets `creator`, SPEC 7.5), and derived objects only by the derivation engine. Metas in
+/// particular are never accepted: a Meta has no `object_paths` rows and is visible to every
+/// repository reader (SPEC 12.6), so an uploaded, unreferenced Meta would otherwise be
+/// readable through GetObjects, which SPEC 12.5 forbids for unreferenced uploads.
 fn uploadable(kind: Kind) -> bool {
-    matches!(kind, Kind::Blob | Kind::Tree | Kind::Meta)
+    matches!(kind, Kind::Blob | Kind::Tree)
 }
 
 /// Validate and store one item for `p`.
@@ -126,12 +131,12 @@ async fn upload_one(ctx: &AppContext, p: &Principal, item: v1::UploadItem) -> It
 
 /// `WriteService.UploadObjects` (SPEC 7.5, 12.5, 13.6, 17), a client stream of
 /// `{id, kind, data}` with `data` the raw content (a blob's bytes, or the canonical encoding of
-/// a tree or meta).
+/// a tree).
 ///
-/// Per item, in order: the kind must match the id (INVALID_ARGUMENT/invalid_kind; changesets
-/// and derived objects cannot be uploaded), redacted ids fail REDACTED, the BLAKE3 digest of
-/// the data must match the id (INTEGRITY), structured kinds are decoded and validated
-/// (INVALID_ARGUMENT), sizes are limited (TOO_LARGE); then the object is stored through the
+/// Per item, in order: the kind must match the id (INVALID_ARGUMENT/invalid_kind; only blobs
+/// and trees can be uploaded: changesets, metas and derived objects are server-built),
+/// redacted ids fail REDACTED, the BLAKE3 digest of the data must match the id (INTEGRITY),
+/// trees are decoded and validated (INVALID_ARGUMENT), sizes are limited (TOO_LARGE); then the object is stored through the
 /// ObjectRepo and an `object_uploads` record is written for the caller. A redundant upload of
 /// an existing object is accepted with status `ok`, exactly like a new one, so it reveals
 /// nothing about prior existence.

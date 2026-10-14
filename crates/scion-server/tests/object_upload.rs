@@ -230,3 +230,49 @@ async fn upload_call_level_errors() {
     let (_, r) = upload_blob(&c, &content).await;
     assert_eq!(status(&r), v1::ItemStatus::Ok);
 }
+
+/// SPEC 12.5 / 12.6: a Meta has no `object_paths` rows and is visible to every repository
+/// reader, so an uploaded (unreferenced) Meta would be readable by everyone. Metas are
+/// server-built (CreateChangeset), so uploads of them are rejected and store nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn meta_uploads_are_rejected_and_never_readable() {
+    let srv = start().await;
+    let meta = scion_object::Meta {
+        author: b"Mallory <m@example.com>".to_vec(),
+        author_time: scion_object::Timestamp {
+            seconds: 1,
+            tz_offset_minutes: 0,
+        },
+        committer: None,
+        committer_time: None,
+        creator: b"github:bob".to_vec(),
+        message: b"uploaded, never referenced".to_vec(),
+        extensions: scion_object::Extensions::new(),
+    };
+    let enc = meta.encode();
+    let mid = meta.id();
+    assert_eq!(mid.kind(), Kind::Meta);
+    let b = srv.client(Some(&bob())).await;
+    let r = upload(
+        &b,
+        vec![(mid.as_bytes().to_vec(), Kind::Meta.byte().into(), enc)],
+    )
+    .await
+    .unwrap();
+    assert_eq!(status(&r[0]), v1::ItemStatus::Unspecified);
+    assert_eq!(r[0].error_code, "INVALID_ARGUMENT");
+    assert!(srv.ctx().objects.stat(&mid).await.unwrap().is_none());
+    assert!(
+        !srv.ctx()
+            .storage
+            .meta
+            .has_upload(&mid, "github:bob")
+            .await
+            .unwrap()
+    );
+    for p in [alice(), bob(), carol(), admin()] {
+        let c = srv.client(Some(&p)).await;
+        assert_eq!(status_of(&c, &mid).await, v1::ItemStatus::NotFound, "{p}");
+    }
+    assert_eq!(has(&b, &[mid]).await, vec![false]);
+}

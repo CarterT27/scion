@@ -50,38 +50,47 @@ fn status_chunk(id: &ObjectId, status: v1::ItemStatus) -> v1::ObjectChunk {
     }
 }
 
-/// Split `data` into OK chunks of at most [`CHUNK_BYTES`] (one empty chunk for empty data).
-fn data_chunks(
-    id: &ObjectId,
+/// The OK payload of one id, sent as chunks of at most [`CHUNK_BYTES`] (one empty chunk for
+/// empty data). Chunks are cut lazily so a large object is held once, not twice.
+struct Payload {
+    id: ObjectId,
     encoding: v1::Encoding,
-    data: &Bytes,
+    data: Bytes,
     base_offset: u64,
     total_size: u64,
     class: AccessClass,
-) -> Vec<v1::ObjectChunk> {
-    let n = data.len().div_ceil(CHUNK_BYTES).max(1);
-    (0..n)
-        .map(|i| {
-            let start = (i * CHUNK_BYTES).min(data.len());
-            let end = (start + CHUNK_BYTES).min(data.len());
-            v1::ObjectChunk {
-                id: id_bytes(id),
-                status: v1::ItemStatus::Ok as i32,
-                encoding: encoding as i32,
-                data: data.slice(start..end).to_vec(),
-                total_size,
-                access_class: access_class_to_proto(class) as i32,
-                r#final: i + 1 == n,
-                offset: base_offset + start as u64,
-            }
-        })
-        .collect()
+}
+
+impl Payload {
+    /// Number of chunks (at least one).
+    fn chunk_count(&self) -> usize {
+        self.data.len().div_ceil(CHUNK_BYTES).max(1)
+    }
+
+    /// Chunk `i` of [`Payload::chunk_count`].
+    fn chunk(&self, i: usize) -> v1::ObjectChunk {
+        let n = self.chunk_count();
+        let start = i.saturating_mul(CHUNK_BYTES).min(self.data.len());
+        let end = start.saturating_add(CHUNK_BYTES).min(self.data.len());
+        v1::ObjectChunk {
+            id: id_bytes(&self.id),
+            status: v1::ItemStatus::Ok as i32,
+            encoding: self.encoding as i32,
+            data: self.data.slice(start..end).to_vec(),
+            total_size: self.total_size,
+            access_class: access_class_to_proto(self.class) as i32,
+            r#final: i + 1 >= n,
+            offset: self.base_offset + start as u64,
+        }
+    }
 }
 
 /// What one requested id produced.
 enum Served {
-    /// Chunks to send (an item status, or the OK data chunks).
-    Chunks(Vec<v1::ObjectChunk>),
+    /// A single item-status chunk (`not_found`, `denied`, `redacted`).
+    Status(v1::ObjectChunk),
+    /// The object's data.
+    Data(Payload),
     /// The server's own copy is corrupt (SPEC 16.1 class 7).
     Integrity(ScionError),
 }
@@ -109,10 +118,7 @@ async fn serve_one(
     let eval = ctx.authz.evaluate(p, id).await?;
     let class = match eval.decision {
         ReadDecision::Redacted => {
-            return Ok(Served::Chunks(vec![status_chunk(
-                id,
-                v1::ItemStatus::Redacted,
-            )]));
+            return Ok(Served::Status(status_chunk(id, v1::ItemStatus::Redacted)));
         }
         ReadDecision::Deny => {
             let status = if eval.referenced {
@@ -120,7 +126,7 @@ async fn serve_one(
             } else {
                 v1::ItemStatus::NotFound
             };
-            return Ok(Served::Chunks(vec![status_chunk(id, status)]));
+            return Ok(Served::Status(status_chunk(id, status)));
         }
         ReadDecision::Allow(c) => c,
     };
@@ -149,14 +155,12 @@ async fn serve_one(
         Ok(v) => v,
         Err(e) => {
             return match e.code {
-                ErrorCode::NotFound => Ok(Served::Chunks(vec![status_chunk(
-                    id,
-                    v1::ItemStatus::NotFound,
-                )])),
-                ErrorCode::Redacted => Ok(Served::Chunks(vec![status_chunk(
-                    id,
-                    v1::ItemStatus::Redacted,
-                )])),
+                ErrorCode::NotFound => {
+                    Ok(Served::Status(status_chunk(id, v1::ItemStatus::NotFound)))
+                }
+                ErrorCode::Redacted => {
+                    Ok(Served::Status(status_chunk(id, v1::ItemStatus::Redacted)))
+                }
                 ErrorCode::Integrity => {
                     record_integrity_alert(ctx, id);
                     Ok(Served::Integrity(e))
@@ -173,9 +177,14 @@ async fn serve_one(
         .object_bytes_served
         .with_label_values(&["server", label])
         .inc_by(data.len() as u64);
-    Ok(Served::Chunks(data_chunks(
-        id, encoding, &data, base, total, class,
-    )))
+    Ok(Served::Data(Payload {
+        id: *id,
+        encoding,
+        data,
+        base_offset: base,
+        total_size: total,
+        class,
+    }))
 }
 
 /// Produce the GetObjects stream for `ids` into `tx`.
@@ -190,9 +199,14 @@ async fn produce(
     let mut integrity: Option<ScionError> = None;
     for id in &ids {
         match serve_one(&ctx, &p, id, offset, length).await {
-            Ok(Served::Chunks(chunks)) => {
-                for c in chunks {
-                    if tx.send(Ok(c)).await.is_err() {
+            Ok(Served::Status(c)) => {
+                if tx.send(Ok(c)).await.is_err() {
+                    return; // The caller went away.
+                }
+            }
+            Ok(Served::Data(payload)) => {
+                for i in 0..payload.chunk_count() {
+                    if tx.send(Ok(payload.chunk(i))).await.is_err() {
                         return; // The caller went away.
                     }
                 }
@@ -310,26 +324,41 @@ pub async fn resolve_ref(
 mod tests {
     use super::*;
 
+    fn payload(data: Bytes, encoding: v1::Encoding, base: u64, class: AccessClass) -> Payload {
+        Payload {
+            id: ObjectId::hash_blob(b"x"),
+            encoding,
+            data,
+            base_offset: base,
+            total_size: 9,
+            class,
+        }
+    }
+
     #[test]
     fn chunking_and_ranges() {
-        let id = ObjectId::hash_blob(b"x");
-        let one = data_chunks(
-            &id,
-            v1::Encoding::Raw,
-            &Bytes::new(),
-            0,
-            0,
-            AccessClass::Root,
-        );
-        assert_eq!(one.len(), 1);
-        assert!(one[0].r#final);
+        let one = payload(Bytes::new(), v1::Encoding::Raw, 0, AccessClass::Root);
+        assert_eq!(one.chunk_count(), 1);
+        assert!(one.chunk(0).r#final);
+        assert!(one.chunk(0).data.is_empty());
         let big = Bytes::from(vec![7u8; CHUNK_BYTES * 2 + 3]);
-        let parts = data_chunks(&id, v1::Encoding::Zstd, &big, 5, 9, AccessClass::Restricted);
+        let p = payload(big, v1::Encoding::Zstd, 5, AccessClass::Restricted);
+        let parts: Vec<_> = (0..p.chunk_count()).map(|i| p.chunk(i)).collect();
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[1].offset, 5 + CHUNK_BYTES as u64);
         assert_eq!(parts[2].data.len(), 3);
-        assert!(parts[2].r#final && !parts[0].r#final);
+        assert!(parts[2].r#final && !parts[0].r#final && !parts[1].r#final);
         assert_eq!(parts[0].access_class, v1::AccessClass::Restricted as i32);
+        assert_eq!(parts[0].encoding, v1::Encoding::Zstd as i32);
+        assert!(parts.iter().all(|c| c.total_size == 9));
+        let exact = payload(
+            Bytes::from(vec![1u8; CHUNK_BYTES]),
+            v1::Encoding::Raw,
+            0,
+            AccessClass::Root,
+        );
+        assert_eq!(exact.chunk_count(), 1);
+        assert!(exact.chunk(0).r#final);
         assert_eq!(clamp_range(Some(3), Some(4), 5), (3, 5));
         assert_eq!(clamp_range(Some(9), None, 5), (5, 5));
         assert_eq!(clamp_range(None, Some(2), 5), (0, 2));

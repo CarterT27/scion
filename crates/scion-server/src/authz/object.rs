@@ -145,7 +145,9 @@ impl ObjectAuthorizer {
         })
     }
 
-    /// SPEC 12.6: a Meta is visible to every repository reader (read on `/`).
+    /// SPEC 12.6: a Meta is visible to every repository reader (read on `/`). Metas are built
+    /// only by the server (UploadObjects rejects them), so an existing Meta is never an
+    /// unreferenced client upload (SPEC 12.5).
     async fn evaluate_meta(
         &self,
         policy: &Policy,

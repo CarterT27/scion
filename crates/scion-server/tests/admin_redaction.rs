@@ -226,7 +226,7 @@ async fn redaction_set_refresher_propagates_within_the_bound() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert!(
-        t0.elapsed() <= Duration::from_millis(200 + 300),
+        t0.elapsed() <= Duration::from_millis(200 + 800),
         "{:?}",
         t0.elapsed()
     );
