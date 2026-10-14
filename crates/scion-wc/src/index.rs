@@ -358,6 +358,43 @@ mod tests {
     }
 
     #[test]
+    fn file_written_after_save_is_racy_and_older_file_is_not() {
+        // written_at_ns comes from the filesystem clock of the index write, so a file
+        // touched after the save compares >= and is re-hashed (SPEC 11.5).
+        let dir = tempfile::tempdir().unwrap();
+        let wc = crate::fs_safe::SafeRoot::open(dir.path()).unwrap();
+        std::fs::write(dir.path().join("old"), b"o").unwrap();
+        let old = wc.stat_raw(b"old").unwrap().unwrap();
+        let mut c = StatCache::default();
+        // Force the index write onto a later filesystem tick than "old" on coarse clocks.
+        loop {
+            c.save(dir.path()).unwrap();
+            if c.written_at_ns > old.mtime_ns {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::fs::write(dir.path().join("new"), b"n").unwrap();
+        let new = wc.stat_raw(b"new").unwrap().unwrap();
+        let entry = |stat: StatTuple| IndexEntry {
+            stat,
+            id: ObjectId::hash_blob(b"x"),
+            mode: Mode::File,
+            redacted: false,
+        };
+        assert!(c.is_racy(&entry(new)), "written after the index: racy");
+        assert!(
+            !c.is_racy(&entry(old)),
+            "written before the index tick: trusted"
+        );
+        // The persisted value is the one used for the predicate.
+        assert_eq!(
+            StatCache::load(dir.path()).unwrap().written_at_ns,
+            c.written_at_ns
+        );
+    }
+
+    #[test]
     fn stat_tuple_kinds() {
         let t = |mode| StatTuple {
             size: 0,

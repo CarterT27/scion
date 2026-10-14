@@ -9,10 +9,12 @@
 //! A file is hashed only when it has no index entry, its stat tuple changed, or the entry is
 //! racily clean (`mtime >= written_at`); symlinks hash their target. Clean files are
 //! refreshed in the index; entries of in-scope paths that vanished are dropped. Redaction
-//! placeholders (SPEC 13.7): a regular file whose bytes are exactly the placeholder of the
-//! base entry's blob is clean (and marked `redacted` in the index); an edited placeholder (an
-//! index entry flagged `redacted` whose content changed) is reported in both `modified` and
-//! `redacted_dirty`. Saving the index is the caller's job.
+//! placeholders (SPEC 13.7): a file (or symlink target) whose bytes are exactly the
+//! placeholder of the base entry's blob is clean (and marked `redacted` in the index); an
+//! edited placeholder (an index entry flagged `redacted` whose content changed) is reported in
+//! both `modified` and `redacted_dirty`. A directory that cannot be opened is an error when it
+//! holds tracked files (so they are never misreported as deleted) and is skipped otherwise.
+//! Saving the index is the caller's job.
 
 use crate::fs_safe::{self, SafeRoot, check_name};
 use crate::ignore::IgnoreMatcher;
@@ -20,7 +22,7 @@ use crate::index::{IndexEntry, StatCache, StatTuple};
 use crate::placeholder::placeholder_bytes;
 use rustix::fd::{AsFd, BorrowedFd};
 use rustix::io::Errno;
-use scion_core::{EntryInfo, ErrorCode, Mode, ObjectId, Result};
+use scion_core::{EntryInfo, ErrorCode, Mode, ObjectId, Result, ScionError};
 use scion_object::RepoPath;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -219,8 +221,34 @@ impl Walk<'_> {
         }
         let sub = match fs_safe::open_dir_nofollow(dir, name) {
             Ok(fd) => fd,
-            // Replaced by a symlink or removed mid-walk, or unreadable: nothing to report here.
-            Err(Errno::NOENT) | Err(Errno::LOOP) | Err(Errno::NOTDIR) | Err(Errno::ACCESS) => {
+            // Removed mid-walk: nothing on disk to report.
+            Err(Errno::NOENT) => return Ok(()),
+            // Replaced by a symlink or a file mid-walk: report what is there now.
+            Err(Errno::LOOP) | Err(Errno::NOTDIR) => {
+                return match fs_safe::stat_at(dir, name)? {
+                    Some(st) => {
+                        let tuple = fs_safe::tuple_from_stat(&st);
+                        match tuple.entry_mode() {
+                            Some(mode) if self.prefixes.in_scope(child) => {
+                                self.visit_file(dir, name, child, tuple, mode)
+                            }
+                            _ => Ok(()),
+                        }
+                    }
+                    None => Ok(()),
+                };
+            }
+            // An unreadable directory holding tracked files must not make them look deleted
+            // (a later commit would delete them): fail instead. Unreadable untracked
+            // directories are skipped, as git does.
+            Err(Errno::ACCESS) if self.base_dirs.contains(child) => {
+                return Err(ScionError::permission_denied(
+                    "cannot read a working-copy directory that holds tracked files; \
+                     fix its permissions and retry",
+                ));
+            }
+            Err(Errno::ACCESS) => {
+                tracing::warn!("skipping an unreadable untracked directory during status");
                 return Ok(());
             }
             Err(e) => {
@@ -262,14 +290,38 @@ impl Walk<'_> {
             return Ok(());
         }
 
-        let content = match disk_mode {
-            Mode::Symlink => fs_safe::readlink_at(dir, name),
-            _ => fs_safe::read_file_at(dir, name),
-        };
-        let content = match content {
-            Ok(c) => c,
-            Err(e) if e.code == ErrorCode::NotFound => return Ok(()), // vanished
-            Err(e) => return Err(e),
+        // Read the content; when the entry changed type between the stat and the read (a
+        // concurrent symlink swap), re-stat and retry a bounded number of times.
+        let (mut stat, mut disk_mode) = (stat, disk_mode);
+        let mut attempts = 0;
+        let content = loop {
+            let read = match disk_mode {
+                Mode::Symlink => fs_safe::readlink_at(dir, name),
+                _ => fs_safe::read_file_at(dir, name),
+            };
+            match read {
+                Ok(c) => break c,
+                Err(e) if e.code == ErrorCode::NotFound => return Ok(()), // vanished
+                Err(e) if e.code == ErrorCode::InvalidArgument && attempts < TYPE_RACE_RETRIES => {
+                    attempts += 1;
+                    let Some(st) = fs_safe::stat_at(dir, name)? else {
+                        return Ok(()); // vanished
+                    };
+                    let tuple = fs_safe::tuple_from_stat(&st);
+                    if tuple.is_dir() {
+                        return Err(changed_during_status());
+                    }
+                    let Some(mode) = tuple.entry_mode() else {
+                        return Ok(()); // now a special file: not a working-copy file
+                    };
+                    stat = tuple;
+                    disk_mode = mode;
+                }
+                Err(e) if e.code == ErrorCode::InvalidArgument => {
+                    return Err(changed_during_status());
+                }
+                Err(e) => return Err(e),
+            }
         };
         self.report.hashed += 1;
         let h = ObjectId::hash_blob(&content);
@@ -284,8 +336,10 @@ impl Walk<'_> {
             self.report.added.push(path);
             return Ok(());
         };
-        if disk_mode != Mode::Symlink && b.id != h && content == placeholder_bytes(&b.id) {
-            // An unmodified placeholder of the redacted base blob (SPEC 13.7).
+        if b.id != h && content == placeholder_bytes(&b.id) {
+            // An unmodified placeholder of the redacted base blob (SPEC 13.7), whether it was
+            // materialized as a regular file or (for a redacted symlink entry written through
+            // `write_file_atomic(.., Mode::Symlink)`) as a symlink whose target is the text.
             self.refresh(path, stat, b.id, b.mode, true);
         } else if b.id != h {
             if was_redacted {
@@ -318,6 +372,17 @@ impl Walk<'_> {
             },
         );
     }
+}
+
+/// Re-stat attempts when an entry changes type between its stat and its read.
+const TYPE_RACE_RETRIES: usize = 3;
+
+/// A concurrent writer kept changing an entry's type under the walk (retryable).
+fn changed_during_status() -> ScionError {
+    ScionError::new(
+        ErrorCode::Unavailable,
+        "a working-copy entry changed type while status was reading it; retry",
+    )
 }
 
 fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {

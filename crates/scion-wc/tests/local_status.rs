@@ -567,6 +567,90 @@ fn racily_clean_entry_is_rehashed() {
 }
 
 #[test]
+fn symlink_materialized_placeholder_is_clean() {
+    require_p01!();
+    let f = Fixture::new(&[("plain", b"p", Mode::File)]);
+    // A redacted symlink entry whose placeholder was written as a symlink target
+    // (`write_file_atomic(.., Mode::Symlink)` delegates to `symlink`).
+    let target = b"secret/target";
+    let id = ObjectId::hash_blob(target);
+    let mut base = f.base.0.clone();
+    base.insert(
+        rp("rl"),
+        EntryInfo {
+            mode: Mode::Symlink,
+            id,
+            size: target.len() as u64,
+        },
+    );
+    let lookup = MapTreeLookup(base);
+    f.safe.symlink(&rp("rl"), &placeholder_bytes(&id)).unwrap();
+    let run = |idx: &mut StatCache| {
+        status(&f.safe, idx, &f.ign, &[RepoPath::root()], &[], &lookup).unwrap()
+    };
+    let mut idx = StatCache::default();
+    let r = run(&mut idx);
+    assert!(r.is_clean(), "{r:?}");
+    assert!(idx.entries.get(&rp("rl")).unwrap().redacted);
+    idx.save(&f.scion()).unwrap();
+    let mut idx = StatCache::load(&f.scion()).unwrap();
+    let r = run(&mut idx);
+    assert!(r.is_clean(), "{r:?}");
+    assert_eq!(r.hashed, 0);
+    // Retargeting the symlink is an edit of the placeholder.
+    f.safe.symlink(&rp("rl"), b"elsewhere").unwrap();
+    let r = run(&mut idx);
+    assert_eq!(r.modified, vec![rp("rl")]);
+    assert_eq!(r.redacted_dirty, vec![rp("rl")]);
+}
+
+#[test]
+fn unreadable_directories() {
+    require_p01!();
+    let f = Fixture::new(&[("locked/a", b"a", Mode::File), ("top", b"t", Mode::File)]);
+    std::fs::create_dir_all(f.root().join("junk")).unwrap();
+    std::fs::write(f.root().join("junk/new"), b"n").unwrap();
+    let chmod = |p: &str, bits: u32| {
+        std::fs::set_permissions(f.root().join(p), std::fs::Permissions::from_mode(bits)).unwrap()
+    };
+    chmod("junk", 0o000);
+    if std::fs::read_dir(f.root().join("junk")).is_ok() {
+        chmod("junk", 0o755);
+        eprintln!("SKIP: running with privileges that bypass directory permissions");
+        return;
+    }
+    // An unreadable untracked directory is skipped (nothing reported under it).
+    let r = f.status(&mut StatCache::default());
+    assert!(r.is_clean(), "{r:?}");
+    // An unreadable directory holding tracked files is an error, never "deleted".
+    chmod("locked", 0o000);
+    let err = status(
+        &f.safe,
+        &mut StatCache::default(),
+        &f.ign,
+        &[RepoPath::root()],
+        &[],
+        &f.base,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, scion_core::ErrorCode::PermissionDenied);
+    // Out of scope, it is not visited at all.
+    let r = status(
+        &f.safe,
+        &mut StatCache::default(),
+        &f.ign,
+        &[rp("top")],
+        &[],
+        &f.base,
+    )
+    .unwrap();
+    assert!(r.is_clean(), "{r:?}");
+    chmod("locked", 0o755);
+    chmod("junk", 0o755);
+    assert!(f.status(&mut StatCache::default()).added == vec![rp("junk/new")]);
+}
+
+#[test]
 fn placeholders_ignore_scope_and_inaccessible() {
     require_p01!();
     let secret = b"top secret contents";
