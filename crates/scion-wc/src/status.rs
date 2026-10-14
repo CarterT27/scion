@@ -197,6 +197,10 @@ impl Walk<'_> {
             if child.len() > 4096 || self.prefixes.inaccessible(&child) {
                 continue;
             }
+            // Neither in scope nor on the way to a scope prefix: not even stat'ed (SPEC 11.2).
+            if !self.prefixes.in_scope(&child) && !self.prefixes.leads_to_scope(&child) {
+                continue;
+            }
             let Some(st) = fs_safe::stat_at(dir, &name)? else {
                 continue; // vanished
             };
