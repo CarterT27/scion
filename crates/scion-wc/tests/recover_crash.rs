@@ -192,3 +192,83 @@ async fn server_down_keeps_the_journal_for_later() {
     assert!(wc.status().await.unwrap().is_clean());
     validate_server(&srv).await;
 }
+
+/// A two-member local stack on top of an advanced `main`; returns the working copy (with
+/// `faults`) and the stack head.
+#[allow(clippy::unwrap_used)] // test helper
+async fn two_member_stack(
+    s: &scion_wc::testing::Scenario,
+    faults: &std::sync::Arc<FaultRegistry>,
+) -> (WorkingCopy, scion_core::ObjectId) {
+    let r = main_ref();
+    let start = seed_files(s, &r, &[("a", Mode::File, b"a\n")], &[])
+        .await
+        .unwrap();
+    let mut wc = checkout_at(s, &start.to_text(), Some(faults.clone()))
+        .await
+        .unwrap();
+    seed_files(s, &r, &[("u", Mode::File, b"u\n")], &[])
+        .await
+        .unwrap();
+    write_files(&wc, &[("b", Mode::File, b"b\n")]).unwrap();
+    wc.commit(b"m1\n", b"A", None).await.unwrap();
+    write_files(&wc, &[("c", Mode::File, b"c\n")]).unwrap();
+    let head = wc.commit(b"m2\n", b"A", None).await.unwrap();
+    (wc, head)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn definitive_rebase_failure_returns_to_the_original_at_once() {
+    let srv = server().await;
+    let s = scenario(&srv, &alice()).await;
+    let faults = FaultRegistry::new();
+    let (mut wc, head) = two_member_stack(&s, &faults).await;
+    let disk = wc_snapshot(&wc).unwrap();
+    faults.arm(
+        points::REBASE_MID_MEMBER,
+        FaultAction::Error(scion_core::ErrorCode::PermissionDenied),
+        Some(1),
+    );
+    let e = wc.rebase("main").await.unwrap_err();
+    faults.reset();
+    assert_eq!(e.code, scion_core::ErrorCode::PermissionDenied);
+    assert!(wc.state().pending.is_none());
+    assert_eq!(wc.state().base, head);
+    assert_eq!(wc_snapshot(&wc).unwrap(), disk);
+    assert!(wc.status().await.unwrap().is_clean());
+    // A later rebase works normally.
+    let report = wc.rebase("main").await.unwrap();
+    assert_eq!(report.rebased.len(), 2);
+    validate_server(&srv).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_rolls_back_a_rebase_that_fails_definitively() {
+    let srv = server().await;
+    let s = scenario(&srv, &alice()).await;
+    let faults = FaultRegistry::new();
+    let (mut wc, head) = two_member_stack(&s, &faults).await;
+    let disk = wc_snapshot(&wc).unwrap();
+    faults.arm(points::REBASE_MID_MEMBER, FaultAction::Crash, Some(1));
+    assert!(wc.rebase("main").await.is_err());
+    faults.reset();
+    assert!(matches!(
+        wc.state().pending,
+        Some(PendingOperation::Rebase { .. })
+    ));
+    // The resumed run now fails definitively: recovery rolls back instead of failing every
+    // later command.
+    faults.arm(
+        points::REBASE_MID_MEMBER,
+        FaultAction::Error(scion_core::ErrorCode::InvalidArgument),
+        Some(1),
+    );
+    let what = wc.recover().await.unwrap().unwrap();
+    faults.reset();
+    assert!(what.contains("rolled back"), "{what}");
+    assert!(wc.state().pending.is_none());
+    assert_eq!(wc.state().base, head);
+    assert_eq!(wc_snapshot(&wc).unwrap(), disk);
+    assert!(wc.status().await.unwrap().is_clean());
+    validate_server(&srv).await;
+}

@@ -269,11 +269,14 @@ impl Cursor<'_> {
             self.eat(b'+');
             1
         };
-        let mut secs = self.number()? * 3600;
+        // Bounded like zic (hours 0..=167, minutes and seconds 0..=59), so a hostile TZ
+        // value can never overflow the offset arithmetic.
+        let hours = self.number().filter(|h| *h <= 167)?;
+        let mut secs = hours * 3600;
         if self.eat(b':') {
-            secs += self.number()? * 60;
+            secs += self.number().filter(|m| *m <= 59)? * 60;
             if self.eat(b':') {
-                secs += self.number()?;
+                secs += self.number().filter(|s| *s <= 59)?;
             }
         }
         Some(sign * secs)
@@ -486,7 +489,18 @@ mod tests {
         let j = Posix::parse("XXX0YYY,J60,300").unwrap();
         assert_eq!(j.offset_at(at(2024, 6, 1, 0)), 3600);
         assert_eq!(j.offset_at(at(2024, 1, 1, 0)), 0);
-        for bad in ["", "AB1", "EST", "EST5EDT,M13.1.0,M1.1.0", "EST5EDT,M3.2.0"] {
+        for bad in [
+            "",
+            "AB1",
+            "EST",
+            "EST5EDT,M13.1.0,M1.1.0",
+            "EST5EDT,M3.2.0",
+            // Out-of-range fields (and values that would overflow the arithmetic).
+            "UTC9999999999999999999",
+            "UTC3074457345618258",
+            "UTC1:99",
+            "EST5EDT,M3.2.0/99999999999999,M11.1.0",
+        ] {
             assert!(Posix::parse(bad).is_none(), "{bad}");
         }
     }
@@ -520,5 +534,9 @@ mod tests {
             Some(-5 * 3600)
         );
         assert!(tzif_offset(b"not a tzif file", 0).is_none());
+        // Truncated files never panic.
+        for n in 0..b.len() {
+            let _ = tzif_offset(&b[..n], at(2024, 7, 1, 12));
+        }
     }
 }

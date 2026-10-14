@@ -28,7 +28,10 @@
 //! Recovery: a journal with recorded conflicts is a paused rebase, a stable state left as is.
 //! Any other Rebase journal is an interrupted run: the working copy is restored to the
 //! journaled base and the run resumes (server Rebase is deterministic and idempotent, and
-//! every file step converges when repeated), ending completed or paused on conflicts.
+//! every file step converges when repeated), ending completed or paused on conflicts. A run
+//! (first or resumed) that fails definitively (a non-retryable error other than an expired
+//! login) is rolled back to the original changeset at once, so no later command keeps
+//! retrying it (SPEC 11.3, 16.1 class 8).
 
 mod materialize;
 
@@ -204,7 +207,32 @@ impl WorkingCopy {
             current: None,
         })?;
         self.opts.faults.check(points::REBASE_AFTER_JOURNAL).await?;
-        self.run_rebase().await
+        match self.run_rebase().await {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                self.rollback_on_definitive(&e).await?;
+                Err(e)
+            }
+        }
+    }
+
+    /// After a failed rebase run: a definitive failure (one that repeating the run cannot
+    /// fix) returns to the original changeset at once, so the next command does not retry it
+    /// forever (SPEC 11.3, 16.1 class 8). Retryable failures, an expired login and a rebase
+    /// that already paused on conflicts or ended keep the journal. Returns whether it rolled
+    /// back.
+    async fn rollback_on_definitive(&mut self, e: &ScionError) -> Result<bool> {
+        if e.retryable() || e.code == ErrorCode::Unauthenticated {
+            return Ok(false);
+        }
+        match self.rebase_state() {
+            Some(st) if st.conflicts.is_empty() => {
+                tracing::warn!(error = %e, "rebase failed definitively; returning to the original");
+                self.abort_to_original().await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     /// The first-parent chain from `base` back to the first ancestor of `onto`, oldest first.
@@ -421,7 +449,19 @@ pub(crate) async fn recover_rebase(wc: &mut WorkingCopy) -> Result<Option<String
     let mut idx = wc.load_index()?;
     let restored = wc.reset_hard(&mut idx).await?;
     wc.save_index(&mut idx)?;
-    let report = wc.run_rebase().await?;
+    let report = match wc.run_rebase().await {
+        Ok(r) => r,
+        Err(e) => {
+            if wc.rollback_on_definitive(&e).await? {
+                return Ok(Some(format!(
+                    "rolled back interrupted rebase ({}: {})",
+                    e.code.as_str(),
+                    e.message
+                )));
+            }
+            return Err(e);
+        }
+    };
     tracing::info!(restored, "resumed an interrupted rebase");
     Ok(Some(if report.conflicts.is_empty() {
         format!(
