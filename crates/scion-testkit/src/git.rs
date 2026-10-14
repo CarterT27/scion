@@ -413,6 +413,9 @@ type FixtureEntry = (u32, String);
 struct Runner<'a> {
     dir: &'a Path,
     clock: i64,
+    /// Flat entries of every commit this fixture created. git canonicalizes modes when it
+    /// reads trees (100664 reads back as 100644), so the exact modes are kept here.
+    trees: BTreeMap<String, BTreeMap<Vec<u8>, FixtureEntry>>,
 }
 
 impl Runner<'_> {
@@ -476,6 +479,9 @@ impl Runner<'_> {
         let Some(commit) = commit else {
             return Ok(out);
         };
+        if let Some(t) = self.trees.get(commit) {
+            return Ok(t.clone());
+        }
         let raw = self.git(&["ls-tree", "-r", "-z", "--full-tree", commit], None)?;
         for rec in raw.split(|b| *b == 0).filter(|r| !r.is_empty()) {
             let Some(tab) = rec.iter().position(|b| *b == b'\t') else {
@@ -557,10 +563,12 @@ impl Runner<'_> {
     fn commit(
         &mut self,
         branch: &str,
-        tree: &str,
+        entries: BTreeMap<Vec<u8>, FixtureEntry>,
         parents: &[String],
         message: &str,
     ) -> Result<String> {
+        let tree = self.write_tree(&entries)?;
+        let tree = tree.as_str();
         self.clock += 60;
         let mut args: Vec<String> = vec!["commit-tree".into(), tree.into()];
         for p in parents {
@@ -575,6 +583,7 @@ impl Runner<'_> {
         let id = self.git_line(&argv, Some(&msg))?;
         let refname = format!("refs/heads/{branch}");
         self.git(&["update-ref", &refname, &id], None)?;
+        self.trees.insert(id.clone(), entries);
         Ok(id)
     }
 }
@@ -604,6 +613,7 @@ impl GitFixture {
         let mut run = Runner {
             dir: dir.path(),
             clock: 1_700_000_000,
+            trees: BTreeMap::new(),
         };
         run.git(&["init", "-q", "-b", "main", "."], None)?;
         run.git(&["config", "core.autocrlf", "false"], None)?;
@@ -637,19 +647,15 @@ impl GitFixture {
                         remove_conflicts(&mut entries, path.as_bytes());
                         entries.insert(path.as_bytes().to_vec(), (0o160000, hex));
                     }
-                    let tree = run.write_tree(&entries)?;
                     let parents: Vec<String> = parent.into_iter().collect();
-                    run.commit(branch, &tree, &parents, message)?;
+                    run.commit(branch, entries, &parents, message)?;
                     current = Some(branch.clone());
                 }
                 GitOp::EmptyCommit { branch, message } => {
                     let parent = start_point(&run, branch, &mut orphans, current.as_deref())?;
-                    let tree = match &parent {
-                        Some(p) => run.git_line(&["rev-parse", &format!("{p}^{{tree}}")], None)?,
-                        None => run.write_tree(&BTreeMap::new())?,
-                    };
+                    let entries = run.entries(parent.as_deref())?;
                     let parents: Vec<String> = parent.into_iter().collect();
-                    run.commit(branch, &tree, &parents, message)?;
+                    run.commit(branch, entries, &parents, message)?;
                     current = Some(branch.clone());
                 }
                 GitOp::OrphanRoot { branch } => {
@@ -700,8 +706,7 @@ impl GitFixture {
                         }
                         parents.push(theirs);
                     }
-                    let tree = run.write_tree(&merged)?;
-                    run.commit(into, &tree, &parents, message)?;
+                    run.commit(into, merged, &parents, message)?;
                     current = Some(into.clone());
                 }
             }
@@ -728,6 +733,7 @@ impl GitFixture {
         let run = Runner {
             dir: self.dir.path(),
             clock: 0,
+            trees: BTreeMap::new(),
         };
         run.git_line(&["rev-parse", "--verify", rev], None)
     }
@@ -737,6 +743,7 @@ impl GitFixture {
         let run = Runner {
             dir: self.dir.path(),
             clock: 0,
+            trees: BTreeMap::new(),
         };
         let out = out.to_string_lossy().to_string();
         run.git(&["bundle", "create", &out, "--all"], None)

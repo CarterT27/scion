@@ -1,6 +1,8 @@
 //! SPEC 19.5 linearizability checker: hand-built accept/reject cases and randomized histories
 //! produced by a correct (atomic) register, with and without Unknown completions.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
+
 use parking_lot::Mutex;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;

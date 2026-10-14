@@ -5,6 +5,8 @@
 //! subset of Unknown operations that took effect, the targets of unknown lands, and every
 //! real-time-respecting order of the operations.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
+
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use scion_testkit::lincheck::{Event, RefOp, RefRet, check_ref_registers};
