@@ -35,6 +35,7 @@ use scion_proto::{EpochSource, EpochTrailerLayer, Epochs, v1};
 use scion_redaction::{RedactionConfig, Redactor};
 use scion_store::{ObjectRepo, ObjectRepoConfig, Storage};
 use std::convert::Infallible;
+use std::future::Future as _;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -655,8 +656,6 @@ impl<IO: tonic::transport::server::Connected> tonic::transport::server::Connecte
         self.io.connect_info()
     }
 }
-
-use std::future::Future as _;
 
 /// SPEC 15.3 readiness: the metadata store answers `ping`, the object store answers a probe,
 /// and a policy is loaded. Probed on every `/readyz` request by [`ReadyProbeLayer`] (no

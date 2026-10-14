@@ -160,10 +160,10 @@ impl InProcessServer {
             })
             .collect();
         let tls_pem = if opts.tls {
-            let (_ca, cert, key) = crate::tls::generate_test_tls().expect("test TLS material");
+            let (ca, cert, key) = crate::tls::generate_test_tls().expect("test TLS material");
             std::fs::write(&config.server.tls_cert, &cert).expect("write tls.crt");
             std::fs::write(&config.server.tls_key, &key).expect("write tls.key");
-            Some((_ca, cert, key))
+            Some((ca, cert, key))
         } else {
             None
         };
