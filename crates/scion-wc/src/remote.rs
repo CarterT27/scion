@@ -21,6 +21,12 @@ const MAX_STALLS: u32 = 3;
 /// Digest mismatches tolerated per object before INTEGRITY is returned (SPEC 16.1 class 7).
 const MAX_INTEGRITY_RETRIES: u32 = 2;
 
+/// Errors that end a batch fetch at once: non-retryable ones, and INTEGRITY, which is only
+/// returned after the per-object retries are exhausted.
+fn fatal(e: &ScionError) -> bool {
+    !e.retryable() || e.code == ErrorCode::Integrity
+}
+
 /// Per-item outcome of GetObjects (SPEC 7.3).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Item {
@@ -235,7 +241,7 @@ impl Fetcher {
             if !fresh.is_empty()
                 && let Err(e) = self.stream(&fresh, None, &mut st).await
             {
-                if !e.retryable() {
+                if fatal(&e) {
                     return Err(e);
                 }
                 last_err = Some(e);
@@ -249,7 +255,7 @@ impl Fetcher {
             for (id, offset) in resumes {
                 tracing::debug!(object = %id, offset, "resuming an incomplete object");
                 if let Err(e) = self.stream(&[id], Some(offset), &mut st).await {
-                    if !e.retryable() {
+                    if fatal(&e) {
                         return Err(e);
                     }
                     last_err = Some(e);

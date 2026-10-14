@@ -172,16 +172,33 @@ impl WorkingCopy {
             .cloned()
             .collect();
         dirs.extend(dirs_on_the_way.iter().cloned());
+        // Parents sort before their children, so a directory whose parent is absent is
+        // absent too and needs no stat (keeps deep trees linear).
+        let mut absent: BTreeSet<RepoPath> = BTreeSet::new();
+        let parent_absent = |p: &RepoPath, absent: &BTreeSet<RepoPath>| {
+            p.parent().is_some_and(|q| absent.contains(&q))
+        };
         for d in &dirs {
-            if let Some(st) = self.safe.stat(d)?
-                && !st.is_dir()
-            {
-                return Err(blocked(
-                    "a pre-existing symlink or file is in the way of a directory; refusing to write through it",
-                ));
+            if parent_absent(d, &absent) {
+                absent.insert(d.clone());
+                continue;
+            }
+            match self.safe.stat(d)? {
+                None => {
+                    absent.insert(d.clone());
+                }
+                Some(st) if !st.is_dir() => {
+                    return Err(blocked(
+                        "a pre-existing symlink or file is in the way of a directory; refusing to write through it",
+                    ));
+                }
+                Some(_) => {}
             }
         }
         for (p, _) in &files {
+            if parent_absent(p, &absent) {
+                continue;
+            }
             if let Some(st) = self.safe.stat(p)?
                 && st.is_dir()
             {
