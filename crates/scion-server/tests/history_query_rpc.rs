@@ -662,3 +662,45 @@ async fn blame_version_bump_rederives_through_the_unchanged_rpc() {
         "v1 values stay readable"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn log_of_a_readable_directory_never_returns_restricted_entries() {
+    // SPEC 12.6 / 19.12: Log(path) of a readable directory that contains a restricted subtree
+    // (here the root, containing /secret) lists the directory's history, but every entry's
+    // delta omits the restricted paths; first_parent_only and paging change nothing.
+    let srv = InProcessServer::start(opts()).await;
+    let s = seed(&srv).await;
+    let a = srv.client(Some(&alice())).await;
+    let mut want = s.c.clone();
+    want.reverse();
+    want.push(s.root);
+    for fp in [false, true] {
+        let mut got = Vec::new();
+        let mut token = Vec::new();
+        loop {
+            let mut req = log_req(&s.c[3], Some(""), 2, token);
+            req.first_parent_only = fp;
+            let page = log(&a, req).await.unwrap();
+            for e in &page.entries {
+                let (paths, _) = delta_paths(e);
+                assert!(
+                    paths.iter().all(|p| !p.starts_with(b"secret")),
+                    "no restricted path is returned"
+                );
+            }
+            got.extend(entry_ids(&page));
+            if page.next_page_token.is_empty() {
+                break;
+            }
+            token = page.next_page_token;
+        }
+        assert_eq!(got, want, "first_parent_only {fp}");
+    }
+    // The admin sees the same changesets with full encodings.
+    let adm = srv.client(Some(&admin())).await;
+    let r = log(&adm, log_req(&s.c[3], Some(""), 0, vec![]))
+        .await
+        .unwrap();
+    assert_eq!(entry_ids(&r), want);
+    assert!(r.entries.iter().all(|e| !delta_paths(e).1));
+}
