@@ -132,7 +132,7 @@ refs = ["group:admins", "github:half"]
     }
 
     fn path(s: &str) -> RepoPath {
-        RepoPath::new(s.as_bytes()).unwrap()
+        RepoPath::parse(s.as_bytes()).unwrap()
     }
 
     #[test]
