@@ -8,6 +8,68 @@ It explores the architecture described in that post: keep history and expensive 
 on the server, fetch immutable objects as needed, and check out only the paths a job needs.
 This repository is not Anthropic's implementation and is not affiliated with Anthropic.
 
+## Benchmarks
+
+The [benchmark runner](crates/scion-conformance/examples/benchmark.rs) compares Scion with
+Git on the four synthetic workloads used by
+[OpenScion](https://github.com/tinyhumansai/openscion/blob/main/benchmarks/README.md).
+These are local measurements of this implementation, using its own deterministic fixture.
+
+Median wall-clock times, measured 2026-10-14 on an Apple M4 Pro with 24 GiB RAM,
+macOS 26.6.2, Rust 1.98.0, and Git 2.56.0. Scion was built in release mode from
+`9d27736` plus the benchmark runner. Each file contains 4 KiB of seeded pseudorandom bytes,
+spread across 10 directories; the 1,000-file case uses seven runs and the 10,000-file case
+uses five. All times are milliseconds; lower is better.
+
+| Scenario | Git, 1k files | Scion, 1k | Git, 10k files | Scion, 10k |
+| --- | ---: | ---: | ---: | ---: |
+| Import directory | 456.6 | 39.7 | 3,907.1 | 500.5 |
+| Commit one changed file | 33.6 | 36.8 | 166.9 | 203.6 |
+| Full clone / checkout | 242.2 | 170.1 | 2,223.9 | 1,590.2 |
+| One-directory clone / checkout | 89.8 | 29.8 | 159.7 | 173.2 |
+
+Scion imports and materializes the full tree faster in this setup. Git commits faster at
+both sizes and is slightly faster for the 10k-file sparse case. Sparse checkout materializes
+100 or 1,000 files respectively and fetches exactly that many blobs plus two trees.
+
+Reproduce the measurements (requires Git and the build prerequisites below):
+
+```sh
+cargo run --release -p scion-conformance --example benchmark -- 100 7
+cargo run --release -p scion-conformance --example benchmark -- 1000 5
+# Quick correctness check: 10 directories × 2 files, one run
+cargo run --release -p scion-conformance --example benchmark -- 2 1
+```
+
+The positional arguments are files per directory and run count (defaults: `100 5`).
+The runner prints each sample to stderr and a median table to stdout, uses a fresh temporary
+repository and server per run, and removes its scratch files afterward. Setup, fixture
+generation, authentication, and byte-for-byte checkout verification are outside the timers.
+
+- **Import:** Git runs `init`, `add -A`, and `commit`. Scion reads the fixture files, hashes
+  and uploads blobs in batches of 256, creates a parentless changeset, and creates a ref
+  through the write APIs. This measures directory ingestion, not `scion-import`'s Git-history
+  migration; fixture path enumeration is prepared beforehand.
+- **Commit:** Change one byte in one file of the full working copy, then time Git
+  `commit -a` or Scion's working-copy commit, including status scanning and blob upload.
+  Neither side includes a subsequent push or land.
+- **Full checkout:** Git uses `clone --no-local` to build and transfer a pack; Scion uses
+  `WorkingCopy::checkout` with its default 256-object fetch batches.
+- **Sparse checkout:** Git uses `clone --no-local --filter=blob:none --sparse` followed by
+  `sparse-checkout set dir0000`, with filtering enabled on the source. Scion checks out
+  only `dir0000`. Both outputs are checked against the fixture, including absent paths
+  outside the selected directory.
+
+These measurements use an in-process Scion server and client over real loopback TLS/gRPC,
+with in-memory metadata and object storage, elevated test rate limits, and no daemon.
+Scion still performs authorization, BLAKE3 verification, and production zstd compression,
+but does not pay CockroachDB/S3 latency or durable server writes. Git uses disk-backed
+storage, compression, packing, and subprocesses; Scion's CLI process startup is excluded.
+OS caches are not flushed, and recently written working copies can trigger timestamp-related
+rehashing during commit. At 10k files, Git's commit samples ranged from 67.5 to 253.8 ms.
+These are small, single-client, single-commit workloads, not production throughput results
+or a direct comparison with OpenScion's published timings.
+
 ## How it works
 
 ```text
