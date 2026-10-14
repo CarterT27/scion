@@ -3,7 +3,7 @@
 
 mod write_support;
 
-use scion_core::{ErrorCode, ErrorPayload, FaultAction, ObjectId, subcode};
+use scion_core::{ErrorCode, ErrorPayload, FaultAction, ObjectId, points, subcode};
 use scion_object::RefName;
 use scion_proto::{ScionClient, v1};
 use scion_server::testing::{InProcessServer, ServerTestOpts};
@@ -399,4 +399,203 @@ async fn land_rpc_event_has_land_fields() {
     assert_eq!(ev["land_attempt"], 1);
     assert_eq!(ev["changeset_id"], id(&resp.target).to_text());
     assert_eq!(ev["principal"], "github:alice");
+}
+
+/// Pause the next land for 1.5 s after its rebase step, before its CAS, so a concurrent writer
+/// can move the ref (pair with [`wait_for_hits`]).
+fn park_next_land_after_rebase(srv: &InProcessServer) {
+    srv.storage.faults.arm(
+        points::LAND_AFTER_REBASE,
+        FaultAction::Delay(Duration::from_millis(1500)),
+        Some(1),
+    );
+}
+
+async fn wait_for_hits(srv: &InProcessServer, point: &str, at_least: u64) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while srv.storage.faults.hits(point) < at_least {
+        assert!(Instant::now() < deadline, "checkpoint {point} not reached");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+/// Move `main` from version 1 to `target` (a fast-forward) through UpdateRef.
+async fn advance_main(c: &ScionClient, target: &ObjectId) {
+    c.refs()
+        .update_ref(v1::UpdateRefRequest {
+            name: "main".into(),
+            expected_version: 1,
+            new_target: target.as_bytes().to_vec(),
+            allow_non_fast_forward: false,
+        })
+        .await
+        .unwrap();
+}
+
+/// SPEC 19.5 / 8.4: authorization is re-checked on every attempt. A land loses its CAS to a
+/// concurrent update, the policy revoking the lander's `update` grant is applied meanwhile, and
+/// the retry fails PERMISSION_DENIED without touching the ref.
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_revoked_mid_retry_fails_the_land() {
+    let srv = InProcessServer::start(opts_with_acl(RESTRICTED_ACL)).await;
+    let r = root(&srv).await;
+    let alice_c = srv.client(Some(&alice())).await;
+    let bob_c = srv.client(Some(&bob())).await;
+    let mine = commit(&srv, &alice_c, &r, &[("mine", b"m\n")], 1).await;
+    let other = commit(&srv, &bob_c, &r, &[("other", b"o\n")], 2).await;
+    let metrics = srv.ctx().metrics.clone();
+    let cas_before = metrics
+        .land_attempts
+        .with_label_values(&["cas_mismatch"])
+        .get();
+    let failed_before = metrics.land_attempts.with_label_values(&["failed"]).get();
+
+    let hits = srv.storage.faults.hits(points::LAND_AFTER_REBASE);
+    park_next_land_after_rebase(&srv);
+    let task = {
+        let c = alice_c.clone();
+        tokio::spawn(async move { land(&c, "main", &mine, false).await })
+    };
+    wait_for_hits(&srv, points::LAND_AFTER_REBASE, hits + 1).await;
+    advance_main(&bob_c, &other).await;
+    srv.set_policy(&RESTRICTED_ACL.replace(
+        "[refs.\"main\"]\nupdate = [\"group:eng\"]",
+        "[refs.\"main\"]\nupdate = [\"github:bob\"]",
+    ))
+    .unwrap();
+
+    let e = task.await.unwrap().unwrap_err();
+    expect_err(&e, ErrorCode::PermissionDenied, None);
+    assert_eq!(ref_state(&srv, "main").await, (other, 2));
+    assert_eq!(
+        metrics
+            .land_attempts
+            .with_label_values(&["cas_mismatch"])
+            .get(),
+        cas_before + 1,
+        "the first attempt lost the CAS"
+    );
+    assert_eq!(
+        metrics.land_attempts.with_label_values(&["failed"]).get(),
+        failed_before + 1
+    );
+    // Restoring the grant lets the same land through.
+    srv.set_policy(RESTRICTED_ACL).unwrap();
+    land(&alice_c, "main", &mine, false).await.unwrap();
+}
+
+/// SPEC 19.5 / PLAN 6.7: `land.max_attempts` exhaustion returns UNAVAILABLE/land_contention
+/// (retryable) and leaves the ref as the competing writer left it.
+#[tokio::test(flavor = "multi_thread")]
+async fn max_attempts_exhaustion_is_retryable_and_leaves_ref_unchanged() {
+    let base = opts();
+    let base_tweak = base.tweak.clone().unwrap();
+    let srv = InProcessServer::start(ServerTestOpts {
+        tweak: Some(Arc::new(move |cfg| {
+            base_tweak(cfg);
+            cfg.land.max_attempts = 1;
+        })),
+        ..base
+    })
+    .await;
+    let r = root(&srv).await;
+    let c = srv.client(Some(&alice())).await;
+    let mine = commit(&srv, &c, &r, &[("mine", b"m\n")], 1).await;
+    let other = commit(&srv, &c, &r, &[("other", b"o\n")], 2).await;
+    let cas_failures_before = srv
+        .ctx()
+        .metrics
+        .ref_cas_failures
+        .with_label_values(&["main"])
+        .get();
+
+    let hits = srv.storage.faults.hits(points::LAND_AFTER_REBASE);
+    park_next_land_after_rebase(&srv);
+    let task = {
+        let c = c.clone();
+        tokio::spawn(async move { land(&c, "main", &mine, false).await })
+    };
+    wait_for_hits(&srv, points::LAND_AFTER_REBASE, hits + 1).await;
+    advance_main(&c, &other).await;
+
+    let e = task.await.unwrap().unwrap_err();
+    let got = expect_err(&e, ErrorCode::Unavailable, Some(subcode::LAND_CONTENTION));
+    assert!(got.retryable());
+    assert_eq!(ref_state(&srv, "main").await, (other, 2));
+    assert!(
+        srv.ctx()
+            .history
+            .ref_log(&RefName::main(), 3, 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "no ref version beyond the competing update"
+    );
+    assert_eq!(
+        srv.ctx()
+            .metrics
+            .ref_cas_failures
+            .with_label_values(&["main"])
+            .get(),
+        cas_failures_before + 1
+    );
+    // The client's retry lands on the new tip.
+    let resp = land(&c, "main", &mine, false).await.unwrap();
+    assert_eq!(resp.version, 3);
+}
+
+/// SPEC 12.6 applied to conflict reports: a lander that cannot read a conflicting or clean
+/// path does not see it in the MERGE_CONFLICT payload.
+#[tokio::test(flavor = "multi_thread")]
+async fn land_conflict_payload_omits_unreadable_paths() {
+    // Write on /secrets for alice, read only for admin.
+    let acl = RESTRICTED_ACL.replace(
+        "prefix = \"/secrets\"\nread = [\"github:admin\"]\nwrite = [\"github:admin\"]",
+        "prefix = \"/secrets\"\nread = [\"github:admin\"]\nwrite = [\"github:admin\", \"github:alice\"]",
+    );
+    assert_ne!(acl, RESTRICTED_ACL);
+    let srv = InProcessServer::start(opts_with_acl(&acl)).await;
+    let r = root(&srv).await;
+    let admin_c = srv.client(Some(&admin())).await;
+    let alice_c = srv.client(Some(&alice())).await;
+    let theirs = commit(
+        &srv,
+        &admin_c,
+        &r,
+        &[("pub", b"theirs\n"), ("secrets/k", b"theirs\n")],
+        1,
+    )
+    .await;
+    land(&admin_c, "main", &theirs, false).await.unwrap();
+    let mine = commit(
+        &srv,
+        &alice_c,
+        &r,
+        &[
+            ("clean", b"c\n"),
+            ("pub", b"mine\n"),
+            ("secrets/k", b"mine\n"),
+            ("secrets/new", b"n\n"),
+        ],
+        2,
+    )
+    .await;
+    let e = land(&alice_c, "main", &mine, false).await.unwrap_err();
+    let got = expect_err(&e, ErrorCode::MergeConflict, None);
+    assert!(
+        got.message.contains("1 readable conflicting"),
+        "the message must not reveal the unfiltered count: {}",
+        got.message
+    );
+    let ErrorPayload::MergeConflict(report) = got.payload else {
+        panic!("expected MergeConflict payload");
+    };
+    let conflict_paths: Vec<_> = report.conflicts.iter().map(|c| c.path.clone()).collect();
+    let clean_paths: Vec<_> = report
+        .clean_entries
+        .iter()
+        .map(|c| c.path.clone())
+        .collect();
+    assert_eq!(conflict_paths, vec![b"pub".to_vec()]);
+    assert_eq!(clean_paths, vec![b"clean".to_vec()]);
 }

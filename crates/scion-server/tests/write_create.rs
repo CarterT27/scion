@@ -304,6 +304,16 @@ async fn invalid_argument_subcodes() {
             create_req(&[base], vec![put_entry("f/g", &b, n)], 2),
             subcode::FILE_DIRECTORY,
         ),
+        (
+            "file over directory without deletes",
+            create_req(&[base], vec![put_entry("dir", &b, n)], 2),
+            subcode::FILE_DIRECTORY,
+        ),
+        (
+            "duplicate delta path",
+            create_req(&[r], vec![put_entry("a", &b, n), put_entry("a", &b, n)], 2),
+            subcode::DELTA_DUPLICATE,
+        ),
     ];
     for (what, req, sub) in cases {
         let e = c.write().create_changeset(req).await.unwrap_err();
@@ -312,6 +322,43 @@ async fn invalid_argument_subcodes() {
         assert_eq!(got.subcode(), Some(sub), "{what}: {got:?}");
         assert!(!got.retryable(), "{what}");
     }
+    // SPEC 4.4 path rules, each rejected with INVALID_ARGUMENT/invalid_path.
+    let long_name = "n".repeat(256);
+    let long_path = vec!["d".repeat(200); 21].join("/");
+    let bad_paths: Vec<Vec<u8>> = vec![
+        b".".to_vec(),
+        b"..".to_vec(),
+        b"a/./b".to_vec(),
+        b"a/../b".to_vec(),
+        b"/abs".to_vec(),
+        b"trailing/".to_vec(),
+        b"a//b".to_vec(),
+        b"nul\0byte".to_vec(),
+        b".scion".to_vec(),
+        b"x/.SCION/y".to_vec(),
+        b".Scion/z".to_vec(),
+        long_name.into_bytes(),
+        long_path.into_bytes(),
+    ];
+    for path in bad_paths {
+        let mut entry = put_entry("placeholder", &b, n);
+        entry.path = path.clone();
+        let e = c
+            .write()
+            .create_changeset(create_req(&[r], vec![entry], 2))
+            .await
+            .unwrap_err();
+        let got = err(&e);
+        assert_eq!(got.code, ErrorCode::InvalidArgument, "{path:?}: {got:?}");
+        assert_eq!(
+            got.subcode(),
+            Some(subcode::INVALID_PATH),
+            "{path:?}: {got:?}"
+        );
+    }
+    // A 255-byte name is valid.
+    commit(&srv, &c, &r, &[("n".repeat(255).as_str(), b"ok\n")], 4).await;
+
     // No-op put: the same content at the same path.
     let (fb, fnn) = blob(&srv, b"f\n").await;
     let e = c

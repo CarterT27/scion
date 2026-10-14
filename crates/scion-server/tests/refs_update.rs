@@ -55,6 +55,15 @@ async fn concurrent_cas(n: usize) {
     }
     assert_eq!(ok, 1, "exactly one CAS succeeds");
     assert_eq!(ref_state(&srv, "main").await, (target, 2));
+    // Every loser is a ref CAS failure (SPEC 15.2 `scion_ref_cas_failures_total{ref}`).
+    assert_eq!(
+        srv.ctx()
+            .metrics
+            .ref_cas_failures
+            .with_label_values(&["main"])
+            .get(),
+        n as u64 - 1
+    );
 
     // Sequential updates advance by exactly one each.
     let mut prev = target;

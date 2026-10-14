@@ -292,3 +292,71 @@ async fn merge_message_limit_is_too_large() {
     let e = merge(&c, &a, &b, 3).await.unwrap_err();
     expect_err(&e, ErrorCode::TooLarge, None);
 }
+
+/// SPEC 12.6 applied to conflict reports: any repository reader may rebase anyone's
+/// changeset (PLAN 6.12), but conflicts and clean entries at paths the caller cannot read are
+/// omitted from the MERGE_CONFLICT payload. A principal who can read them sees everything.
+#[tokio::test(flavor = "multi_thread")]
+async fn rebase_conflict_payload_omits_unreadable_paths() {
+    let srv = InProcessServer::start(opts_with_acl(RESTRICTED_ACL)).await;
+    let r = root(&srv).await;
+    let admin_c = srv.client(Some(&admin())).await;
+    let p = commit(
+        &srv,
+        &admin_c,
+        &r,
+        &[("pub", b"base\n"), ("secrets/k", b"base\n")],
+        1,
+    )
+    .await;
+    let mine = commit(
+        &srv,
+        &admin_c,
+        &p,
+        &[
+            ("clean", b"c\n"),
+            ("pub", b"mine\n"),
+            ("secrets/k", b"mine\n"),
+            ("secrets/new", b"n\n"),
+        ],
+        2,
+    )
+    .await;
+    let onto = commit(
+        &srv,
+        &admin_c,
+        &p,
+        &[("pub", b"onto\n"), ("secrets/k", b"onto\n")],
+        3,
+    )
+    .await;
+    let paths = |e: &tonic::Status| {
+        let got = expect_err(e, ErrorCode::MergeConflict, None);
+        let ErrorPayload::MergeConflict(report) = got.payload else {
+            panic!("expected MergeConflict payload");
+        };
+        (
+            report
+                .conflicts
+                .iter()
+                .map(|c| String::from_utf8(c.path.clone()).unwrap())
+                .collect::<Vec<_>>(),
+            report
+                .clean_entries
+                .iter()
+                .map(|c| String::from_utf8(c.path.clone()).unwrap())
+                .collect::<Vec<_>>(),
+        )
+    };
+    let reader = srv.client(Some(&gh("reader"))).await;
+    let e = rebase(&reader, &mine, &onto).await.unwrap_err();
+    assert_eq!(paths(&e), (vec!["pub".into()], vec!["clean".into()]));
+    let e = rebase(&admin_c, &mine, &onto).await.unwrap_err();
+    assert_eq!(
+        paths(&e),
+        (
+            vec!["pub".to_owned(), "secrets/k".to_owned()],
+            vec!["clean".to_owned(), "secrets/new".to_owned()]
+        )
+    );
+}

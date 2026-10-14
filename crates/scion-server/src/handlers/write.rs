@@ -12,6 +12,9 @@
 //!   changesets, so rebasing someone else's changeset is allowed; landing checks write.
 //! - Land: [`PolicyLandAuthzSource`], which re-reads the policy on every attempt (SPEC 8.4).
 //!
+//! MERGE_CONFLICT payloads omit conflicts and clean entries at paths the caller cannot read
+//! (SPEC 12.6 applied to conflict reports; [`filter_conflict_payload`]).
+//!
 //! Error payloads (MERGE_CONFLICT `ConflictReport`, ALREADY_LANDED, TOO_LARGE limits, subcodes)
 //! are encoded by `scion_proto::status_from_error` (SPEC 7.2). Log events carry
 //! `changeset_id`, `ref`, `ref_version` and `land_attempt` where applicable (SPEC 15.1).
@@ -21,7 +24,7 @@ use crate::authz::{PolicyLandAuthzSource, PolicyWriteAuthz};
 use crate::context::caller;
 use crate::errors::{StatusExt, to_status};
 use crate::logging::{LogFields, LogSlot};
-use scion_core::{ObjectId, Principal, ScionError};
+use scion_core::{ErrorCode, ErrorPayload, ObjectId, Principal, ScionError};
 use scion_history::{CreateRequest, LandAuthorizer, LandAuthorizerSource, LandRequest, MetaFields};
 use scion_object::{RefName, RepoPath};
 use scion_proto::convert::{
@@ -56,6 +59,42 @@ pub(crate) fn require_repo_read(ctx: &AppContext, who: &Principal) -> Result<(),
             "repository read (read on /) denied",
         )))
     }
+}
+
+/// SPEC 12.6 applied to MERGE_CONFLICT payloads (Rebase, Merge, Land): conflicts and clean
+/// entries at paths the caller cannot read under the current policy are omitted, so a
+/// repository reader rebasing someone else's changeset never learns restricted path names or
+/// object ids. Other errors pass through unchanged. When entries are removed the message is
+/// rewritten so it does not reveal the unfiltered conflict count.
+pub(crate) fn filter_conflict_payload(
+    ctx: &AppContext,
+    who: &Principal,
+    mut e: ScionError,
+) -> ScionError {
+    if e.code != ErrorCode::MergeConflict {
+        return e;
+    }
+    let ErrorPayload::MergeConflict(report) = &mut e.payload else {
+        return e;
+    };
+    let policy = ctx.policy.current();
+    let (conflicts, clean) = (report.conflicts.len(), report.clean_entries.len());
+    report
+        .conflicts
+        .retain(|c| policy.can_read_bytes(who, &c.path));
+    report
+        .clean_entries
+        .retain(|c| policy.can_read_bytes(who, &c.path));
+    if report.conflicts.len() != conflicts || report.clean_entries.len() != clean {
+        let shown = report.conflicts.len();
+        tracing::debug!(
+            omitted_conflicts = conflicts - shown,
+            omitted_clean = clean - report.clean_entries.len(),
+            "merge conflict payload filtered by read policy"
+        );
+        e.message = format!("merge conflict: {shown} readable conflicting path(s)");
+    }
+    e
 }
 
 /// Parse a required ref name: empty is INVALID_ARGUMENT/missing_field, otherwise
@@ -150,7 +189,12 @@ pub async fn rebase(
     let onto = required_id(&m.onto, "onto").map_status()?;
     require_repo_read(ctx, &who)?;
     note(&slot, |f| f.changeset_id = Some(c.to_text()));
-    let id = ctx.history.rebase(&c, &onto, &who).await.map_status()?;
+    let id = ctx
+        .history
+        .rebase(&c, &onto, &who)
+        .await
+        .map_err(|e| filter_conflict_payload(ctx, &who, e))
+        .map_status()?;
     note(&slot, |f| f.changeset_id = Some(id.to_text()));
     Ok(Response::new(v1::RebaseResponse {
         changeset_id: id_bytes(&id),
@@ -183,6 +227,7 @@ pub async fn merge(
             &authz,
         )
         .await
+        .map_err(|e| filter_conflict_payload(ctx, &who, e))
         .map_status()?;
     note(&slot, |f| f.changeset_id = Some(id.to_text()));
     Ok(Response::new(v1::MergeResponse {
@@ -245,7 +290,9 @@ pub async fn land(
         .await;
     let attempts = source.attempts.load(Ordering::Relaxed);
     note(&slot, |f| f.land_attempt = Some(attempts.max(1)));
-    let result = result.map_status()?;
+    let result = result
+        .map_err(|e| filter_conflict_payload(ctx, &who, e))
+        .map_status()?;
     note(&slot, |f| {
         f.ref_version = Some(result.version);
         f.changeset_id = Some(result.target.to_text());

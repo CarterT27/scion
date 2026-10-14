@@ -9,8 +9,9 @@ use crate::app::AppContext;
 use crate::authz::PolicyLandAuthzSource;
 use crate::context::caller;
 use crate::errors::{StatusExt, to_status};
-use scion_core::{Principal, ScionError};
+use scion_core::{ErrorCode, Principal, ScionError};
 use scion_history::{LandAuthorizerSource, UpdateRefRequest};
+use scion_object::RefName;
 use scion_policy::AdminPerm;
 use scion_proto::convert::{opt_id_bytes, required_id};
 use scion_proto::v1;
@@ -44,6 +45,18 @@ pub fn ref_log_to_proto(r: &RefLogRow) -> v1::RefLogEntryMsg {
     }
 }
 
+/// SPEC 15.2 `scion_ref_cas_failures_total{ref}`: a version-checked ref write (UpdateRef,
+/// DeleteRef) lost its compare-and-set. Land CAS losses are counted by the land observer.
+fn count_cas_failure(ctx: &AppContext, name: &RefName, e: ScionError) -> ScionError {
+    if e.code == ErrorCode::RefVersionMismatch {
+        ctx.metrics
+            .ref_cas_failures
+            .with_label_values(&[name.as_str()])
+            .inc();
+    }
+    e
+}
+
 /// SPEC 7.6, 12.4: `admin.refs` under the current policy, else PERMISSION_DENIED.
 fn require_admin_refs(ctx: &AppContext, who: &Principal) -> Result<(), Status> {
     if ctx.policy.current().can_admin(who, AdminPerm::Refs) {
@@ -62,7 +75,7 @@ fn require_admin_refs(ctx: &AppContext, who: &Principal) -> Result<(), Status> {
 /// the ref (PERMISSION_DENIED); REF_VERSION_MISMATCH carries the current version and target;
 /// a non-fast-forward update needs `allow_non_fast_forward` AND `force` on the ref
 /// (NOT_FAST_FORWARD otherwise) and is audited (SPEC 17). The `ref_log` row is written in the
-/// same transaction.
+/// same transaction. A lost CAS increments `scion_ref_cas_failures_total{ref}` (SPEC 15.2).
 pub async fn update_ref(
     ctx: &Arc<AppContext>,
     req: Request<v1::UpdateRefRequest>,
@@ -81,7 +94,7 @@ pub async fn update_ref(
         .history
         .update_ref(
             UpdateRefRequest {
-                name,
+                name: name.clone(),
                 expected_version: m.expected_version,
                 new_target,
                 allow_non_fast_forward: m.allow_non_fast_forward,
@@ -90,6 +103,7 @@ pub async fn update_ref(
             authz.as_ref(),
         )
         .await
+        .map_err(|e| count_cas_failure(ctx, &name, e))
         .map_status()?;
     note(&slot, |f| f.ref_version = Some(row.version));
     Ok(Response::new(v1::UpdateRefResponse {
@@ -149,6 +163,7 @@ pub async fn delete_ref(
     ctx.history
         .delete_ref(&name, m.expected_version, &who, &m.reason)
         .await
+        .map_err(|e| count_cas_failure(ctx, &name, e))
         .map_status()?;
     Ok(Response::new(v1::DeleteRefResponse {}))
 }
@@ -186,7 +201,6 @@ pub async fn get_ref_log(
 mod tests {
     use super::*;
     use scion_core::{ChangeId, Kind, ObjectId};
-    use scion_object::RefName;
     use scion_store::LandedEntry;
     use std::time::Duration;
 
