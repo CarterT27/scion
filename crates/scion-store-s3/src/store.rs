@@ -57,6 +57,14 @@ impl S3BlobStore {
     /// Build the client (no IO). An invalid configuration (e.g. a malformed endpoint) is
     /// INVALID_ARGUMENT.
     pub fn new(cfg: S3Config) -> Result<Self> {
+        for (name, v) in [("bucket", &cfg.bucket), ("endpoint", &cfg.endpoint)] {
+            if v.trim().is_empty() {
+                return Err(ScionError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("invalid object storage configuration: empty {name}"),
+                ));
+            }
+        }
         let mut b = AmazonS3Builder::new()
             .with_endpoint(cfg.endpoint.clone())
             .with_bucket_name(cfg.bucket.clone())
