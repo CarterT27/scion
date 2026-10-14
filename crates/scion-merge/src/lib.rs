@@ -2,6 +2,7 @@
 //!
 //! The behaviour is defined normatively by `docs/contracts/line-diff3-v1.md`; when this code
 //! and that document disagree, the document wins.
+#![warn(missing_docs)]
 
 mod binary;
 mod classify;

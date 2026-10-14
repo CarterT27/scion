@@ -364,7 +364,7 @@ message LogEntry {
   MetaView meta = 3;
 }
 
-// Meta as shown to clients. When redacted only meta_id is set; clients render "<redacted>".
+// Meta as shown to clients. When redacted only meta_id is set; clients render `<redacted>`.
 message MetaView {
   bool redacted = 1;
   bytes author = 2;

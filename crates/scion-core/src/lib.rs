@@ -4,6 +4,7 @@
 //! identifiers and their text form (SPEC 4.2), file modes (SPEC 4.3.2), conflict payloads
 //! (SPEC 8.3), principals (SPEC 4.3.8), the injectable clock, limits (SPEC 6.5), and the fault
 //! registry used by the failure-injection tests (SPEC 19.0).
+#![warn(missing_docs)]
 
 pub mod clock;
 pub mod conflict;

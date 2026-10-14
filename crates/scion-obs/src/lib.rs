@@ -1,5 +1,6 @@
 //! Observability (SPEC 15; PLAN 2.12, 6.9, 6.10): structured logging, RPC log events, path
 //! hashing, Prometheus metrics, health endpoints and an in-memory log capture for tests.
+#![warn(missing_docs)]
 
 pub mod capture;
 

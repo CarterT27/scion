@@ -6,6 +6,7 @@
 //! - Epoch trailers (SPEC 7.1): [`EpochTrailerLayer`], [`read_epochs`], [`write_epochs`].
 //! - [`ScionClient`]: a client over a Unix socket or HTTPS (SPEC 7.1, 11).
 //! - [`raw::RawCodec`]: byte-level codec for verbatim forwarding by the daemon (SPEC 7.8).
+#![warn(missing_docs)]
 
 /// Generated `scion.v1` protobuf types and tonic services (SPEC 7).
 #[allow(
@@ -14,7 +15,10 @@
     clippy::pedantic,
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::panic
+    clippy::panic,
+    rustdoc::invalid_html_tags,
+    rustdoc::bare_urls,
+    rustdoc::broken_intra_doc_links
 )]
 pub mod v1 {
     tonic::include_proto!("scion.v1");

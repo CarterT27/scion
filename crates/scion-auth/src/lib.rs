@@ -1,6 +1,7 @@
 //! Authentication (SPEC 12; PLAN 2.10, 6.1): PASETO v4.public Ed25519 tokens, keyrings with
 //! rotation, the constant-time comparison primitive, service principals, the GitHub API client
 //! and the GitHub device flow.
+#![warn(missing_docs)]
 
 pub mod device_flow;
 

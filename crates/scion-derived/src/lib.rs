@@ -7,6 +7,7 @@
 //! - v1 types: [`history`] (eager, kind 0x10 nodes), [`path_index`] and [`commit_graph`]
 //!   (descriptors computed by scion-history), [`git_mapping`] (eager), [`blame`] (lazy), plus
 //!   [`log`] (Log(path)) and [`versions`] (all versions of a path).
+#![warn(missing_docs)]
 
 pub mod types;
 

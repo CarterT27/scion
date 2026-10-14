@@ -1,6 +1,7 @@
 //! Cache layer primitives (SPEC 3.2 level 6, SPEC 10; PLAN 2.15): the verified
 //! content-addressed disk cache, single-flight coalescing, the upstream limiter, the ref TTL
 //! cache, local redaction tracking and the per-principal access cache.
+#![warn(missing_docs)]
 
 mod access;
 mod coalesce;

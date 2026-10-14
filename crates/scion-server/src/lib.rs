@@ -3,6 +3,7 @@
 //! [`ServerApp::build`] wires storage, the object facade, history, derived data, redaction,
 //! policy, auth and observability; [`grpc`] implements the six `scion.v1` services by
 //! delegating to [`handlers`]. The `testing` feature adds [`testing::InProcessServer`].
+#![warn(missing_docs)]
 
 pub mod authz;
 pub mod context;

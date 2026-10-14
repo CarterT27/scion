@@ -8,9 +8,12 @@ use std::future::Future;
 use std::hash::Hash;
 use std::sync::Arc;
 
+/// One in-flight fetch result slot.
+type Slot<V> = Arc<tokio::sync::OnceCell<std::result::Result<V, ScionError>>>;
+
 /// Concurrent callers for the same key share one fetch; errors are shared too.
 pub struct Coalescer<K, V> {
-    inflight: Mutex<HashMap<K, Arc<tokio::sync::OnceCell<std::result::Result<V, ScionError>>>>>,
+    inflight: Mutex<HashMap<K, Slot<V>>>,
 }
 
 impl<K: Eq + Hash + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static>

@@ -1,6 +1,7 @@
 //! Test infrastructure (SPEC 19.0; PLAN 2.21): corpus generators, shared-subtree repositories,
 //! edge-case repositories, production encoding of structural trees, vendored git histories, the
 //! linearizability checker, and in-process fakes (upstream server, GitHub) plus test TLS.
+#![warn(missing_docs)]
 
 pub mod git;
 pub mod lincheck;

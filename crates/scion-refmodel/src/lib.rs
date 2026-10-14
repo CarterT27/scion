@@ -3,6 +3,7 @@
 //! Written from SPEC.md and `docs/contracts/line-diff3-v1.md` alone. It depends on no scion
 //! crate (checked by `scripts/check-layers.sh`) and works on structural values, so comparisons
 //! are independent of production identifiers.
+#![warn(missing_docs)]
 
 pub mod diff;
 pub mod enc;

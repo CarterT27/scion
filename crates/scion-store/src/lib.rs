@@ -6,6 +6,7 @@
 //! - [`Storage`]: the bundle of both backends wrapped in counting/fault decorators.
 //! - [`ObjectRepo`]: the object facade implementing SPEC 5.1, 5.3 step 1 and 5.4.
 //! - [`fsck`]: the SPEC 4.5 invariant oracle; [`conformance`]: shared backend suites.
+#![warn(missing_docs)]
 
 pub mod conformance;
 

@@ -7,6 +7,7 @@
 //!   FileDiff over flat trees (4.3.4).
 //!
 //! No IO happens in this crate.
+#![warn(missing_docs)]
 
 pub mod enc;
 

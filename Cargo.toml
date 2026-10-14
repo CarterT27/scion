@@ -41,6 +41,8 @@ unsafe_code = "deny"
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+# Frozen PLAN section 2 signatures use nested types (Arc<dyn Fn..>, Vec<(.., Option<..>)>).
+type_complexity = "allow"
 
 [workspace.dependencies]
 # ---- internal crates ----

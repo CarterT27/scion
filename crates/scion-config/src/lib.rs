@@ -1,6 +1,7 @@
 //! Configuration (SPEC 6; PLAN 2.11, 6.11): server, daemon, client and working-copy TOML
 //! files with `$VAR` resolution, unknown-key rejection naming the full key, and SPEC 6.5
 //! defaults.
+#![warn(missing_docs)]
 
 mod client;
 mod daemon;

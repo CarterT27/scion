@@ -4,6 +4,7 @@
 //! Upward needs are inverted through the traits in [`hooks`]: [`EagerHook`] (implemented by
 //! scion-derived), [`WriteAuthorizer`], [`LandAuthorizer`], [`LandAuthorizerSource`] (implemented
 //! by scion-server over scion-policy) and [`Rebaser`].
+#![warn(missing_docs)]
 
 pub mod config;
 pub mod hooks;
