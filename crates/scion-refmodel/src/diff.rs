@@ -288,7 +288,6 @@ fn side_range(hs: &[MHunk], rs: usize, re: usize) -> (usize, usize) {
 /// Full three-way merge result: merged bytes, or conflict hunks
 /// `((base_start, base_end), (ours_start, ours_end), (theirs_start, theirs_end))`
 /// (contract section 6; SPEC 8.3).
-#[allow(clippy::type_complexity)]
 pub fn merge3_full(
     b: &[u8],
     o: &[u8],
