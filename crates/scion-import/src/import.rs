@@ -12,19 +12,21 @@
 //! 4. Create the target ref, or fast-forward it with `expected_version`.
 
 mod git;
+mod rpc;
 
 pub(crate) use git::{CommitInfo, GitOid, GitRepo, oid_bytes};
 
 use crate::mapping::{change_id_for, encode_skipped_gitlinks, parse_commit_header};
 use bytes::Bytes;
 use git::Change;
+use rpc::Rpc;
 use scion_core::{ErrorCode, Kind, ObjectId, Result, ScionError, empty_tree_id};
 use scion_object::{
     Canonical, Changeset, DeltaEntry, DeltaOp, Extensions, META_EXT_GIT_COMMIT,
     META_EXT_SKIPPED_GITLINKS, RefName, RepoPath,
 };
 use scion_proto::convert::{CreateChangesetParts, MetaFieldsParts, id_bytes, parse_id};
-use scion_proto::{ScionClient, error_from_status, v1};
+use scion_proto::{ScionClient, v1};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -80,11 +82,12 @@ pub struct ImportReport {
 /// (UpdateRef with `expected_version`). A ref still at the repository's bootstrap root
 /// changeset (implementation-defined 6.5) is replaced by a forced update, because imported
 /// histories start at their own parentless changesets; this needs `force` on the ref. Any
-/// other non-fast-forward is NOT_FAST_FORWARD.
+/// other non-fast-forward is NOT_FAST_FORWARD. RESOURCE_EXHAUSTED answers (rate limiting)
+/// are retried with back-off.
 pub async fn import(client: &ScionClient, opts: &ImportOptions) -> Result<ImportReport> {
     let git = GitRepo::open(&opts.git_dir)?;
     let mut imp = Importer {
-        client,
+        rpc: Rpc { client },
         opts,
         git,
         blob_ids: HashMap::new(),
@@ -97,7 +100,7 @@ pub async fn import(client: &ScionClient, opts: &ImportOptions) -> Result<Import
 }
 
 struct Importer<'a> {
-    client: &'a ScionClient,
+    rpc: Rpc<'a>,
     opts: &'a ImportOptions,
     git: GitRepo,
     /// git blob id -> (Scion blob id, size).
@@ -110,10 +113,6 @@ struct Importer<'a> {
     skipped_links: BTreeSet<(String, String)>,
 }
 
-fn status_err(s: tonic::Status) -> ScionError {
-    error_from_status(&s)
-}
-
 fn with_commit(e: ScionError, id: &GitOid) -> ScionError {
     let message = format!("git commit {id}: {}", e.message);
     ScionError {
@@ -121,6 +120,10 @@ fn with_commit(e: ScionError, id: &GitOid) -> ScionError {
         message,
         payload: e.payload,
     }
+}
+
+fn internal(msg: impl Into<String>) -> ScionError {
+    ScionError::new(ErrorCode::Unavailable, msg)
 }
 
 /// `BLAKE3("scion-root-v1")[0..16]`: the bootstrap root's change id (implementation-defined
@@ -148,14 +151,12 @@ impl Importer<'_> {
             if !seen.insert(id) {
                 continue;
             }
-            if let Some(cs) = self.resolve_git(&id).await? {
+            if let Some(cs) = self.rpc.resolve_git(&id.to_string()).await? {
                 self.mapped.insert(id, cs);
                 continue;
             }
             need.insert(id);
-            if let Some(&i) = by_id.get(&id)
-                && let Some(c) = commits.get(i)
-            {
+            if let Some(c) = by_id.get(&id).and_then(|&i| commits.get(i)) {
                 stack.extend(c.parents.iter().copied());
             }
         }
@@ -170,12 +171,13 @@ impl Importer<'_> {
                 continue;
             }
             let parent_tree = match c.parents.first() {
-                Some(p) => {
-                    let i = by_id.get(p).copied().ok_or_else(|| {
-                        ScionError::new(ErrorCode::Unavailable, format!("parent {p} not walked"))
-                    })?;
-                    commits.get(i).map(|pc| pc.tree)
-                }
+                Some(p) => Some(
+                    by_id
+                        .get(p)
+                        .and_then(|&i| commits.get(i))
+                        .map(|pc| pc.tree)
+                        .ok_or_else(|| internal(format!("parent {p} was not walked")))?,
+                ),
                 None => None,
             };
             let cs = self
@@ -193,9 +195,11 @@ impl Importer<'_> {
             .into_iter()
             .collect();
 
-        let tip_cs = self.mapped.get(&tip).copied().ok_or_else(|| {
-            ScionError::new(ErrorCode::Unavailable, "tip commit was not imported")
-        })?;
+        let tip_cs = self
+            .mapped
+            .get(&tip)
+            .copied()
+            .ok_or_else(|| internal("the tip commit was not imported"))?;
         self.report.final_target = Some(tip_cs);
         self.report.ref_version = self.update_target(tip_cs, &tip).await?;
         tracing::info!(
@@ -208,28 +212,6 @@ impl Importer<'_> {
         Ok(self.report.clone())
     }
 
-    /// `Resolve("git:<sha>")`: the imported changeset, or `None` when not imported yet.
-    async fn resolve_git(&mut self, id: &GitOid) -> Result<Option<ObjectId>> {
-        let r = self
-            .client
-            .query()
-            .resolve(v1::ResolveRequest {
-                revision: format!("git:{id}"),
-            })
-            .await;
-        match r {
-            Ok(resp) => Ok(Some(parse_id(&resp.into_inner().changeset, "changeset")?)),
-            Err(s) => {
-                let e = status_err(s);
-                if e.code == ErrorCode::NotFound {
-                    Ok(None)
-                } else {
-                    Err(e)
-                }
-            }
-        }
-    }
-
     /// Import one commit whose parents are all mapped; returns the changeset id.
     async fn import_commit(
         &mut self,
@@ -238,9 +220,8 @@ impl Importer<'_> {
     ) -> Result<ObjectId> {
         let header = parse_commit_header(&c.raw)?;
         let links = self.git.gitlinks(c.tree)?;
-        if !links.is_empty() {
+        if let Some((path, _)) = links.first() {
             if !self.opts.skip_submodules {
-                let (path, _) = &links[0];
                 return Err(ScionError::new(
                     ErrorCode::InvalidArgument,
                     format!(
@@ -291,12 +272,10 @@ impl Importer<'_> {
             .parents
             .iter()
             .map(|p| {
-                self.mapped.get(p).copied().ok_or_else(|| {
-                    ScionError::new(
-                        ErrorCode::Unavailable,
-                        format!("parent {p} is not imported"),
-                    )
-                })
+                self.mapped
+                    .get(p)
+                    .copied()
+                    .ok_or_else(|| internal(format!("parent {p} is not imported")))
             })
             .collect::<Result<Vec<_>>>()?;
         let parts = CreateChangesetParts {
@@ -314,14 +293,9 @@ impl Importer<'_> {
             expected_root_tree: None,
             import_mode: true,
         };
-        let resp = self
-            .client
-            .write()
+        self.rpc
             .create_changeset(v1::CreateChangesetRequest::from(&parts))
             .await
-            .map_err(status_err)?
-            .into_inner();
-        parse_id(&resp.changeset_id, "changeset_id")
     }
 
     /// The Scion id and size of git blob `oid`; content of blobs not known to be on the
@@ -355,22 +329,8 @@ impl Importer<'_> {
         }
         let ids: Vec<ObjectId> = pending.keys().copied().collect();
         for chunk in ids.chunks(HAS_OBJECTS_CHUNK) {
-            let resp = self
-                .client
-                .objects()
-                .has_objects(v1::HasObjectsRequest {
-                    ids: chunk.iter().map(id_bytes).collect(),
-                })
-                .await
-                .map_err(status_err)?
-                .into_inner();
-            if resp.present.len() != chunk.len() {
-                return Err(ScionError::new(
-                    ErrorCode::Unavailable,
-                    "HasObjects answered a different number of ids",
-                ));
-            }
-            for (id, present) in chunk.iter().zip(resp.present) {
+            let present = self.rpc.has_objects(chunk).await?;
+            for (id, present) in chunk.iter().zip(present) {
                 if present {
                     pending.remove(id);
                     self.present.insert(*id);
@@ -404,14 +364,8 @@ impl Importer<'_> {
                 data: data.to_vec(),
             })
             .collect();
-        let resp = self
-            .client
-            .write()
-            .upload_objects(futures::stream::iter(items))
-            .await
-            .map_err(status_err)?
-            .into_inner();
-        for r in &resp.results {
+        let results = self.rpc.upload(&items).await?;
+        for r in &results {
             if r.status != v1::ItemStatus::Ok as i32 {
                 let code = ErrorCode::parse(&r.error_code).unwrap_or(ErrorCode::Unavailable);
                 let id = parse_id(&r.id, "id")
@@ -423,9 +377,8 @@ impl Importer<'_> {
                 ));
             }
         }
-        if resp.results.len() != ids.len() {
-            return Err(ScionError::new(
-                ErrorCode::Unavailable,
+        if results.len() != ids.len() {
+            return Err(internal(
                 "UploadObjects answered a different number of items",
             ));
         }
@@ -436,54 +389,17 @@ impl Importer<'_> {
 
     /// Create or fast-forward the target ref to `tip`; returns the ref version.
     async fn update_target(&mut self, tip: ObjectId, git_tip: &GitOid) -> Result<u64> {
-        let name = self.opts.target_ref.as_str().to_owned();
-        let current = self
-            .client
-            .objects()
-            .resolve_ref(v1::ResolveRefRequest {
-                name: name.clone(),
-                at_version: None,
-            })
-            .await;
-        let (cur, version) = match current {
-            Ok(r) => {
-                let r = r.into_inner();
-                (parse_id(&r.target, "target")?, r.version)
-            }
-            Err(s) => {
-                let e = status_err(s);
-                if e.code != ErrorCode::NotFound {
-                    return Err(e);
-                }
-                let resp = self
-                    .client
-                    .refs()
-                    .create_ref(v1::CreateRefRequest {
-                        name,
-                        target: id_bytes(&tip),
-                        reason: format!("scion-import git:{git_tip}"),
-                    })
-                    .await
-                    .map_err(status_err)?
-                    .into_inner();
-                return Ok(resp.version);
-            }
+        let name = self.opts.target_ref.as_str();
+        let Some((cur, version)) = self.rpc.resolve_ref(name).await? else {
+            return self
+                .rpc
+                .create_ref(name, &tip, &format!("scion-import git:{git_tip}"))
+                .await;
         };
         if cur == tip {
             return Ok(version);
         }
-        let ff = self
-            .client
-            .query()
-            .is_ancestor(v1::IsAncestorRequest {
-                a: id_bytes(&cur),
-                b: id_bytes(&tip),
-            })
-            .await
-            .map_err(status_err)?
-            .into_inner()
-            .result;
-        let force = if ff {
+        let force = if self.rpc.is_ancestor(&cur, &tip).await? {
             false
         } else if self.is_bootstrap_root(&cur).await? {
             true
@@ -496,40 +412,16 @@ impl Importer<'_> {
                 ),
             ));
         };
-        let resp = self
-            .client
-            .refs()
-            .update_ref(v1::UpdateRefRequest {
-                name,
-                expected_version: version,
-                new_target: id_bytes(&tip),
-                allow_non_fast_forward: force,
-            })
-            .await
-            .map_err(status_err)?
-            .into_inner();
-        Ok(resp.version)
+        self.rpc.update_ref(name, version, &tip, force).await
     }
 
     /// True when `id` is the repository's bootstrap root changeset (implementation-defined
     /// 6.5): no parents, the empty root tree and the root change id.
     async fn is_bootstrap_root(&mut self, id: &ObjectId) -> Result<bool> {
-        let resp = self
-            .client
-            .query()
-            .get_changesets(v1::GetChangesetsRequest {
-                ids: vec![id_bytes(id)],
-            })
-            .await
-            .map_err(status_err)?
-            .into_inner();
-        let Some(item) = resp.items.first() else {
+        let Some(enc) = self.rpc.changeset_encoding(id).await? else {
             return Ok(false);
         };
-        let Some(v1::changeset_item::View::Encoded(enc)) = &item.view else {
-            return Ok(false);
-        };
-        let cs = Changeset::decode(enc)?;
+        let cs = Changeset::decode(&enc)?;
         Ok(cs.parents.is_empty()
             && cs.root_tree == empty_tree_id()
             && cs.change_id.0 == bootstrap_root_change_id())

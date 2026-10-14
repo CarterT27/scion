@@ -162,6 +162,21 @@ pub fn git_commits(git_dir: &Path, git_ref: &str) -> Result<Vec<GitCommitView>> 
     Ok(out)
 }
 
+/// The commits reachable from any of `refs`, deduplicated, parents before children (the
+/// concatenation of each ref's topological order without repeats keeps that property).
+pub fn git_commits_for_refs(git_dir: &Path, refs: &[String]) -> Result<Vec<GitCommitView>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for r in refs {
+        for c in git_commits(git_dir, r)? {
+            if seen.insert(c.id.clone()) {
+                out.push(c);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// One file of a git tree, mapped to Scion terms.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedFile {
@@ -495,14 +510,24 @@ pub async fn check_fidelity(
     git_dir: &Path,
     git_ref: &str,
 ) -> Result<FidelityReport> {
-    let repo = GitRepo::open(git_dir)?;
     let commits = git_commits(git_dir, git_ref)?;
+    check_fidelity_commits(client, git_dir, &commits).await
+}
+
+/// [`check_fidelity`] over an explicit commit list in topological order (parents before
+/// children), e.g. from [`git_commits_for_refs`].
+pub async fn check_fidelity_commits(
+    client: &ScionClient,
+    git_dir: &Path,
+    commits: &[GitCommitView],
+) -> Result<FidelityReport> {
+    let repo = GitRepo::open(git_dir)?;
     let mut reader = ScionReader::new(client);
     let mut report = FidelityReport::default();
     let mut mapped: HashMap<String, ObjectId> = HashMap::new();
     let mut git_blobs: HashMap<GitOid, Bytes> = HashMap::new();
     let mut verified: HashMap<ObjectId, ()> = HashMap::new();
-    for c in &commits {
+    for c in commits {
         report.commits_checked += 1;
         let mut errs: Vec<String> = Vec::new();
         let Some(cs_id) = resolve_git(client, &c.id).await? else {
