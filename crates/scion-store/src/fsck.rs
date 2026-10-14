@@ -28,10 +28,12 @@
 use crate::repo::ObjectRepo;
 use crate::types::{ChangesetRow, Consistency, DerivedKey};
 use bytes::Bytes;
+use lru::LruCache;
 use scion_core::{ErrorCode, Kind, Mode, ObjectId, Result, ScionError, empty_tree_id};
 use scion_object::{Canonical, Changeset, DeltaOp, Meta, Tree, TreeEntry};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 /// fsck options.
@@ -94,6 +96,12 @@ const COMMIT_GRAPH: &str = "commit_graph";
 const PATH_INDEX: &str = "path_index";
 const GIT_MAPPING: &str = "git_mapping";
 
+/// Decoded trees fsck keeps while walking deltas (consecutive changesets share most trees).
+const TREE_CACHE_ENTRIES: NonZeroUsize = match NonZeroUsize::new(4096) {
+    Some(n) => n,
+    None => NonZeroUsize::MIN,
+};
+
 /// "No limit" for list reads; SQL backends bind limits as INT8, so stay within `i64`.
 const UNBOUNDED: usize = i64::MAX as usize;
 
@@ -115,6 +123,7 @@ struct Checker<'a> {
     rows: HashMap<ObjectId, Option<ChangesetRow>>,
     decoded: HashMap<ObjectId, Option<Arc<Changeset>>>,
     verified: HashSet<ObjectId>,
+    trees: LruCache<ObjectId, Arc<Tree>>,
 }
 
 fn join(prefix: &[u8], name: &[u8]) -> Vec<u8> {
@@ -175,13 +184,32 @@ impl<'a> Checker<'a> {
     }
 
     /// A tree for the delta walk; violations are recorded and `None` returned when it cannot
-    /// be read.
+    /// be read. Trees are read from storage (verified), never from the repo's decoded LRU, so
+    /// a tree cached before its row or bytes went bad is still reported; fsck keeps its own
+    /// bounded cache.
     async fn tree(&mut self, cs: &ObjectId, id: &ObjectId) -> Result<Option<Arc<Tree>>> {
         if *id == empty_tree_id() {
             return Ok(Some(Arc::new(Tree::default())));
         }
-        match self.objects.get_tree(id).await {
-            Ok(t) => Ok(Some(t)),
+        if let Some(t) = self.trees.get(id) {
+            return Ok(Some(t.clone()));
+        }
+        if id.kind() != Kind::Tree {
+            self.push(Violation::BadEncoding { id: *id });
+            return Ok(None);
+        }
+        match self.objects.get(id).await {
+            Ok(raw) => match canonical::<Tree>(&raw) {
+                Some(t) => {
+                    let t = Arc::new(t);
+                    self.trees.put(*id, t.clone());
+                    Ok(Some(t))
+                }
+                None => {
+                    self.push(Violation::BadEncoding { id: *id });
+                    Ok(None)
+                }
+            },
             Err(e) => self.object_error(cs, id, "tree", e).map(|()| None),
         }
     }
@@ -603,6 +631,7 @@ pub async fn fsck(objects: &ObjectRepo, opts: &FsckOptions) -> Result<Vec<Violat
         rows: HashMap::new(),
         decoded: HashMap::new(),
         verified: HashSet::new(),
+        trees: LruCache::new(TREE_CACHE_ENTRIES),
     };
     let meta = objects.storage().meta.clone();
     let ids = meta.changesets_by_prefix("", UNBOUNDED).await?;

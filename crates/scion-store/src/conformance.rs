@@ -938,6 +938,29 @@ async fn meta_derived(s: Arc<dyn MetaStore>) -> CaseResult {
         "delete again",
     )?;
     ensure_eq!(n, 0, "nothing left to delete");
+    // A deleted key re-derived for another source belongs to that source only.
+    ok(
+        s.put_derived(vec![drow(k1.clone(), b"v1'", Some(other_src))])
+            .await,
+        "re-put k1",
+    )?;
+    let n = ok(
+        s.delete_derived_by_source(&["blame".to_owned()], &src)
+            .await,
+        "delete old source",
+    )?;
+    ensure_eq!(n, 0, "the old source owns nothing");
+    let n = ok(
+        s.delete_derived_by_source(&[], &other_src).await,
+        "delete no types",
+    )?;
+    ensure_eq!(n, 0, "an empty type list deletes nothing");
+    let n = ok(
+        s.delete_derived_by_source(&["blame".to_owned(), "history".to_owned()], &other_src)
+            .await,
+        "delete new source",
+    )?;
+    ensure_eq!(n, 2, "k1 (re-derived) and k4 belong to the other source");
     Ok(())
 }
 

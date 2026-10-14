@@ -60,10 +60,51 @@ struct Tables {
     ref_log: OrdMap<RefName, OrdMap<u64, RefLogRow>>,
     landed: OrdMap<(RefName, ChangeId), LandedRow>,
     derived: OrdMap<DKey, DerivedRow>,
+    /// Secondary index `derived_by_source` (storage-semantics 2): source object -> keys.
+    derived_by_source: OrdMap<ObjectId, OrdSet<DKey>>,
     leases: OrdMap<DKey, (String, SystemTime)>,
     redactions: OrdMap<ObjectId, RedactionRow>,
     redaction_epoch: u64,
     audit: Vector<AuditRow>,
+}
+
+impl Tables {
+    /// `INSERT INTO derived ... ON CONFLICT DO NOTHING`; true when the row was inserted.
+    fn insert_derived(&mut self, row: DerivedRow) -> bool {
+        let k = dkey(&row.key);
+        if self.derived.contains_key(&k) {
+            return false;
+        }
+        if let Some(src) = row.source_object {
+            let mut keys = self
+                .derived_by_source
+                .get(&src)
+                .cloned()
+                .unwrap_or_default();
+            keys.insert(k.clone());
+            self.derived_by_source.insert(src, keys);
+        }
+        self.derived.insert(k, row);
+        true
+    }
+
+    /// Delete one derived row (and its index entry); true when it existed.
+    fn remove_derived(&mut self, k: &DKey) -> bool {
+        let Some(row) = self.derived.remove(k) else {
+            return false;
+        };
+        if let Some(src) = row.source_object
+            && let Some(mut keys) = self.derived_by_source.get(&src).cloned()
+        {
+            keys.remove(k);
+            if keys.is_empty() {
+                self.derived_by_source.remove(&src);
+            } else {
+                self.derived_by_source.insert(src, keys);
+            }
+        }
+        true
+    }
 }
 
 /// Mutable state guarded by the single mutex.
@@ -233,7 +274,7 @@ impl MemMetaStore {
     /// Test support: delete a derived row, bypassing every rule.
     pub fn remove_derived_raw(&self, k: &DerivedKey) -> bool {
         let mut removed = false;
-        self.tamper(|t| removed = t.derived.remove(&dkey(k)).is_some());
+        self.tamper(|t| removed = t.remove_derived(&dkey(k)));
         removed
     }
 
@@ -437,11 +478,7 @@ impl MetaStore for MemMetaStore {
                 }
             }
             for row in b.derived {
-                let k = dkey(&row.key);
-                if !t.derived.contains_key(&k) {
-                    t.derived.insert(k, row);
-                    changed = true;
-                }
+                changed |= t.insert_derived(row);
             }
             Ok((outcome, changed))
         })
@@ -580,11 +617,7 @@ impl MetaStore for MemMetaStore {
         self.write(|t| {
             let mut changed = false;
             for row in rows {
-                let k = dkey(&row.key);
-                if !t.derived.contains_key(&k) {
-                    t.derived.insert(k, row);
-                    changed = true;
-                }
+                changed |= t.insert_derived(row);
             }
             Ok(((), changed))
         })
@@ -592,14 +625,20 @@ impl MetaStore for MemMetaStore {
 
     async fn delete_derived_by_source(&self, types: &[String], source: &ObjectId) -> Result<u64> {
         self.write(|t| {
+            // Served by the derived_by_source index: O(rows of this source), as SPEC 13.1
+            // requires redaction cost to be independent of history size.
             let doomed: Vec<DKey> = t
-                .derived
-                .iter()
-                .filter(|(k, r)| r.source_object.as_ref() == Some(source) && types.contains(&k.0))
-                .map(|(k, _)| k.clone())
-                .collect();
+                .derived_by_source
+                .get(source)
+                .map(|keys| {
+                    keys.iter()
+                        .filter(|k| types.contains(&k.0))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
             for k in &doomed {
-                t.derived.remove(k);
+                t.remove_derived(k);
             }
             Ok((doomed.len() as u64, !doomed.is_empty()))
         })
