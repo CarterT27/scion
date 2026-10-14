@@ -167,3 +167,28 @@ async fn lease_lost_mid_derivation_both_write_one_row() {
     assert_eq!(a, expected_chain(1, 0)[0]);
     assert_eq!(handles.meta.table_counts().derived, 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn single_lazy_worker_serializes_without_deadlock() {
+    let (storage, handles) = storage();
+    let mut reg = Registry::empty();
+    reg.register_lazy(Arc::new(ChainType::new("test_chain", 1)));
+    let cfg = scion_derived::DeriveConfig {
+        lazy_workers: 1,
+        ..scion_derived::DeriveConfig::default()
+    };
+    let eng = scion_derived::DerivedEngine::new(repo(&storage), reg, cfg, clock());
+    let expected = expected_chain(1, 40);
+    let mut tasks = Vec::new();
+    for k in [10u64, 40, 25, 3] {
+        let eng = eng.clone();
+        tasks.push(tokio::spawn(async move {
+            (k, eng.get("test_chain", None, &ck(k)).await)
+        }));
+    }
+    for t in tasks {
+        let (k, v) = t.await.unwrap();
+        assert_eq!(v.unwrap(), expected[k as usize]);
+    }
+    assert_eq!(handles.meta.table_counts().derived, 41);
+}

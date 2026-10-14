@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
+use tokio::sync::Semaphore;
 use tracing::debug;
 
 /// Runs eager types at changeset creation and lazy types on query (SPEC 9.1).
@@ -34,6 +35,8 @@ pub struct DerivedEngine {
     ctx: StoreDeriveCtx,
     metrics: RwLock<Option<Arc<dyn DeriveMetrics>>>,
     seq: AtomicU64,
+    /// Bounds concurrent lazy derivations (SPEC 6.1 `derive.lazy_workers`).
+    workers: Semaphore,
 }
 
 /// One entry of the lazy work stack: a key and, once expanded, its dependency keys.
@@ -86,6 +89,7 @@ impl DerivedEngine {
         clock: Arc<dyn Clock>,
     ) -> Arc<Self> {
         let ctx = StoreDeriveCtx::new(objects.clone());
+        let workers = Semaphore::new(cfg.lazy_workers.max(1));
         Arc::new(DerivedEngine {
             objects,
             registry,
@@ -94,6 +98,7 @@ impl DerivedEngine {
             ctx,
             metrics: RwLock::new(None),
             seq: AtomicU64::new(0),
+            workers,
         })
     }
 
@@ -143,6 +148,15 @@ impl DerivedEngine {
     pub async fn get(&self, ty: &str, version: Option<u32>, key: &[u8]) -> Result<Bytes> {
         let version = self.resolve_version(ty, version)?;
         if let Some(t) = self.registry.lazy(ty, version) {
+            if let Some(v) = read_stored(&self.objects, &Self::dkey(ty, version, key)).await? {
+                return Ok(v);
+            }
+            // At most `lazy_workers` derivations run at once; the walk re-checks the stored
+            // value after the wait.
+            let _permit =
+                self.workers.acquire().await.map_err(|_| {
+                    ScionError::new(ErrorCode::Unavailable, "derive workers shut down")
+                })?;
             return self
                 .derive_lazy(t, version, Bytes::copy_from_slice(key))
                 .await;
