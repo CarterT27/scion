@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 /// The smallest refresh period, so a zero bound cannot spin.
-const MIN_BOUND: Duration = Duration::from_millis(10);
+const MIN_PERIOD: Duration = Duration::from_millis(5);
 
 /// Redacted ids known to this server and the epoch they reflect (SPEC 13.3).
 pub struct RedactionSet {
@@ -156,15 +156,22 @@ impl RedactionSet {
 
     /// Refresh at least every `bound`, and immediately when [`RedactionSet::observe`] sees a
     /// newer epoch (SPEC 13.3). The task stops when the set is dropped or the handle aborted.
+    ///
+    /// Refreshes start every `bound / 2` (start to start, not after the previous refresh
+    /// finished), so a redaction committed just after one refresh read its snapshot is in the
+    /// set by the next one: within `bound` of its commit as long as a refresh takes less than
+    /// `bound / 2` (SPEC 13.3 `effective_by = commit_time + propagation_bound_ms`).
     pub fn spawn_refresher(self: &Arc<Self>, bound: Duration) -> tokio::task::JoinHandle<()> {
-        let bound = bound.max(MIN_BOUND);
+        let period = (bound / 2).max(MIN_PERIOD);
         self.refresher.store(true, Ordering::Release);
         let weak = Arc::downgrade(self);
         let notify = self.notify.clone();
         tokio::spawn(async move {
+            let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(bound) => {}
+                    _ = tick.tick() => {}
                     _ = notify.notified() => {}
                 }
                 let Some(me) = weak.upgrade() else {
@@ -299,6 +306,40 @@ mod tests {
         while !set.contains(&a) {
             assert!(Instant::now() < deadline, "periodic refresh did not run");
             tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        task.abort();
+    }
+
+    /// SPEC 13.3: with a slow metadata store (each refresh takes 40% of the bound), a
+    /// redaction committed right after a refresh read its snapshot is still in the set within
+    /// `propagation_bound` of the commit.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn slow_refreshes_still_meet_the_propagation_bound() {
+        let bound = Duration::from_millis(1000);
+        let (storage, mem) = scion_store::Storage::in_memory(MemOptions::default());
+        let a = object(&mem.meta, b"a").await;
+        let set = RedactionSet::new(storage.meta.clone());
+        set.refresh().await.unwrap();
+        storage.faults.arm(
+            "meta.list_redactions.before",
+            scion_core::FaultAction::Delay(Duration::from_millis(400)),
+            None,
+        );
+        let task = set.spawn_refresher(bound);
+        // Periodic refreshes start every bound/2 and read their snapshot 400ms later (at 900ms,
+        // 1400ms, ...). Commit just after the second read; a refresher that waited a full bound
+        // after each refresh would read next at 2800ms.
+        let t0 = tokio::time::Instant::now();
+        tokio::time::sleep_until(t0 + Duration::from_millis(1420)).await;
+        mem.meta.redact(txn(vec![a])).await.unwrap();
+        let committed = tokio::time::Instant::now();
+        while !set.contains(&a) {
+            assert!(
+                committed.elapsed() <= bound,
+                "redaction not visible within the bound ({:?})",
+                committed.elapsed()
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
         task.abort();
     }

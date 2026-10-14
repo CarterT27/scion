@@ -1,9 +1,12 @@
 //! Load shedding and per-principal rate limits (SPEC 10.5; PLAN 6.11 `[rate_limit]`; P23).
 //!
-//! - [`ShedService`]: a tower `ConcurrencyLimit` over one semaphore shared by every service of
-//!   the server (`rate_limit.max_inflight` permits) behind `LoadShed`, so a call that finds no
-//!   free permit fails RESOURCE_EXHAUSTED immediately instead of queueing (the server sheds
-//!   load before its dependencies saturate).
+//! - [`ShedService`]: a concurrency limit over one semaphore shared by every service of the
+//!   server (`rate_limit.max_inflight` permits) with load-shed semantics (tower
+//!   `ConcurrencyLimit` + `LoadShed`): a call that finds no free permit fails
+//!   RESOURCE_EXHAUSTED immediately instead of queueing, so the server sheds load before its
+//!   dependencies saturate. Unlike tower's `ConcurrencyLimit`, which releases the permit when
+//!   the response *headers* are ready, the permit is held until the response body (the whole
+//!   stream of a streaming RPC such as `GetObjects`) has finished or been dropped.
 //! - [`GovernorService`]: a governor keyed limiter, `rate_limit.per_principal_rps` with burst
 //!   `rate_limit.burst`, keyed by the authenticated principal (unauthenticated calls are keyed by
 //!   peer address). Exceeding it fails RESOURCE_EXHAUSTED.
@@ -15,13 +18,12 @@ use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use scion_core::ScionError;
 use std::convert::Infallible;
 use std::num::NonZeroU32;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::ServiceExt;
-use tower::limit::ConcurrencyLimit;
-use tower::load_shed::LoadShed;
 use tower_service::Service;
 
 /// How many limiter checks happen between purges of idle per-principal state.
@@ -67,21 +69,20 @@ impl Limits {
     }
 }
 
-/// Load shedding: `LoadShed<ConcurrencyLimit>` over the shared in-flight semaphore; an
-/// overloaded call fails RESOURCE_EXHAUSTED (SPEC 10.5).
+/// Load shedding over the shared in-flight semaphore: a call that cannot take a permit at once
+/// fails RESOURCE_EXHAUSTED (SPEC 10.5). The permit lives until the response body ends.
 #[derive(Clone)]
 pub struct ShedService {
-    inner: LoadShed<ConcurrencyLimit<BoxSvc>>,
+    inner: BoxSvc,
+    inflight: Arc<Semaphore>,
 }
 
 impl ShedService {
     /// Wrap `inner` with the shared in-flight limit of `limits`.
     pub fn new(inner: BoxSvc, limits: &Limits) -> Self {
         ShedService {
-            inner: LoadShed::new(ConcurrencyLimit::with_semaphore(
-                inner,
-                limits.inflight.clone(),
-            )),
+            inner,
+            inflight: limits.inflight.clone(),
         }
     }
 }
@@ -96,23 +97,53 @@ impl Service<HttpReq> for ShedService {
     }
 
     fn call(&mut self, req: HttpReq) -> BoxFut {
-        let svc = self.inner.clone();
+        let Ok(permit) = self.inflight.clone().try_acquire_owned() else {
+            let e = ScionError::resource_exhausted("server overloaded; retry later");
+            return Box::pin(std::future::ready(Ok(error_response(&e))));
+        };
+        let inner = self.inner.clone();
         Box::pin(async move {
-            match svc.oneshot(req).await {
-                Ok(resp) => Ok(resp),
-                Err(e) => {
-                    let err = if e.is::<tower::load_shed::error::Overloaded>() {
-                        ScionError::resource_exhausted("server overloaded; retry later")
-                    } else {
-                        ScionError::unavailable(
-                            scion_core::subcode::STORE_UNAVAILABLE,
-                            format!("request failed: {e}"),
-                        )
-                    };
-                    Ok(error_response(&err))
-                }
-            }
+            let resp = inner.oneshot(req).await?;
+            Ok(resp.map(|body| {
+                tonic::body::Body::new(PermitBody {
+                    inner: body,
+                    permit: Some(permit),
+                })
+            }))
         })
+    }
+}
+
+/// A response body holding an in-flight permit until its end (or until it is dropped).
+struct PermitBody {
+    inner: tonic::body::Body,
+    permit: Option<OwnedSemaphorePermit>,
+}
+
+impl http_body::Body for PermitBody {
+    type Data = bytes::Bytes;
+    type Error = tonic::Status;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<bytes::Bytes>, tonic::Status>>> {
+        let this = &mut *self;
+        let polled = Pin::new(&mut this.inner).poll_frame(cx);
+        match &polled {
+            Poll::Ready(None) | Poll::Ready(Some(Err(_))) => this.permit = None,
+            Poll::Ready(Some(Ok(frame))) if frame.is_trailers() => this.permit = None,
+            _ => {}
+        }
+        polled
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
     }
 }
 
@@ -215,7 +246,59 @@ mod tests {
         // Capacity is back once the calls finished.
         let d = svc.oneshot(req()).await.unwrap();
         assert_eq!(code(&d), None);
+        drop(d);
         assert_eq!(limits.available_permits(), 2);
+    }
+
+    /// A streaming response keeps its permit until the stream has ended, not just until the
+    /// headers were sent.
+    #[tokio::test]
+    async fn streaming_body_holds_its_permit_until_the_end() {
+        use http_body_util::BodyExt;
+        let limits = Limits::new(&RateLimitSection {
+            per_principal_rps: 0,
+            burst: 0,
+            max_inflight: 1,
+        });
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<Result<http_body::Frame<bytes::Bytes>, tonic::Status>>(4);
+        let rx = Arc::new(parking_lot::Mutex::new(Some(rx)));
+        let streaming: BoxSvc =
+            BoxCloneSyncService::new(tower::service_fn(move |_req: HttpReq| {
+                let rx = rx.lock().take();
+                async move {
+                    let body = match rx {
+                        Some(rx) => tonic::body::Body::new(http_body_util::StreamBody::new(
+                            tokio_stream::wrappers::ReceiverStream::new(rx),
+                        )),
+                        None => tonic::body::Body::empty(),
+                    };
+                    Ok::<_, Infallible>(HttpResp::new(body))
+                }
+            }));
+        let svc = ShedService::new(streaming, &limits);
+        let resp = svc.clone().oneshot(req()).await.unwrap();
+        assert_eq!(code(&resp), None);
+        assert_eq!(limits.available_permits(), 0);
+        // Headers are out but the stream is still open: no capacity.
+        let shed = svc.clone().oneshot(req()).await.unwrap();
+        assert_eq!(code(&shed), Some(tonic::Code::ResourceExhausted));
+        drop(shed);
+
+        let mut body = resp.into_body();
+        tx.send(Ok(http_body::Frame::data(bytes::Bytes::from_static(b"x"))))
+            .await
+            .unwrap();
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
+        tx.send(Ok(http_body::Frame::trailers(trailers)))
+            .await
+            .unwrap();
+        drop(tx);
+        assert!(body.frame().await.unwrap().unwrap().is_data());
+        assert_eq!(limits.available_permits(), 0);
+        assert!(body.frame().await.unwrap().unwrap().is_trailers());
+        assert_eq!(limits.available_permits(), 1, "released at the trailers");
     }
 
     #[tokio::test]

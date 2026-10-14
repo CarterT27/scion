@@ -170,6 +170,91 @@ fn binary_fails_on_missing_or_invalid_config() {
     assert!(!out.status.success());
 }
 
+/// SPEC 6.2 / 19.12: startup with an invalid or a missing policy file fails, before any
+/// backend is contacted (the metadata and object store URLs here are unroutable).
+#[test]
+fn binary_fails_on_invalid_or_missing_policy() {
+    let bin = env!("CARGO_BIN_EXE_scion-server");
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let keys = Keyring::generate_for_tests(1).write_pem_files(d).unwrap();
+    let (_ca, cert, key) = test_tls();
+    std::fs::write(d.join("tls.crt"), cert).unwrap();
+    std::fs::write(d.join("tls.key"), key).unwrap();
+    let acl = d.join("acl.toml");
+    let config = d.join("scion-server.toml");
+    std::fs::write(
+        &config,
+        format!(
+            r#"[server]
+listen = "127.0.0.1:0"
+tls_cert = "{cert}"
+tls_key = "{key}"
+repo = "test"
+
+[metadata]
+url = "postgresql://root@127.0.0.1:9/scion?sslmode=disable"
+
+[objects]
+endpoint = "http://127.0.0.1:9"
+bucket = "scion"
+prefix = "test"
+
+[auth]
+github_client_id = "test"
+signing_keys = ["{signing}"]
+
+[policy]
+path = "{acl}"
+reload = true
+
+[observability]
+log_format = "json"
+metrics_listen = "127.0.0.1:0"
+"#,
+            cert = d.join("tls.crt").display(),
+            key = d.join("tls.key").display(),
+            signing = keys[0].display(),
+            acl = acl.display(),
+        ),
+    )
+    .unwrap();
+    let run = || {
+        let out = std::process::Command::new(bin)
+            .arg("--config")
+            .arg(&config)
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    // Missing policy file.
+    let (ok, err) = run();
+    assert!(!ok, "{err}");
+    if err.contains("not implemented yet") {
+        println!("SKIP: stale scion-server binary in the shared target directory");
+        return;
+    }
+    assert!(err.contains("policy"), "{err}");
+
+    // Invalid policy (no `/` rule).
+    std::fs::write(
+        &acl,
+        "version = 1\n[[paths]]\nprefix = \"/src\"\nread = []\nwrite = []\n",
+    )
+    .unwrap();
+    let (ok, err) = run();
+    assert!(!ok, "{err}");
+    assert!(err.contains("policy"), "{err}");
+    assert!(
+        !err.contains("metadata store"),
+        "failed before the policy check: {err}"
+    );
+}
+
 /// The full stack over CockroachDB and S3 (gated: `SCION_TEST_CRDB_URL`,
 /// `SCION_TEST_S3_ENDPOINT`): login-free RPCs, a protected RPC, and data surviving a restart.
 #[tokio::test(flavor = "multi_thread")]

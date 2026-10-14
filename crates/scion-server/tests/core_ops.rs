@@ -331,3 +331,58 @@ async fn rpc_log_events_have_required_fields() {
             .is_empty()
     );
 }
+
+/// SPEC 13.3 server propagation: a redaction committed by another server (straight into the
+/// shared metadata store) reaches this server's redaction set, the `scion-redaction-epoch`
+/// trailer and `scion_redaction_epoch{tier=server}` within `redaction.propagation_bound_ms`.
+#[tokio::test(flavor = "multi_thread")]
+async fn redaction_epoch_propagates_within_the_bound() {
+    let bound = std::time::Duration::from_millis(400);
+    let srv = InProcessServer::start(ServerTestOpts {
+        tweak: Some(Arc::new(move |c| {
+            c.redaction.propagation_bound_ms = bound.as_millis() as u64;
+        })),
+        ..opts()
+    })
+    .await;
+    let ctx = srv.ctx();
+    let c = srv.client(Some(&alice())).await;
+    let r = c.auth().who_am_i(v1::WhoAmIRequest {}).await.unwrap();
+    assert_eq!(epochs(r.metadata()).unwrap().redaction, 0);
+
+    let (id, _) = ctx
+        .objects
+        .put_blob(Bytes::from_static(b"to be redacted"))
+        .await
+        .unwrap();
+    let epoch = ctx
+        .storage
+        .meta
+        .redact(scion_store::RedactTxn {
+            ids: vec![id],
+            reason: "test".into(),
+            actor: "github:admin".into(),
+            at: std::time::SystemTime::now(),
+            purge_after: std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
+        })
+        .await
+        .unwrap();
+    let committed = std::time::Instant::now();
+    while !ctx.redactions.contains(&id) {
+        assert!(
+            committed.elapsed() <= bound,
+            "not propagated within {bound:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(ctx.redactions.epoch(), epoch);
+    let r = c.auth().who_am_i(v1::WhoAmIRequest {}).await.unwrap();
+    assert_eq!(epochs(r.metadata()).unwrap().redaction, epoch);
+    assert_eq!(
+        ctx.metrics
+            .redaction_epoch
+            .with_label_values(&["server"])
+            .get(),
+        epoch as i64
+    );
+}
