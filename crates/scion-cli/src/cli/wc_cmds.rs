@@ -26,6 +26,14 @@ async fn open(ctx: &mut Ctx<'_>) -> CliResult<WorkingCopy> {
     Ok(WorkingCopy::open(&root, client, WcOptions::default())?)
 }
 
+/// [`open`] with a lazily connected client: no server contact unless the command issues an
+/// RPC (SPEC 11.5: `status`/`diff` work offline when every needed tree is cached).
+fn open_lazy(ctx: &mut Ctx<'_>) -> CliResult<WorkingCopy> {
+    let root = ctx.require_root()?;
+    let client = ctx.lazy_client(Some(&root))?;
+    Ok(WorkingCopy::open(&root, client, WcOptions::default())?)
+}
+
 fn paths_text(v: &[RepoPath]) -> Vec<String> {
     v.iter().map(path_text).collect()
 }
@@ -166,7 +174,7 @@ pub(crate) async fn sparse(ctx: &mut Ctx<'_>, c: &SparseCmd) -> CliResult<Reply>
 
 /// `scion status` (SPEC 11.5).
 pub(crate) async fn status(ctx: &mut Ctx<'_>) -> CliResult<Reply> {
-    let mut wc = open(ctx).await?;
+    let mut wc = open_lazy(ctx)?;
     let r = wc.status().await?;
     let st = wc.state().clone();
     let conflicts = unresolved(&st);
@@ -219,7 +227,7 @@ fn status_letter(s: &str) -> char {
 
 /// `scion diff`: changed files against the base (SPEC 11.5).
 pub(crate) async fn diff(ctx: &mut Ctx<'_>) -> CliResult<Reply> {
-    let mut wc = open(ctx).await?;
+    let mut wc = open_lazy(ctx)?;
     let changes = wc.diff().await?;
     let mut human = String::new();
     for c in &changes {

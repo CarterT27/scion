@@ -200,6 +200,54 @@ async fn corrupt_objects_are_refused_with_integrity() {
 }
 
 #[tokio::test]
+async fn corrupt_cached_tree_is_refetched_within_the_same_command() {
+    // SPEC 16.1 class 7 at the client tier (amendment W6-3): a cached tree whose bytes fail
+    // the digest is discarded and transparently re-fetched by the command that reads it.
+    let env = Env::start().await;
+    let f = files(&[("a.txt", 1, "one\n"), ("sub/b.txt", 1, "two\n")]);
+    env.commit(&f, "main");
+    let dir = tmp();
+    let root = dir.path().join("wc");
+    let wc = WorkingCopy::checkout(
+        env.client.clone(),
+        &root,
+        "main",
+        Vec::new(),
+        WcOptions::default(),
+    )
+    .await
+    .unwrap();
+    drop(wc);
+    let hex = dir_tree_id(&f, "sub").hex();
+    let cached = root
+        .join(".scion/cache/objects/t")
+        .join(&hex[..2])
+        .join(&hex);
+    let original = std::fs::read(&cached).unwrap();
+    let mut bad = original.clone();
+    *bad.last_mut().unwrap() ^= 0x01;
+    std::fs::write(&cached, &bad).unwrap();
+
+    let mut wc = WorkingCopy::open(&root, env.client.clone(), WcOptions::default()).unwrap();
+    let calls = env.client.calls();
+    let st = wc.status().await.unwrap();
+    assert!(st.is_clean(), "{st:?}");
+    assert!(
+        env.client.calls() > calls,
+        "the corrupt tree was re-fetched"
+    );
+    assert_eq!(
+        std::fs::read(&cached).unwrap(),
+        original,
+        "a good copy replaced it"
+    );
+    // Now cached and intact: status needs no server call.
+    let calls = env.client.calls();
+    assert!(wc.status().await.unwrap().is_clean());
+    assert_eq!(env.client.calls(), calls);
+}
+
+#[tokio::test]
 async fn upstream_down_fails_unavailable_without_writes() {
     let env = Env::start().await;
     let f = files(&[("a.txt", 1, "x\n")]);

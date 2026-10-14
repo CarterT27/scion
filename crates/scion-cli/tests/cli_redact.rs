@@ -4,9 +4,9 @@
 //! changeset ids unchanged, and every redact action produces audit entries with actor and
 //! reason.
 //!
-//! The oracle mirrors `scion_refmodel::MRepo::all_versions` (BFS from the commit over all
-//! parents, every distinct content the path holds as a file) on the generated structural
-//! history; scion-cli has no direct dev-dependency on scion-refmodel (amendment requested).
+//! The oracle is `scion_refmodel::MRepo::all_versions` (BFS from the commit over all parents,
+//! every distinct content the path holds as a file) on the generated structural history
+//! (amendment W6-2).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod cli_support;
@@ -14,38 +14,29 @@ mod cli_support;
 use cli_support::{Harness, scion};
 use scion_conformance::{TestCluster, Via};
 use scion_core::ObjectId;
+use scion_refmodel::MRepo;
 use scion_testkit::{CorpusSpec, GenRepo, generate};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
-/// Reference-model `all_versions(c, p)`: distinct contents held at `p` by any commit reachable
-/// from `c`, first-seen in BFS order (SPEC 13.2 "every distinct blob the path ever held").
-fn model_all_versions(repo: &GenRepo, c: usize, p: &[u8]) -> Vec<Vec<u8>> {
-    let mut out: Vec<Vec<u8>> = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut queue = VecDeque::from([c]);
-    while let Some(x) = queue.pop_front() {
-        if !seen.insert(x) {
-            continue;
-        }
-        if let Some(f) = repo.commits[x].tree.get(p)
-            && !out.contains(&f.content)
-        {
-            out.push(f.content.clone());
-        }
-        queue.extend(repo.commits[x].parents.iter().copied());
+/// The generated history as a reference-model repository (commit indices preserved).
+fn model_repo(repo: &GenRepo) -> MRepo {
+    let mut m = MRepo::new();
+    for gc in &repo.commits {
+        m.commit(&gc.parents, gc.tree.clone());
     }
-    out
+    m
 }
 
 /// The path with the most distinct versions reachable from `c` (ties: smallest path).
 fn busiest_path(repo: &GenRepo, c: usize) -> (Vec<u8>, Vec<Vec<u8>>) {
+    let model = model_repo(repo);
     let mut paths: BTreeSet<Vec<u8>> = BTreeSet::new();
     for gc in &repo.commits {
         paths.extend(gc.tree.keys().cloned());
     }
     let mut best: Option<(Vec<u8>, Vec<Vec<u8>>)> = None;
     for p in paths {
-        let v = model_all_versions(repo, c, &p);
+        let v = model.all_versions(c, &p);
         if best.as_ref().is_none_or(|(_, b)| v.len() > b.len()) {
             best = Some((p, v));
         }

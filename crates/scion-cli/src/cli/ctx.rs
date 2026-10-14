@@ -287,6 +287,25 @@ impl<'a> Ctx<'a> {
         Ok((c, e))
     }
 
+    /// The authenticated client for `root`, connected lazily: no I/O happens until the first
+    /// RPC, so commands that may complete from local state (`status`, `diff`) work offline
+    /// when every needed tree is cached (SPEC 11.5). Cached for the invocation like
+    /// [`Ctx::client`].
+    pub(crate) fn lazy_client(&mut self, root: Option<&Path>) -> CliResult<ScionClient> {
+        if let Some((r, c, _)) = &self.client
+            && r.as_deref() == root
+        {
+            return Ok(c.clone());
+        }
+        let token = self.token()?;
+        let ep_text = self.endpoint(root)?;
+        let ep = Endpoint::parse(&ep_text)?;
+        let tls = self.tls()?;
+        let c = ScionClient::connect_lazy(&ep, tls, token)?;
+        self.client = Some((root.map(Path::to_path_buf), c.clone(), ep_text));
+        Ok(c)
+    }
+
     /// Whether an UNAUTHENTICATED failure may be retried after a silent re-exchange of the
     /// stored GitHub token (SPEC 12.2).
     pub(crate) fn can_reexchange(&self) -> bool {

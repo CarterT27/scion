@@ -54,9 +54,26 @@ impl TreeCache {
         })
     }
 
-    /// Whether `id` is available locally (the empty tree always is).
+    /// Whether `id` is available locally and intact (the empty tree always is).
+    ///
+    /// A disk entry is read, digest-verified and decoded (then memoized), so a corrupt entry is
+    /// discarded here and reported absent; callers such as `fetch::ensure_trees` then re-fetch
+    /// it within the same command (SPEC 16.1 class 7 at the client tier). Consulting only the
+    /// index would let a later `require` fail NOT_FOUND on the dropped entry.
     pub(crate) fn contains(&self, id: &ObjectId) -> bool {
-        *id == empty_tree_id() || lock(&self.mem).contains_key(id) || self.disk.contains(id)
+        if *id == empty_tree_id() || lock(&self.mem).contains_key(id) {
+            return true;
+        }
+        if !self.disk.contains(id) {
+            return false;
+        }
+        match self.get(id) {
+            Ok(t) => t.is_some(),
+            Err(e) => {
+                tracing::warn!(object = %id, error = %e, "cached tree unreadable; re-fetching");
+                false
+            }
+        }
     }
 
     /// The decoded tree, when cached. Entries that fail verification are dropped by the disk
@@ -286,5 +303,42 @@ mod tests {
         assert!(reopened.contains(&sub_id));
         assert_eq!(reopened.get(&root_id).unwrap().unwrap().entries.len(), 2);
         assert!(reopened.contains(&empty_tree_id()));
+    }
+
+    #[test]
+    fn contains_discards_a_corrupt_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = TreeCache::open(dir.path()).unwrap();
+        let tree = Tree {
+            entries: vec![TreeEntry {
+                name: Name::new(b"f").unwrap(),
+                mode: Mode::File,
+                id: ObjectId::hash_blob(b"x"),
+                size: 1,
+            }],
+            extensions: Extensions::new(),
+        };
+        let id = tree.id();
+        cache
+            .insert_verified(&id, Bytes::from(tree.encode()))
+            .unwrap();
+        drop(cache);
+        // Flip the last byte of the stored file (bypassing the index).
+        let hex = id.hex();
+        let file = dir
+            .path()
+            .join(CACHE_DIR)
+            .join("objects")
+            .join("t")
+            .join(&hex[..2])
+            .join(&hex);
+        let mut bytes = std::fs::read(&file).unwrap();
+        *bytes.last_mut().unwrap() ^= 0xff;
+        std::fs::write(&file, bytes).unwrap();
+        let reopened = TreeCache::open(dir.path()).unwrap();
+        assert!(reopened.disk.contains(&id), "the index still lists it");
+        assert!(!reopened.contains(&id), "a corrupt entry is not contained");
+        assert!(!reopened.disk.contains(&id), "and it was discarded");
+        assert!(reopened.get(&id).unwrap().is_none());
     }
 }

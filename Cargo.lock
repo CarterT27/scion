@@ -4104,6 +4104,7 @@ dependencies = [
  "scion-core",
  "scion-object",
  "scion-proto",
+ "scion-refmodel",
  "scion-testkit",
  "scion-wc",
  "serde",

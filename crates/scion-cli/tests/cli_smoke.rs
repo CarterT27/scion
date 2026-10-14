@@ -256,6 +256,36 @@ async fn commands_work_through_the_daemon_endpoint() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn status_and_diff_work_offline_when_trees_are_cached() {
+    // SPEC 11.5 (amendment W6-1): `status` makes no server call when every needed tree is
+    // cached, so it must succeed with an unreachable endpoint after a checkout.
+    let h = Harness::start(false).await;
+    let env = h.env_as("alice");
+    let wc = h.path("wc");
+    let wcs = wc.to_str().unwrap();
+    let co = scion(&env, &["checkout", "main", wcs]).await;
+    assert_eq!(co.code, 0, "{}", co.stderr);
+    std::fs::write(wc.join("offline.txt"), b"written offline\n").unwrap();
+    let gone = h.path("no-server.sock");
+    let mut offline = env.clone();
+    offline.0.insert(
+        "SCION_ENDPOINT".into(),
+        format!("unix://{}", gone.display()),
+    );
+    let st = scion(&offline, &["-C", wcs, "--json", "status"]).await;
+    assert_eq!(st.code, 0, "{}", st.stderr);
+    let j = st.json();
+    assert_eq!(j["data"]["clean"], false);
+    assert_eq!(j["data"]["added"][0], "offline.txt");
+    let d = scion(&offline, &["-C", wcs, "--json", "diff"]).await;
+    assert_eq!(d.code, 0, "{}", d.stderr);
+    assert_eq!(d.json()["data"]["changes"][0]["path"], "offline.txt");
+    // A command that needs the server still reports the unreachable endpoint.
+    let l = scion(&offline, &["-C", wcs, "log", "--oneline"]).await;
+    assert_ne!(l.code, 0, "{}", l.text());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn binary_help_usage_and_whoami() {
     let h = Harness::start(false).await;
     let token = h.cluster.token_for(&TestCluster::gh("bob"));

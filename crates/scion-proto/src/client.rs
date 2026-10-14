@@ -239,7 +239,77 @@ fn unavailable(ep: &Endpoint, e: &(dyn std::error::Error + 'static)) -> ScionErr
     )
 }
 
+/// A configured tonic endpoint plus, for Unix sockets, the socket path its connector dials.
+enum Prepared {
+    Unix(tonic::transport::Endpoint, std::path::PathBuf),
+    Https(tonic::transport::Endpoint),
+}
+
+/// A connector dialing the Unix socket at `path` (the URI is ignored).
+fn unix_connector(
+    path: std::path::PathBuf,
+) -> impl tower_service::Service<
+    http::Uri,
+    Response = hyper_util::rt::TokioIo<tokio::net::UnixStream>,
+    Error = std::io::Error,
+    Future = impl Future<Output = std::io::Result<hyper_util::rt::TokioIo<tokio::net::UnixStream>>>
+             + Send,
+> + Clone
++ Send
++ 'static {
+    tower::service_fn(move |_: http::Uri| {
+        let path = path.clone();
+        async move {
+            let s = tokio::net::UnixStream::connect(path).await?;
+            Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(s))
+        }
+    })
+}
+
+/// Build the tonic endpoint for `ep` (timeouts, header limits, TLS); performs no I/O.
+fn prepare(ep: &Endpoint, tls: Option<TlsOptions>) -> Result<Prepared> {
+    match ep {
+        Endpoint::Unix(path) => Ok(Prepared::Unix(
+            tonic::transport::Endpoint::from_static("http://localhost")
+                .connect_timeout(CONNECT_TIMEOUT)
+                .http2_max_header_list_size(MAX_HEADER_LIST_BYTES),
+            path.clone(),
+        )),
+        Endpoint::Https(url) => {
+            let tls = tls.unwrap_or_default();
+            let mut cfg = ClientTlsConfig::new();
+            cfg = match tls.ca_pem {
+                Some(pem) => cfg.ca_certificate(Certificate::from_pem(pem)),
+                None => cfg.with_native_roots(),
+            };
+            if let Some(d) = tls.domain {
+                cfg = cfg.domain_name(d);
+            }
+            let endpoint = tonic::transport::Endpoint::from_shared(url.clone())
+                .map_err(|e| {
+                    ScionError::new(
+                        ErrorCode::InvalidArgument,
+                        format!("invalid endpoint {url}: {}", error_chain(&e)),
+                    )
+                })?
+                .connect_timeout(CONNECT_TIMEOUT)
+                .http2_max_header_list_size(MAX_HEADER_LIST_BYTES)
+                .tls_config(cfg)
+                .map_err(|e| unavailable(ep, &e))?;
+            Ok(Prepared::Https(endpoint))
+        }
+    }
+}
+
 impl ScionClient {
+    fn from_channel(channel: Channel, token: Option<String>) -> Self {
+        ScionClient {
+            channel,
+            token: token.map(Arc::from),
+            state: Arc::new(ClientState::default()),
+        }
+    }
+
     /// Connect to `ep` (Unix socket or HTTPS with rustls), optionally authenticating with
     /// `token` (SPEC 7.1, 17).
     ///
@@ -251,52 +321,31 @@ impl ScionClient {
         tls: Option<TlsOptions>,
         token: Option<String>,
     ) -> Result<Self> {
-        let channel = match ep {
-            Endpoint::Unix(path) => {
-                let path = path.clone();
-                let connector = tower::service_fn(move |_: http::Uri| {
-                    let path = path.clone();
-                    async move {
-                        let s = tokio::net::UnixStream::connect(path).await?;
-                        Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(s))
-                    }
-                });
-                tonic::transport::Endpoint::from_static("http://localhost")
-                    .connect_timeout(CONNECT_TIMEOUT)
-                    .http2_max_header_list_size(MAX_HEADER_LIST_BYTES)
-                    .connect_with_connector(connector)
-                    .await
-                    .map_err(|e| unavailable(ep, &e))?
-            }
-            Endpoint::Https(url) => {
-                let tls = tls.unwrap_or_default();
-                let mut cfg = ClientTlsConfig::new();
-                cfg = match tls.ca_pem {
-                    Some(pem) => cfg.ca_certificate(Certificate::from_pem(pem)),
-                    None => cfg.with_native_roots(),
-                };
-                if let Some(d) = tls.domain {
-                    cfg = cfg.domain_name(d);
-                }
-                let endpoint = tonic::transport::Endpoint::from_shared(url.clone())
-                    .map_err(|e| {
-                        ScionError::new(
-                            ErrorCode::InvalidArgument,
-                            format!("invalid endpoint {url}: {}", error_chain(&e)),
-                        )
-                    })?
-                    .connect_timeout(CONNECT_TIMEOUT)
-                    .http2_max_header_list_size(MAX_HEADER_LIST_BYTES)
-                    .tls_config(cfg)
-                    .map_err(|e| unavailable(ep, &e))?;
-                endpoint.connect().await.map_err(|e| unavailable(ep, &e))?
-            }
+        let channel = match prepare(ep, tls)? {
+            Prepared::Unix(e, path) => e
+                .connect_with_connector(unix_connector(path))
+                .await
+                .map_err(|e| unavailable(ep, &e))?,
+            Prepared::Https(e) => e.connect().await.map_err(|e| unavailable(ep, &e))?,
         };
-        Ok(ScionClient {
-            channel,
-            token: token.map(Arc::from),
-            state: Arc::new(ClientState::default()),
-        })
+        Ok(Self::from_channel(channel, token))
+    }
+
+    /// Like [`ScionClient::connect`], but performs no I/O: the connection is established on
+    /// the first RPC, so a command that never issues one works offline (SPEC 11.5: `status`
+    /// makes no server call when every needed tree is cached). A failure to connect surfaces
+    /// as UNAVAILABLE on that first RPC. Must be called inside a Tokio runtime. Only an
+    /// invalid endpoint or TLS configuration fails here.
+    pub fn connect_lazy(
+        ep: &Endpoint,
+        tls: Option<TlsOptions>,
+        token: Option<String>,
+    ) -> Result<Self> {
+        let channel = match prepare(ep, tls)? {
+            Prepared::Unix(e, path) => e.connect_with_connector_lazy(unix_connector(path)),
+            Prepared::Https(e) => e.connect_lazy(),
+        };
+        Ok(Self::from_channel(channel, token))
     }
 
     /// The same connection with a different bearer token. Epoch capture and the call counter
@@ -420,5 +469,19 @@ mod tests {
         let e = ScionClient::connect(&ep, None, None).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::Unavailable);
         assert_eq!(e.subcode(), Some(subcode::UPSTREAM_UNAVAILABLE));
+    }
+
+    #[tokio::test]
+    async fn connect_lazy_defers_failure_to_first_rpc() {
+        let dir = tempfile::tempdir().unwrap();
+        let ep = Endpoint::Unix(dir.path().join("missing.sock"));
+        let c = ScionClient::connect_lazy(&ep, None, None).unwrap();
+        assert_eq!(c.calls(), 0);
+        let s = c
+            .auth()
+            .who_am_i(v1::WhoAmIRequest::default())
+            .await
+            .unwrap_err();
+        assert_eq!(s.code(), tonic::Code::Unavailable);
     }
 }
