@@ -124,9 +124,8 @@ impl Keyring {
         }
         let mut keys = Vec::with_capacity(paths.len());
         for (i, p) in paths.iter().enumerate() {
-            let pem = std::fs::read_to_string(p).map_err(|e| {
-                config_error(format!("cannot read signing key #{i}: {}", e.kind()))
-            })?;
+            let pem = std::fs::read_to_string(p)
+                .map_err(|e| config_error(format!("cannot read signing key #{i}: {}", e.kind())))?;
             let k = ed25519_dalek::SigningKey::from_pkcs8_pem(&pem).map_err(|_| {
                 config_error(format!(
                     "signing key #{i} is not a PKCS#8 PEM Ed25519 private key"
@@ -212,7 +211,11 @@ impl Keyring {
             kid: String::new(),
         };
         let token = self.sign(&claims)?;
-        claims.kid = self.keys.first().map(|(k, _)| k.clone()).unwrap_or_default();
+        claims.kid = self
+            .keys
+            .first()
+            .map(|(k, _)| k.clone())
+            .unwrap_or_default();
         Ok((token, claims))
     }
 
@@ -307,8 +310,7 @@ impl Verifier {
         if exp <= now {
             return Err(ScionError::unauthenticated("token expired"));
         }
-        let mut sub =
-            Principal::parse(&payload.sub).map_err(|_| unauthenticated("bad subject"))?;
+        let mut sub = Principal::parse(&payload.sub).map_err(|_| unauthenticated("bad subject"))?;
         if let Principal::GitHub { id, .. } = &mut sub {
             *id = payload.gid;
         }

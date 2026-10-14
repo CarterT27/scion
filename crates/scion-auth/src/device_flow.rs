@@ -147,7 +147,10 @@ pub async fn poll(oauth_base: &str, client_id: &str, dc: &DeviceCode) -> Result<
                     Some(s) => Duration::from_secs(s),
                     None => interval + SLOW_DOWN_STEP,
                 };
-                tracing::debug!(interval_secs = interval.as_secs(), "GitHub asked to slow down");
+                tracing::debug!(
+                    interval_secs = interval.as_secs(),
+                    "GitHub asked to slow down"
+                );
             }
             Some("expired_token") => {
                 return Err(ScionError::unauthenticated("GitHub device code expired"));
