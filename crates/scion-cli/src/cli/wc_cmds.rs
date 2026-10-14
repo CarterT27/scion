@@ -317,8 +317,14 @@ fn commit_reply(cmd: &str, wc: &WorkingCopy, r: &CommitReport, verb: &str) -> Cl
 /// `scion commit -m <msg> [--path p...]` (SPEC 11.6; continues a paused rebase, SPEC 11.7).
 pub(crate) async fn commit(ctx: &mut Ctx<'_>, a: &CommitArgs) -> CliResult<Reply> {
     let root = ctx.require_root()?;
-    let author = author(ctx, &root).await?;
     let mut wc = open(ctx).await?;
+    let rebasing = matches!(wc.state().pending, Some(PendingOperation::Rebase { .. }));
+    // A commit that continues a rebase keeps the original author and message (SPEC 11.7).
+    let (message, author) = match (&a.message, rebasing) {
+        (_, true) => (a.message.clone().unwrap_or_default(), Vec::new()),
+        (Some(m), false) => (m.clone(), author(ctx, &root).await?),
+        (None, false) => return Err(usage("commit needs -m <message>")),
+    };
     let paths = a
         .paths
         .iter()
@@ -326,7 +332,7 @@ pub(crate) async fn commit(ctx: &mut Ctx<'_>, a: &CommitArgs) -> CliResult<Reply
         .collect::<CliResult<Vec<_>>>()?;
     let r = wc
         .commit_with_report(
-            a.message.as_bytes(),
+            message.as_bytes(),
             &author,
             (!paths.is_empty()).then_some(paths.as_slice()),
         )

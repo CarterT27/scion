@@ -425,9 +425,17 @@ pub async fn scripted_session(h: &Harness, json: bool) -> Vec<Step> {
         "commit",
         &alice,
         0,
-        ["-C", &wc1s, "commit", "-m", "unused"]
+        ["-C", &wc1s, "commit"]
     );
     step!("land-merged", "land", &alice, 0, ["-C", &wc1s, "land"]);
+    // Outside a rebase a message is required: usage error.
+    step!(
+        "commit-no-message",
+        "error",
+        &alice,
+        2,
+        ["-C", &wc1s, "commit"]
+    );
     let blob = ObjectId::hash_blob(b"b\n").to_text();
     step!(
         "redact",

@@ -181,8 +181,22 @@ async fn human_output_of_every_command() {
         err("cat-missing")
     );
 
-    // The merged content landed.
+    assert!(
+        err("commit-no-message").contains("commit needs -m"),
+        "{}",
+        err("commit-no-message")
+    );
+
+    // The merged content landed, with the original message (SPEC 11.7: the continuing
+    // commit keeps the original change id, author and message).
     let alice = h.env_as("alice");
+    let top = scion(&alice, &["log", "--rev", "main", "--limit", "1"]).await;
+    assert!(top.text().contains("    ours\n"), "{}", top.text());
+    assert!(
+        top.text().contains("Author: github:alice\n"),
+        "{}",
+        top.text()
+    );
     let cat = scion(&alice, &["cat", "main:a.txt"]).await;
     assert_eq!(
         (cat.code, cat.stdout.as_slice()),

@@ -4,7 +4,7 @@
 use super::error::{CliResult, local, usage};
 use crate::output::views::{MetaJson, TimeView};
 use scion_core::{ChangeId, ErrorCode, Kind, ObjectId, Result as ScionResult, ScionError};
-use scion_object::{Canonical, Changeset, RepoPath};
+use scion_object::{Canonical, Changeset, DeltaEntry, RepoPath};
 use scion_proto::convert::{parse_ids, required_id};
 use scion_proto::{ScionClient, error_from_status, v1};
 
@@ -74,6 +74,9 @@ pub(crate) struct CsView {
     pub meta: ObjectId,
     pub change_id: ChangeId,
     pub filtered: bool,
+    /// The delta against the first parent (SPEC 4.3.4), when complete: `None` for a filtered
+    /// view, whose unreadable entries were removed (SPEC 12.6).
+    pub delta: Option<Vec<DeltaEntry>>,
 }
 
 /// Decode a `ChangesetItem` (SPEC 7.4).
@@ -99,6 +102,7 @@ pub(crate) fn cs_from_item(item: &v1::ChangesetItem) -> ScionResult<CsView> {
                 meta: cs.meta,
                 change_id: cs.change_id,
                 filtered: false,
+                delta: Some(cs.delta),
             })
         }
         Some(v1::changeset_item::View::FilteredView(f)) => Ok(CsView {
@@ -108,6 +112,11 @@ pub(crate) fn cs_from_item(item: &v1::ChangesetItem) -> ScionResult<CsView> {
             meta: required_id(&f.meta, "meta")?,
             change_id: scion_proto::convert::required_change_id(&f.change_id, "change_id")?,
             filtered: f.filtered,
+            delta: if f.filtered {
+                None
+            } else {
+                Some(scion_proto::convert::delta_from_proto(&f.delta)?)
+            },
         }),
         None => Err(scion_proto::convert::missing_field("view")),
     }

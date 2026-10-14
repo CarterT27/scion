@@ -368,3 +368,77 @@ async fn purge_now_is_audited() {
     assert_eq!(bad.code, 1);
     assert!(bad.stderr.contains("not_redactable"), "{}", bad.stderr);
 }
+
+/// Changesets the admin sees only as filtered views (they also touch a path the admin cannot
+/// read) carry no complete delta, so `--all-versions` looks the path up with `ListTree` for
+/// them; complete deltas answer directly. Both kinds contribute versions, including one from
+/// before a deletion and re-creation.
+#[tokio::test(flavor = "multi_thread")]
+async fn all_versions_covers_filtered_changesets() {
+    let h = Harness::start(false).await;
+    // `/private` is readable and writable only by `security` (carol), not by `admins`.
+    let acl = TestCluster::DEFAULT_ACL.replacen(
+        "\n[refs.",
+        "\n[[paths]]\nprefix = \"/private\"\nread = [\"group:security\"]\nwrite = [\"group:security\"]\n\n[refs.",
+        1,
+    );
+    assert_ne!(acl, TestCluster::DEFAULT_ACL);
+    h.cluster.set_policy(&acl).unwrap();
+    let carol = h
+        .cluster
+        .client(Via::Server, &TestCluster::gh("carol"))
+        .await;
+    let head = h.main_head().await;
+    let c1 = TestCluster::commit(
+        &carol,
+        &head,
+        &[("fv/f.txt", b"v1\n"), ("private/x", b"a\n")],
+        &[],
+        101,
+    )
+    .await;
+    let c2 = TestCluster::commit(&carol, &c1, &[("fv/f.txt", b"v2\n")], &[], 102).await;
+    let c3 = TestCluster::commit(&carol, &c2, &[("fv/g.txt", b"g\n")], &["fv/f.txt"], 103).await;
+    let c4 = TestCluster::commit(
+        &carol,
+        &c3,
+        &[("fv/f.txt", b"v3\n"), ("private/x", b"b\n")],
+        &[],
+        104,
+    )
+    .await;
+    // The admin really gets filtered views for c1 and c4.
+    let admin = h.env_as("admin");
+    let shown = scion(&admin, &["--json", "show", &c4.to_text()]).await;
+    assert_eq!(shown.code, 0, "{}", shown.stderr);
+    assert_eq!(shown.json()["data"]["filtered"], true);
+    let out = scion(
+        &admin,
+        &[
+            "--json",
+            "redact",
+            "--path",
+            "fv/f.txt",
+            "--at",
+            &c4.to_text(),
+            "--all-versions",
+            "--reason",
+            "filtered walk",
+        ],
+    )
+    .await;
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let v = out.json();
+    cli_support::validate(&v);
+    let got: BTreeSet<String> = v["data"]["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_owned())
+        .collect();
+    let expected: BTreeSet<String> = [b"v1\n".as_slice(), b"v2\n", b"v3\n"]
+        .iter()
+        .map(|c| ObjectId::hash_blob(c).to_text())
+        .collect();
+    assert_eq!(got, expected);
+}

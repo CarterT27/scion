@@ -92,6 +92,9 @@ async fn every_command_json_validates_against_its_published_schema() {
     assert_eq!(dirty["data"]["subcode"], "dirty_working_copy");
     let markers = by["resolve-markers"].out.json();
     assert_eq!(markers["data"]["subcode"], "conflict_markers_remain");
+    let no_msg = by["commit-no-message"].out.json();
+    assert_eq!(no_msg["data"]["code"], "USAGE");
+    assert_eq!(no_msg["data"]["exit_code"], 2);
     let missing = by["cat-missing"].out.json();
     assert_eq!(missing["data"]["code"], "NOT_FOUND");
     let cat = by["cat"].out.json();

@@ -10,7 +10,7 @@ use super::util::{
 };
 use crate::output::views::{RedactData, RedactTarget};
 use scion_core::{ErrorCode, Kind, Mode, ObjectId, Result as ScionResult, subcode};
-use scion_object::RepoPath;
+use scion_object::{DeltaEntry, DeltaOp, RepoPath};
 use scion_proto::convert::{ids_bytes, parse_mode, required_id};
 use scion_proto::{ScionClient, error_from_status, v1};
 use std::collections::{HashMap, HashSet};
@@ -63,13 +63,17 @@ async fn entry_at(
     Ok(None)
 }
 
-/// Every distinct blob `path` ever held in history reachable from `at`, in first-seen order
-/// (SPEC 13.2 `--all-versions`, 19.13).
+/// Every distinct blob `path` ever held in history reachable from `at`, in first-seen order of
+/// the walk (SPEC 13.2 `--all-versions`, 19.13).
 ///
 /// The walk covers every changeset reachable from `at` (`Log` without a path follows all
 /// parents), not only the path's TREESAME history, so versions that lived only on a merged-away
-/// branch or before a deletion and re-creation are found. The path lookup (`ListTree` of the
-/// parent directory) is memoized by root tree.
+/// branch or before a deletion and re-creation are found. Because a changeset's delta is exactly
+/// the file-level diff against its first parent (SPEC 4.3.4), every version of `path` is
+/// introduced by a `Put` at `path` in some reachable changeset, so the complete delta of each
+/// walked changeset answers the question without another RPC. Only a changeset served as a
+/// filtered view (some delta entries unreadable, SPEC 12.6) falls back to looking the path up
+/// with `ListTree`, memoized by root tree.
 pub(crate) async fn all_versions(
     client: &ScionClient,
     at: &ObjectId,
@@ -78,6 +82,7 @@ pub(crate) async fn all_versions(
     let mut out = Vec::new();
     let mut found: HashSet<ObjectId> = HashSet::new();
     let mut memo: HashMap<ObjectId, Option<(Mode, ObjectId)>> = HashMap::new();
+    let mut walked = 0u64;
     let mut token = Vec::new();
     loop {
         let page = log_page(client, at, None, false, WALK_PAGE, token).await?;
@@ -87,13 +92,17 @@ pub(crate) async fn all_versions(
                 .as_ref()
                 .ok_or_else(|| scion_proto::convert::missing_field("changeset"))?;
             let cs = cs_from_item(item)?;
-            let hit = match memo.get(&cs.root_tree) {
-                Some(h) => *h,
-                None => {
-                    let h = entry_at(client, &cs.id, path).await?;
-                    memo.insert(cs.root_tree, h);
-                    h
-                }
+            walked += 1;
+            let hit = match &cs.delta {
+                Some(delta) => put_at(delta, path),
+                None => match memo.get(&cs.root_tree) {
+                    Some(h) => *h,
+                    None => {
+                        let h = entry_at(client, &cs.id, path).await?;
+                        memo.insert(cs.root_tree, h);
+                        h
+                    }
+                },
             };
             if let Some((mode, id)) = hit
                 && mode.is_file_like()
@@ -109,10 +118,23 @@ pub(crate) async fn all_versions(
     }
     tracing::debug!(
         versions = out.len(),
-        trees = memo.len(),
+        changesets = walked,
+        list_tree_lookups = memo.len(),
         "all-versions walk done"
     );
     Ok(out)
+}
+
+/// The `(mode, id)` a delta puts at exactly `path`, if any (SPEC 4.3.4: delta entries are
+/// file-level, so any other version of `path` equals the first parent's).
+fn put_at(delta: &[DeltaEntry], path: &RepoPath) -> Option<(Mode, ObjectId)> {
+    delta
+        .iter()
+        .find(|d| d.path == *path)
+        .and_then(|d| match &d.op {
+            DeltaOp::Put { mode, id, .. } => Some((*mode, *id)),
+            DeltaOp::Delete => None,
+        })
 }
 
 fn kind_label(k: Kind) -> &'static str {

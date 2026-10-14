@@ -166,9 +166,10 @@ pub(crate) enum SparseCmd {
 
 #[derive(Args, Debug)]
 pub(crate) struct CommitArgs {
-    /// Message.
-    #[arg(short = 'm', long = "message", required = true)]
-    pub message: String,
+    /// Message (required, except for the commit that continues a paused rebase, which keeps
+    /// the original message, SPEC 11.7).
+    #[arg(short = 'm', long = "message")]
+    pub message: Option<String>,
     /// Restrict the commit to these paths.
     #[arg(long = "path", value_name = "PATH")]
     pub paths: Vec<String>,
