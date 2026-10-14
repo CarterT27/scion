@@ -35,7 +35,7 @@ pub mod commit_graph {
 
 pub use ctx::StoreDeriveCtx;
 pub use engine::DerivedEngine;
-pub use registry::Registry;
+pub use registry::{Registry, TypeInfo};
 pub use types::{
     DeriveConfig, DeriveCtx, DeriveMetrics, DeriveMode, DerivedType, EagerType, LazyType,
 };

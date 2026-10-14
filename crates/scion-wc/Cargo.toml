@@ -47,3 +47,4 @@ scion-wc = { path = ".", features = ["testing"] }
 scion-testkit = { workspace = true }
 scion-server = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
+scion-refmodel = { workspace = true }

@@ -96,6 +96,8 @@ pub const TXN_RETRY: &str = "txn_retry";
 pub const STORE_UNAVAILABLE: &str = "store_unavailable";
 /// SPEC 16.1: the upstream tier is unreachable.
 pub const UPSTREAM_UNAVAILABLE: &str = "upstream_unavailable";
+/// SPEC 7.4 `Log`: the `page_token` is malformed or belongs to a different query.
+pub const BAD_PAGE_TOKEN: &str = "bad_page_token";
 
 /// Every subcode constant above, for exhaustive tests and documentation.
 pub const ALL: &[&str] = &[
@@ -140,6 +142,7 @@ pub const ALL: &[&str] = &[
     TXN_RETRY,
     STORE_UNAVAILABLE,
     UPSTREAM_UNAVAILABLE,
+    BAD_PAGE_TOKEN,
 ];
 
 /// TOO_LARGE limit names carried in [`crate::ErrorPayload::Limit`] (SPEC 6.5, PLAN 6.7).

@@ -17,9 +17,7 @@ use scion_object::enc::{Decoder, Encoder};
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-/// INVALID_ARGUMENT subcode for a malformed or mismatched `log_page` token (SPEC 7.4 `Log`
-/// `page_token`; implementation-defined).
-pub(crate) const BAD_PAGE_TOKEN: &str = "bad_page_token";
+pub(crate) use scion_core::subcode::BAD_PAGE_TOKEN;
 
 /// Format version of the opaque `log_page` token.
 const PAGE_TOKEN_VERSION: u64 = 1;
