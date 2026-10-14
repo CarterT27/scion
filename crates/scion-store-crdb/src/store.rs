@@ -84,6 +84,8 @@ struct Inner {
     pool: Pool,
     repo_id: RepoId,
     repo_name: String,
+    /// The database name from the connection configuration, when given.
+    database: Option<String>,
     /// Retried attempts (40001/40003/conflicts) since construction.
     retries: AtomicU64,
 }
@@ -305,6 +307,12 @@ impl CrdbMetaStore {
         &self.inner.repo_name
     }
 
+    /// The database this store connects to (e.g. the `scion_test_<rand>` database created by
+    /// [`Self::connect_fresh_for_tests`]), when the configuration names one.
+    pub fn database(&self) -> Option<&str> {
+        self.inner.database.as_deref()
+    }
+
     fn from_pg_config(
         mut pg: tokio_postgres::Config,
         tls: Option<Arc<rustls::ClientConfig>>,
@@ -314,6 +322,7 @@ impl CrdbMetaStore {
         if pg.get_connect_timeout().is_none() {
             pg.connect_timeout(Duration::from_secs(10));
         }
+        let database = pg.get_dbname().map(str::to_owned);
         let mcfg = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         };
@@ -338,6 +347,7 @@ impl CrdbMetaStore {
                 pool,
                 repo_id: compute_repo_id(repo_name),
                 repo_name: repo_name.to_owned(),
+                database,
                 retries: AtomicU64::new(0),
             }),
         })
