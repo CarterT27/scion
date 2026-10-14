@@ -252,7 +252,8 @@ impl CrdbMetaStore {
         Ok(store)
     }
 
-    /// Apply [`crate::MIGRATIONS`] (idempotent: `CREATE ... IF NOT EXISTS`).
+    /// Apply [`crate::MIGRATIONS`] (idempotent: `CREATE ... IF NOT EXISTS`): every SPEC 5.2
+    /// table plus `audit_log` and the secondary indexes of storage-semantics 2.
     pub async fn migrate(&self) -> Result<()> {
         for &(name, sql) in MIGRATIONS {
             self.txn("migrate", false, |c| async move {
@@ -297,18 +298,18 @@ impl CrdbMetaStore {
 
     /// Number of retried transaction attempts (40001, 40003 on reads, internal conflicts)
     /// since this store was built; for metrics and tests of the retry loop
-    /// (storage-semantics 3).
+    /// (SPEC 5.2-5.4; storage-semantics 3).
     pub fn txn_retries(&self) -> u64 {
         self.inner.retries.load(Ordering::Relaxed)
     }
 
-    /// The repository name this store was opened for (`repos.name`).
+    /// The repository name this store was opened for (`repos.name`, SPEC 5.2).
     pub fn repo_name(&self) -> &str {
         &self.inner.repo_name
     }
 
     /// The database this store connects to (e.g. the `scion_test_<rand>` database created by
-    /// [`Self::connect_fresh_for_tests`]), when the configuration names one.
+    /// [`Self::connect_fresh_for_tests`], PLAN 3.3), when the configuration names one.
     pub fn database(&self) -> Option<&str> {
         self.inner.database.as_deref()
     }
