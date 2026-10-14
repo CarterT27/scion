@@ -68,7 +68,8 @@ refs = ["group:admins", "group:importers"]
     .to_owned()
 }
 
-/// Import options with [`DEFAULT_BATCH_BYTES`] (panics on an invalid ref name: test helper).
+/// Import options with [`DEFAULT_BATCH_BYTES`]. An invalid `target_ref` falls back to `main`
+/// (test helper; library code does not panic).
 pub fn options(
     git_dir: &Path,
     git_ref: &str,

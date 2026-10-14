@@ -186,7 +186,7 @@ impl Importer<'_> {
                 .map_err(|e| with_commit(e, &c.id))?;
             self.mapped.insert(c.id, cs);
             self.report.imported += 1;
-            if self.report.imported % 100 == 0 {
+            if self.report.imported.is_multiple_of(100) {
                 tracing::info!(imported = self.report.imported, "scion-import: progress");
             }
         }

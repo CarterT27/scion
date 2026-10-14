@@ -4,6 +4,8 @@
 //! with it), incremental import with fast-forward, idempotent re-import, importing into the
 //! bootstrap `main`, refusing non-fast-forward targets, rate-limit retry, upload batching.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
+
 mod import_support;
 
 use import_support::*;

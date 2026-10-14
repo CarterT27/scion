@@ -10,6 +10,8 @@
 //!   the identical line at Scion's origin line number (the two tools only chose different
 //!   alignments among equal lines).
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
+
 mod import_support;
 
 use import_support::*;

@@ -1,5 +1,5 @@
 //! Shared helpers of the scion-import integration tests (P29).
-#![allow(dead_code)]
+#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 use scion_core::{ErrorCode, ObjectId, ScionError};
 use scion_import::testing::{

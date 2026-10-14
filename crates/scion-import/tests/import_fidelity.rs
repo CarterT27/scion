@@ -10,6 +10,8 @@
 //!
 //! Documented exclusions: skipped gitlinks and empty git trees (SPEC 14).
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
+
 mod import_support;
 
 use import_support::*;
