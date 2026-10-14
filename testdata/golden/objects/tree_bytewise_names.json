@@ -1,0 +1,7 @@
+{
+  "name": "tree_bytewise_names",
+  "kind": "tree",
+  "description": "Bytewise name order with non-ASCII names: \"B\" mode 1 blob(\"B\") size 1; \"a\" mode 1 blob(\"a\") size 1; [0xc3,0xa9] (UTF-8 e-acute) mode 1 blob(200 x 'x') size 200 (two-byte varint); [0xff] (not UTF-8) mode 2 blob(\"\") size 0.",
+  "hex": "010401420101019f9524ca18c0cc03aef1a0b84faed9375e5d19575e9328e65fea72991f0f58cf01016101010117762fddd969a453925d65717ac3eea21320b66b54342fde15128d6caf21215f0102c3a901010141f27fa4b0ad47675bc00d81795d312523d20ddab8e84cbb3907ea57e3500d44c80101ff020101af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f32620000",
+  "id_text": "t11b19c8abba921cda1711fedf68707bd0d7d5b5236c783131c100d7a7aba28858"
+}

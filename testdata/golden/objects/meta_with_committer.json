@@ -1,0 +1,7 @@
+{
+  "name": "meta_with_committer",
+  "kind": "meta",
+  "description": "Meta with committer: author \"Ada Lovelace <ada@example.com>\", author_time 1600000000 tz 120, committer \"Grace Hopper <grace@example.com>\", committer_time 1600000100 tz -480, creator \"service:importer\", message \"Imported commit\\n\\nWith a body.\\n\", no extensions.",
+  "hex": "011e416461204c6f76656c616365203c616461406578616d706c652e636f6d3e80c0f0f50bf0010120477261636520486f70706572203c6772616365406578616d706c652e636f6d3e01c8c1f0f50bbf0710736572766963653a696d706f727465721e496d706f7274656420636f6d6d69740a0a57697468206120626f64792e0a00",
+  "id_text": "m1efb363c31827b2bc85039f93fdca1e4dc49b3d54b67889e31c0e818b56ef6ca2"
+}

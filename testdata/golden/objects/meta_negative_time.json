@@ -1,0 +1,7 @@
+{
+  "name": "meta_negative_time",
+  "kind": "meta",
+  "description": "Edge Meta: empty author, author_time seconds -1 tz -720, committer absent, committer_time present (seconds -9223372036854775808, tz 840), empty creator, empty message, no extensions.",
+  "hex": "0100019f0b0001ffffffffffffffffff01900d000000",
+  "id_text": "m1f47f901a49311bbdfe597a030c58c51b30790d1ed07e722ab152fd043e023ad0"
+}

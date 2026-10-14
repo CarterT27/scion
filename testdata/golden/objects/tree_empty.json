@@ -1,0 +1,7 @@
+{
+  "name": "tree_empty",
+  "kind": "tree",
+  "description": "The empty tree (valid only as a root): format_version 1, no entries, no extensions. Equals scion_core::empty_tree_id().",
+  "hex": "010000",
+  "id_text": "t1396eab8ebe8b2247fed631cee54835e0c8678ab1cc0d5b8a73f9f86e813187d5"
+}

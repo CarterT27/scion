@@ -1,0 +1,7 @@
+{
+  "name": "blob_empty",
+  "kind": "blob",
+  "description": "Blob with empty content; hex is the raw content, id is BLAKE3(raw) with kind Blob.",
+  "hex": "",
+  "id_text": "b1af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+}

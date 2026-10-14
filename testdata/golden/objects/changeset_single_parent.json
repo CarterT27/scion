@@ -1,0 +1,7 @@
+{
+  "name": "changeset_single_parent",
+  "kind": "changeset",
+  "description": "parents [changeset_root id], root_tree = tree_single_file id, meta = meta_native id, change_id bytes 00 01 .. 0f, delta [Put \"hello.txt\" mode 1 blob(\"hello\\n\") size 6], no extensions.",
+  "hex": "010101032597b62a1634a5e5c5bd505e47cf5fb15939cde2a52c3d692c7bdf1c92391c330102f6995eab0ccb0c1071bc26572ecff6646f144e57f4eebe89acf76b840db9d4240104be58a493f9ed93a6f3726a8da1971cf076ef9a007bd7307cfa056ebe3b2a39af000102030405060708090a0b0c0d0e0f010968656c6c6f2e747874010101018e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a990600",
+  "id_text": "c1bd8a110e9e5b4fa0d3ba1e19742df87d7f576d7ec55555b5bbfbb83dab14107c"
+}

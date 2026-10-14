@@ -1,0 +1,7 @@
+{
+  "name": "meta_native",
+  "kind": "meta",
+  "description": "Native Meta without committer: author \"Ada Lovelace <ada@example.com>\", author_time seconds 1700000000 tz -300, committer absent, committer_time absent, creator \"github:ada\", message \"Add hello\\n\", no extensions.",
+  "hex": "011e416461204c6f76656c616365203c616461406578616d706c652e636f6d3e80c49fd50cd70400000a6769746875623a6164610a4164642068656c6c6f0a00",
+  "id_text": "m1be58a493f9ed93a6f3726a8da1971cf076ef9a007bd7307cfa056ebe3b2a39af"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "tree_even_extension",
+  "kind": "tree",
+  "description": "tree_single_file plus one unknown even (ignorable) extension: tag 6, value \"scion-ext\". Preserved byte for byte; changes the id.",
+  "hex": "01010968656c6c6f2e7478740101018e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a99060106097363696f6e2d657874",
+  "id_text": "t10326d88def0275668d0268e360b01524f1fe7b09bcee4dbc84347cebd4769bb5"
+}

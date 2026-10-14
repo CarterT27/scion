@@ -1,0 +1,7 @@
+{
+  "name": "meta_root",
+  "kind": "meta",
+  "description": "Bootstrap Meta (PLAN 6.5): author \"scion <scion@localhost>\", author_time 0/0, no committer, no committer_time, creator \"service:scion\", message \"root\", no extensions.",
+  "hex": "01177363696f6e203c7363696f6e406c6f63616c686f73743e000000000d736572766963653a7363696f6e04726f6f7400",
+  "id_text": "m12f9e79e2124cb9e9bac52dc8842e79396cca6970d1bb609526e22c3a17db2044"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "changeset_root",
+  "kind": "changeset",
+  "description": "Root changeset (PLAN 6.5): no parents, root_tree = tree_empty id, meta = meta_root id, change_id = first 16 bytes of BLAKE3(\"scion-root-v1\"), empty delta, no extensions.",
+  "hex": "01000102396eab8ebe8b2247fed631cee54835e0c8678ab1cc0d5b8a73f9f86e813187d501042f9e79e2124cb9e9bac52dc8842e79396cca6970d1bb609526e22c3a17db2044aeac6123ae599dc7c874f42da1fa611c0000",
+  "id_text": "c12597b62a1634a5e5c5bd505e47cf5fb15939cde2a52c3d692c7bdf1c92391c33"
+}
