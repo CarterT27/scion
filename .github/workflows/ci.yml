@@ -21,7 +21,7 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Toolchain (rust-toolchain.toml)
-        run: rustup show
+        run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: scripts/check.sh
         run: scripts/check.sh
@@ -40,7 +40,7 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Toolchain (rust-toolchain.toml)
-        run: rustup show
+        run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: scripts/check.sh --full
         run: scripts/check.sh --full
@@ -55,7 +55,7 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Toolchain (rust-toolchain.toml)
-        run: rustup show
+        run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: Start CockroachDB and MinIO
         run: docker compose -f docker/compose.test.yml up -d --wait
