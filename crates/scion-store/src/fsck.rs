@@ -89,6 +89,9 @@ const COMMIT_GRAPH: &str = "commit_graph";
 const PATH_INDEX: &str = "path_index";
 const GIT_MAPPING: &str = "git_mapping";
 
+/// "No limit" for list reads; SQL backends bind limits as INT8, so stay within `i64`.
+const UNBOUNDED: usize = i64::MAX as usize;
+
 /// A file-level change: path bytes and the resulting `(mode, id, size)` (`None` = delete).
 type FileChange = (Vec<u8>, Option<(Mode, ObjectId, u64)>);
 
@@ -311,7 +314,7 @@ impl<'a> Checker<'a> {
                     let mut all = true;
                     for d in &cs.delta {
                         if let DeltaOp::Put { id: blob, .. } = &d.op {
-                            let rows = meta.object_paths(blob, usize::MAX).await?;
+                            let rows = meta.object_paths(blob, UNBOUNDED).await?;
                             if !rows.iter().any(|r| r.path.as_bytes() == d.path.as_bytes()) {
                                 all = false;
                                 break;
@@ -491,7 +494,7 @@ pub async fn fsck(objects: &ObjectRepo, opts: &FsckOptions) -> Result<Vec<Violat
         verified: HashSet::new(),
     };
     let meta = objects.storage().meta.clone();
-    let ids = meta.changesets_by_prefix("", usize::MAX).await?;
+    let ids = meta.changesets_by_prefix("", UNBOUNDED).await?;
     for id in &ids {
         ck.changeset(id).await?;
     }

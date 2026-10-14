@@ -828,3 +828,27 @@ async fn keys_follow_the_spec_layout() {
         format!("scion/q/{repo_id}/b/{}/{}", &id.hex()[..2], id.hex())
     );
 }
+
+#[tokio::test]
+async fn empty_blob_and_changeset_frames() {
+    let (repo, h) = repo();
+    let (id, _) = repo.put_blob(Bytes::new()).await.unwrap();
+    assert_eq!(id, ObjectId::hash_blob(b""));
+    assert!(h.blobs.raw(&repo.key(&id, Area::Live)).is_some());
+    assert_eq!(repo.get(&id).await.unwrap(), Bytes::new());
+    let cs = opaque_cs_row(b"framed changeset", 1);
+    repo.storage()
+        .meta
+        .commit_changeset(bundle(cs.clone(), vec![]))
+        .await
+        .unwrap();
+    let (frame, row) = repo.get_frame(&cs.id).await.unwrap();
+    assert!(matches!(frame, StoredFrame::Raw(b) if b == cs.encoded));
+    assert_eq!((row.kind, row.state), (Kind::Changeset, ObjectState::Live));
+    // A corrupt changeset row is an integrity failure.
+    let mut bad = cs.clone();
+    bad.encoded = Bytes::from_static(b"tampered");
+    h.meta.put_changeset_row_raw(bad);
+    assert_code(repo.get(&cs.id).await, ErrorCode::Integrity);
+    assert_eq!(repo.storage().counters.snapshot().integrity_failures, 1);
+}
