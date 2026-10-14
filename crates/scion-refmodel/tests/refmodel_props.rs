@@ -21,14 +21,21 @@ impl Rng {
     }
 }
 
+/// Default-run count (PLAN 3.5): `SCION_PROPTEST_CASES` or `default`.
 fn cases(default: u64) -> u64 {
-    if std::env::var("SCION_FULL").is_ok() {
-        return 1_000_000;
-    }
     std::env::var("SCION_PROPTEST_CASES")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default)
+}
+
+/// Spec-sized count for the `#[ignore] full_*` variants: 10^6 under `SCION_FULL`.
+fn full_cases() -> u64 {
+    if std::env::var("SCION_FULL").is_ok() {
+        1_000_000
+    } else {
+        cases(1_000_000)
+    }
 }
 
 const LINES: [&str; 6] = ["a\n", "b\n", "c\n", "a\r\n", "d", "\n"];
@@ -134,7 +141,7 @@ fn prop_myers_script_is_valid_and_minimal() {
 #[test]
 #[ignore]
 fn full_prop_myers_script_is_valid_and_minimal() {
-    run_myers(cases(1_000_000), 2);
+    run_myers(full_cases(), 2);
 }
 
 fn run_merge3(n: u64, seed: u64) {
@@ -166,14 +173,24 @@ fn prop_merge3_basic_laws() {
 #[test]
 #[ignore]
 fn full_prop_merge3_basic_laws() {
-    run_merge3(cases(1_000_000), 4);
+    run_merge3(full_cases(), 4);
 }
 
 #[test]
 fn prop_disjoint_hunks_both_apply() {
+    run_disjoint(cases(10_000), 5);
+}
+
+#[test]
+#[ignore]
+fn full_prop_disjoint_hunks_both_apply() {
+    run_disjoint(full_cases(), 8);
+}
+
+fn run_disjoint(n: u64, seed: u64) {
     // Edits at lines separated by at least one unchanged line merge cleanly with both applied.
-    let mut r = Rng(5);
-    for i in 0..cases(10_000) {
+    let mut r = Rng(seed);
+    for i in 0..n {
         let n = 3 + r.below(8) as usize;
         let base: Vec<String> = (0..n).map(|k| format!("l{k}\n")).collect();
         let lo = r.below(n as u64 - 2) as usize;
@@ -268,5 +285,5 @@ fn prop_merge_trees_laws() {
 #[test]
 #[ignore]
 fn full_prop_merge_trees_laws() {
-    run_tree_laws(cases(1_000_000), 7);
+    run_tree_laws(full_cases(), 7);
 }

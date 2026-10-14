@@ -228,14 +228,21 @@ impl Rng {
     }
 }
 
+/// Default-run count (PLAN 3.5): `SCION_PROPTEST_CASES` or `default`.
 fn cases(default: u64) -> u64 {
-    if std::env::var("SCION_FULL").is_ok() {
-        return 1_000_000;
-    }
     std::env::var("SCION_PROPTEST_CASES")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default)
+}
+
+/// Spec-sized count for the `#[ignore] full_*` variants: 10^6 under `SCION_FULL`.
+fn full_cases() -> u64 {
+    if std::env::var("SCION_FULL").is_ok() {
+        1_000_000
+    } else {
+        cases(1_000_000)
+    }
 }
 
 fn random_path(r: &mut Rng) -> Vec<u8> {
@@ -327,7 +334,7 @@ fn prop_file_diff_inverts_apply_delta() {
 #[test]
 #[ignore]
 fn full_prop_file_diff_inverts_apply_delta() {
-    run_roundtrip(cases(1_000_000), 0x5c10_0008);
+    run_roundtrip(full_cases(), 0x5c10_0008);
 }
 
 /// Independent characterization of validity: every delete names a file of `t`, every put
@@ -404,5 +411,5 @@ fn prop_random_deltas_valid_iff_naive_valid() {
 #[test]
 #[ignore]
 fn full_prop_random_deltas_valid_iff_naive_valid() {
-    run_random_deltas(cases(1_000_000), 0x5c10_000a);
+    run_random_deltas(full_cases(), 0x5c10_000a);
 }
