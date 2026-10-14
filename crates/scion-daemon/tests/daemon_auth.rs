@@ -177,3 +177,44 @@ async fn decisions_expire_after_access_cache_ttl() {
     get_one(&a, r).await.unwrap();
     assert_eq!(h.upstream_calls(upstream_methods::CHECK_ACCESS), n + 1);
 }
+
+/// SPEC 10.4 through coalescing: B's request joins A's in-flight upstream fetch of a missing
+/// restricted object; B never receives the bytes fetched with A's token without B's own
+/// positive decision, and gets exactly B's upstream status.
+#[tokio::test(flavor = "multi_thread")]
+async fn coalesced_fetch_for_a_is_not_served_to_b_without_bs_decision() {
+    let h = Harness::start(Opts {
+        gate: true,
+        ..Default::default()
+    })
+    .await;
+    let (warm, _) = h.blob(9, 10, false);
+    let (r, rdata) = h.blob(1, 5000, true);
+    h.up.deny(BOB, r);
+    let a = h.via_daemon(ALICE).await;
+    let b = h.via_daemon(BOB).await;
+    // Warm keys, tokens and the redaction sync for both principals.
+    get_one(&a, warm).await.unwrap();
+    get_one(&b, warm).await.unwrap();
+    let gate = h.gate.clone().unwrap();
+    gate.set_open(false);
+    let ta = tokio::spawn({
+        let a = a.clone();
+        async move { get_one(&a, r).await }
+    });
+    assert!(eventually(Duration::from_secs(5), || gate.waiting() == 1).await);
+    let tb = tokio::spawn({
+        let b = b.clone();
+        async move { get_one(&b, r).await }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(gate.waiting(), 1, "B joined A's fetch instead of fetching");
+    gate.set_open(true);
+    let ia = ta.await.unwrap().unwrap();
+    assert_eq!((ia.status, ia.content), (OK, rdata.to_vec()));
+    let ib = tb.await.unwrap().unwrap();
+    assert_eq!(ib.status, DENIED);
+    assert!(ib.content.is_empty());
+    let checks = h.up.requests_for(upstream_methods::CHECK_ACCESS);
+    assert!(checks.iter().any(|c| c.principal.as_deref() == Some(BOB)));
+}

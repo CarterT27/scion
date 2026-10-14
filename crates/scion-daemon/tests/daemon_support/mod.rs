@@ -28,6 +28,8 @@ pub const BOB: &str = "github:bob";
 pub struct Opts {
     pub manual_clock: bool,
     pub gate: bool,
+    /// Serve the FakeUpstream over TLS (SPEC 17: TLS between daemon and server).
+    pub tls: bool,
     pub tweak: Box<dyn FnOnce(&mut DaemonConfig) + Send>,
 }
 
@@ -36,6 +38,7 @@ impl Default for Opts {
         Opts {
             manual_clock: false,
             gate: false,
+            tls: false,
             tweak: Box::new(|_| {}),
         }
     }
@@ -124,9 +127,13 @@ impl Drop for Harness {
 }
 
 pub fn upstream_opts(keyring: &Keyring) -> FakeUpstreamOpts {
+    upstream_opts_tls(keyring, false)
+}
+
+pub fn upstream_opts_tls(keyring: &Keyring, tls: bool) -> FakeUpstreamOpts {
     let verifier = keyring.verifier();
     FakeUpstreamOpts {
-        tls: false,
+        tls,
         principal_of: Arc::new(move |t: &str| {
             verifier
                 .verify(t, SystemTime::now())
@@ -144,7 +151,7 @@ pub fn upstream_opts(keyring: &Keyring) -> FakeUpstreamOpts {
 impl Harness {
     pub async fn start(opts: Opts) -> Harness {
         let keyring = Keyring::generate_for_tests(1);
-        let up = FakeUpstream::start(upstream_opts(&keyring)).await;
+        let up = FakeUpstream::start(upstream_opts_tls(&keyring, opts.tls)).await;
         let (gate, gate_dir, gate_task, upstream_endpoint) = if opts.gate {
             let ch = ScionClient::connect(&up.endpoint(), up.tls(), None)
                 .await

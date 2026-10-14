@@ -69,6 +69,9 @@ pub(crate) struct Inner {
     /// Principals with a successful upstream ResolveRef within the access TTL.
     ref_readers: Mutex<HashMap<String, Instant>>,
     verifier: parking_lot::RwLock<Option<Verifier>>,
+    /// Single-flight guard for the first key load, so a burst of first requests makes one
+    /// GetServerInfo call instead of one per request.
+    keys_load: tokio::sync::Mutex<()>,
     keys_refreshed_at: Mutex<Option<Instant>>,
     server_info: Mutex<Option<(v1::ServerInfo, Instant)>>,
     policy_epoch: Mutex<Option<u64>>,
@@ -144,6 +147,7 @@ impl Inner {
             classes: Mutex::new(HashMap::new()),
             ref_readers: Mutex::new(HashMap::new()),
             verifier: parking_lot::RwLock::new(None),
+            keys_load: tokio::sync::Mutex::new(()),
             keys_refreshed_at: Mutex::new(None),
             server_info: Mutex::new(None),
             policy_epoch: Mutex::new(None),
@@ -355,6 +359,10 @@ impl Inner {
 
     /// The verifier, loading the keys from upstream GetServerInfo on first use (SPEC 10.4).
     async fn verifier(&self) -> Result<Verifier> {
+        if let Some(v) = self.verifier.read().clone() {
+            return Ok(v);
+        }
+        let _load = self.keys_load.lock().await;
         if let Some(v) = self.verifier.read().clone() {
             return Ok(v);
         }

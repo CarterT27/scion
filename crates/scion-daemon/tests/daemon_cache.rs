@@ -267,6 +267,7 @@ async fn ref_versions_stay_monotonic_across_expiry_and_reordered_upstream_answer
         gate: true,
         manual_clock: true,
         tweak: Box::new(|c| c.ref_cache_ttl_ms = 500),
+        ..Default::default()
     })
     .await;
     let clock = h.clock.clone().unwrap();

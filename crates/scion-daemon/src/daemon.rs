@@ -67,6 +67,23 @@ fn remove_stale_socket(path: &Path) -> Result<()> {
     }
 }
 
+/// Refuse to start when another process is accepting connections on `path`: deleting a live
+/// daemon's socket would silently take over its clients.
+fn refuse_live_socket(path: &Path) -> Result<()> {
+    use std::os::unix::fs::FileTypeExt;
+    let is_socket = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_socket());
+    if is_socket && std::os::unix::net::UnixStream::connect(path).is_ok() {
+        return Err(ScionError::new(
+            ErrorCode::Unavailable,
+            format!(
+                "daemon: socket {} is in use by a running process",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 impl Daemon {
     /// Open the verified cache, bind the Unix socket (mode 0666: authorization rests on
     /// per-request tokens, never on socket identity, SPEC 17) and start serving: the local
@@ -80,6 +97,9 @@ impl Daemon {
         clock: Arc<dyn Clock>,
         metrics: Arc<Metrics>,
     ) -> Result<DaemonHandle> {
+        // Before touching the cache: opening it deletes temp files, which would break a live
+        // daemon's in-progress inserts.
+        refuse_live_socket(&cfg.socket)?;
         let (dir, max, low, verify) = (
             cfg.cache_dir.clone(),
             cfg.max_cache_bytes,

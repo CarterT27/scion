@@ -136,6 +136,13 @@ fn verify_and_insert(
     if let Err(e) = inner.cache.insert(id, payload) {
         tracing::warn!(object = %id, error = %e, "could not cache a verified object");
     }
+    // A redaction applied between the check above and the insert: the poll that applied it
+    // may have looked for cached copies before this insert landed, so delete it here.
+    if inner.redactions.contains(id)
+        && let Err(e) = inner.cache.remove(id)
+    {
+        tracing::warn!(object = %id, error = %e, "could not delete a redacted cache entry");
+    }
     Ok(content)
 }
 

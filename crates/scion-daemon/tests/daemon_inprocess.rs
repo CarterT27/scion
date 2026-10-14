@@ -50,3 +50,40 @@ async fn in_process_daemon_lifecycle() {
     d.restart().await;
     d.handle.shutdown().await;
 }
+
+/// A stale socket left by a crashed daemon is replaced; a live one is never taken over; a
+/// non-socket file at the path is never deleted.
+#[tokio::test(flavor = "multi_thread")]
+async fn socket_path_takeover_rules() {
+    let keyring = scion_auth::Keyring::generate_for_tests(1);
+    let up = FakeUpstream::start(upstream_opts(&keyring)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = scion_config::DaemonConfig::for_tests(dir.path(), &up.endpoint().to_string());
+    let start = |cfg: scion_config::DaemonConfig| {
+        let conn = std::sync::Arc::new(scion_daemon::DirectUpstream::new(up.endpoint(), up.tls()));
+        async move {
+            scion_daemon::Daemon::start(
+                cfg,
+                conn,
+                std::sync::Arc::new(scion_core::SystemClock),
+                scion_obs::Metrics::new(),
+            )
+            .await
+        }
+    };
+    // Stale: a bound-then-dropped listener leaves a socket file nobody accepts on.
+    drop(std::os::unix::net::UnixListener::bind(&cfg.socket).unwrap());
+    assert!(cfg.socket.exists());
+    let d = start(cfg.clone()).await.unwrap();
+    // Live: a second daemon on the same path is refused and the first keeps serving.
+    let e = start(cfg.clone()).await.err().expect("live socket refused");
+    assert_eq!(e.code, scion_core::ErrorCode::Unavailable);
+    assert!(d.socket_path().exists());
+    d.shutdown().await;
+    assert!(!cfg.socket.exists());
+    // Not a socket: refused, file untouched.
+    std::fs::write(&cfg.socket, b"keep").unwrap();
+    let e = start(cfg.clone()).await.err().expect("non-socket refused");
+    assert_eq!(e.code, scion_core::ErrorCode::InvalidArgument);
+    assert_eq!(std::fs::read(&cfg.socket).unwrap(), b"keep");
+}
