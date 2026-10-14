@@ -6,4 +6,4 @@ mod config;
 mod redactor;
 
 pub use config::{RedactOutcome, RedactionConfig};
-pub use redactor::Redactor;
+pub use redactor::{DEFAULT_UNREDACT_REASON, Redactor, SCHEDULED_PURGE_REASON, SCHEDULER_ACTOR};

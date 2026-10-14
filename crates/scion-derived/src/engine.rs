@@ -378,9 +378,14 @@ impl EagerHook for DerivedEngine {
         let mut rows = Vec::new();
         for t in self.registry.eager_types() {
             let start = Instant::now();
-            let out = t.derive(&self.ctx, input).await?;
+            let mut out = t.derive(&self.ctx, input).await?;
             if let Some(m) = &metrics {
                 m.derive_duration(t.name(), DeriveMode::Eager, start.elapsed());
+            }
+            // Amendment W3-1: eager types have no Clock; the engine stamps every eager row.
+            let now = self.clock.now();
+            for r in &mut out {
+                r.at = now;
             }
             if t.content_bearing() && out.iter().any(|r| r.source_object.is_none()) {
                 // SPEC 9.1: content-bearing records MUST be keyed by their source object id.

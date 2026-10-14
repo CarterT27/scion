@@ -165,3 +165,11 @@ so that this file stays the single index of implementation-defined behaviour.
 | Conflict marker lines | A `\n` is inserted before a marker when the preceding content lacks one | line-diff3-v1 8 |
 | `ErrorPayload::Candidates` | `ScionError::subcode()` reports `ambiguous_prefix` for it | scion-core `error.rs` |
 | Principal names | `github:` / `service:` followed by 1-255 printable ASCII bytes without `:` or `/` | scion-core `principal.rs` |
+
+## Appendix W3. Content-bearing derived records (amendment W3-3)
+
+`DerivedEngine::purge_content_for` removes derived records through
+`MetaStore::delete_derived_by_source`, which deletes rows only. In v1 every content-bearing
+derived type MUST store its value inline in the `derived` row (no `storage_key`), so that purging
+the rows also purges the content (SPEC 13.5). A future type that needs object-storage values must
+first amend `delete_derived_by_source` to return the deleted rows.
