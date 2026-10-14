@@ -533,6 +533,42 @@ async fn run_seed(
         check_ref_registers_with_initial(&tampered, &initial).is_err(),
         "seed {seed}: a tampered history must not be linearizable"
     );
+
+    // Second negative control (real-time order): one more read, invoked after the final read
+    // completed, that observes the version before the final one (a stale read). Versions
+    // only grow, so this must be a definite violation, not merely an exhausted search.
+    if r.version > 1 {
+        let mut stale = events.clone();
+        let op = stale.iter().map(|e| e.op).max().unwrap_or(0) + 1;
+        let at = stale.iter().map(|e| e.at).max().unwrap_or(0);
+        let client = faults.clients as u32 + 1;
+        stale.push(scion_testkit::lincheck::Event {
+            op,
+            client,
+            r: ref_name.clone(),
+            call: Some(RefOp::Read),
+            ret: None,
+            at: at + 1,
+        });
+        stale.push(scion_testkit::lincheck::Event {
+            op,
+            client,
+            r: ref_name.clone(),
+            call: None,
+            ret: Some(RefRet::Value {
+                version: r.version - 1,
+                target: raw(&r.target),
+            }),
+            at: at + 2,
+        });
+        match check_ref_registers_with_initial(&stale, &initial) {
+            Ok(()) => panic!("seed {seed}: a stale read after the final read was accepted"),
+            Err(v) => assert!(
+                !v.detail.contains("inconclusive"),
+                "seed {seed}: the stale-read control must be a definite violation: {v}"
+            ),
+        }
+    }
     Ok(stats)
 }
 

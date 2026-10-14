@@ -782,16 +782,43 @@ async fn run_idempotent_retry(backend: Backend) {
         );
     }
     faults.arm(&point, FaultAction::FailAfter, Some(4));
+    let lost = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut tasks = tokio::task::JoinSet::new();
     for (i, h) in heads.iter().copied().enumerate() {
         let client = clients[i % SERVERS].clone();
-        tasks.spawn(async move { (i, land_retrying(&client, &h).await) });
+        let lost = lost.clone();
+        tasks.spawn(async move {
+            // Retry like `land_retrying`, counting the injected lost responses.
+            for _ in 0..50 {
+                match client.write().land(land_req(&h)).await {
+                    Ok(r) => return (i, Ok(r.into_inner())),
+                    Err(s) if error_from_status(&s).retryable() => {
+                        if error_from_status(&s).subcode() == Some(scion_core::subcode::INJECTED) {
+                            lost.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    Err(s) => return (i, Err(s)),
+                }
+            }
+            (i, land_retrying(&client, &h).await)
+        });
     }
+    let mut reported: BTreeMap<Vec<u8>, (Vec<u8>, Vec<u8>)> = BTreeMap::new();
     while let Some(r) = tasks.join_next().await {
         let (i, r) = r.unwrap();
-        r.unwrap_or_else(|s| panic!("client {i} never landed: {s:?}"));
+        let r = r.unwrap_or_else(|s| panic!("client {i} never landed: {s:?}"));
+        assert_eq!(r.landed.len(), 1, "client {i} landed entries");
+        let l = &r.landed[0];
+        assert_eq!(l.change_id, TestCluster::change_id(100 + i as u32));
+        reported.insert(l.change_id.clone(), (l.source.clone(), l.result.clone()));
     }
     faults.disarm_all();
+    assert!(
+        lost.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "no response was lost: the FailAfter fault never fired on the land path"
+    );
+
     let (_, v3) = c.ref_head("main").await;
     assert_eq!(
         v3,
@@ -808,6 +835,19 @@ async fn run_idempotent_retry(backend: Backend) {
     for i in 0..n {
         assert_eq!(count.get(&TestCluster::change_id(100 + i as u32)), Some(&1));
     }
+    // Retried or not, every client got the landed entry recorded in the ref log (SPEC 18.4:
+    // an idempotent retry returns the recorded `landed` rows with the current target and
+    // version, so only the entries are compared here).
+    let logged: BTreeMap<Vec<u8>, (Vec<u8>, Vec<u8>)> = log
+        .iter()
+        .flat_map(|e| e.landed.iter())
+        .filter(|l| reported.contains_key(&l.change_id))
+        .map(|l| (l.change_id.clone(), (l.source.clone(), l.result.clone())))
+        .collect();
+    assert_eq!(
+        reported, logged,
+        "responses carry the recorded landed entries"
+    );
     invariants::check_16_2(&c).await.unwrap();
 }
 
