@@ -1,5 +1,10 @@
 //! RPC log events and path hashing (SPEC 15.1; PLAN 6.9; P04).
-#![allow(unused_variables)] // P00 stub: remove when implemented.
+
+/// The tracing target of RPC log events (SPEC 15.1).
+pub const RPC_TARGET: &str = "scion::rpc";
+
+/// The `principal` value logged for unauthenticated calls (`GetServerInfo`, `Login`).
+pub const ANONYMOUS_PRINCIPAL: &str = "anonymous";
 
 /// The REQUIRED SPEC 15.1 fields of one RPC log event.
 #[derive(Clone, Debug, Default)]
@@ -29,13 +34,51 @@ pub struct RpcLogEvent {
 }
 
 impl RpcLogEvent {
-    /// Emit at INFO with target `scion::rpc`.
+    /// Emit at INFO with target `scion::rpc` (SPEC 15.1). `request_id`, `rpc`, `tier`,
+    /// `principal` (`anonymous` when unauthenticated), `repo`, `status` and `duration_ms` are
+    /// always present; `changeset_id`, `ref`, `ref_version` and `land_attempt` are present
+    /// when set.
     pub fn emit(&self) {
-        todo!("P04")
+        let principal = self.principal.as_deref().unwrap_or(ANONYMOUS_PRINCIPAL);
+        tracing::info!(
+            target: RPC_TARGET,
+            request_id = self.request_id.as_str(),
+            rpc = self.rpc.as_str(),
+            tier = self.tier,
+            principal = principal,
+            repo = self.repo.as_str(),
+            status = self.status.as_str(),
+            duration_ms = self.duration_ms,
+            changeset_id = self.changeset_id.as_deref(),
+            r#ref = self.ref_name.as_deref(),
+            ref_version = self.ref_version,
+            land_attempt = self.land_attempt,
+            "rpc"
+        );
     }
 }
 
-/// 16 hex characters of BLAKE3 of `path`: the ONLY way paths may appear in logs (PLAN 6.9).
+/// 16 hex characters of BLAKE3 of `path`: the ONLY way paths may appear in logs (PLAN 6.9,
+/// SPEC 15.1).
 pub fn path_hash(path: &[u8]) -> String {
-    todo!("P04")
+    let digest = blake3::hash(path);
+    hex::encode(&digest.as_bytes()[..8])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_hash_shape() {
+        let h = path_hash(b"src/secret/plan.txt");
+        assert_eq!(h.len(), 16);
+        assert!(
+            h.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        );
+        assert_eq!(h, path_hash(b"src/secret/plan.txt"));
+        assert_ne!(h, path_hash(b"src/secret/plan.txT"));
+        assert_eq!(&blake3::hash(b"").to_hex()[..16], path_hash(b""));
+    }
 }
