@@ -3,16 +3,21 @@
 //! before any engine depends on either side.
 //!
 //! 1. Every `testdata/golden/objects` vector is reproduced byte-for-byte (and id-for-id) by the
-//!    refmodel encoder, built from the vector's description (SPEC 19.1, 4.1-4.3).
+//!    refmodel encoder and, independently, by the production encoders, each built from the
+//!    vector's description (SPEC 19.1, 4.1-4.3).
 //! 2. Random valid trees, Metas and changesets: scion-object bytes and ids equal the refmodel's
 //!    (SPEC 19.1 id agreement; 10^4 cases by default, `full_*` 10^6 with `SCION_FULL=1`).
 //! 3. Every `testdata/golden/diff` vector is reproduced by `scion_refmodel::diff` (Myers edit
-//!    runs, hunks, merge3 results and conflict ranges; `docs/contracts/line-diff3-v1.md`).
+//!    runs, hunks, merge3 results and conflict ranges; `docs/contracts/line-diff3-v1.md`), and
+//!    every golden `markers_hex` by a test-local transcription of contract section 8.
 //! 4. Differential `scion_merge::merge3` vs `scion_refmodel::diff::merge3_full` on generated
-//!    text triples (CRLF, unterminated last lines, identical edits), plus `myers`/`diff_lines`
-//!    vs the refmodel (SPEC 19.4).
+//!    text triples (CRLF, unterminated last lines, identical edits), with the SPEC 19.4
+//!    trivial-side properties, ours/theirs symmetry, `render_markers`, and
+//!    `myers`/`diff_lines`/`line_origins` vs the refmodel (SPEC 19.4). The generator's
+//!    clean/conflict mix is asserted so the differential cannot silently go one-sided.
 //! 5. `scion_object::file_diff` vs `scion_refmodel::file_diff` on random flat trees (SPEC 4.3.4).
-//! 6. `scion_testkit::encode_tree` root ids and objects equal the refmodel's trees.
+//! 6. `scion_testkit::encode_tree` and `shared_subtree_repo` root ids and objects equal the
+//!    refmodel's trees.
 //!
 //! A failing property panics with the proptest-minimized case. Production files and refmodel
 //! files are never edited from here: disagreements are routed as amendments.
@@ -295,6 +300,176 @@ fn model_golden_objects() -> BTreeMap<&'static str, ModelCase> {
     out
 }
 
+/// Every golden object vector built a second time, from the same descriptions, with the
+/// production encoders only (scion-object values, `scion_object::file_diff` deltas, ids from
+/// `Canonical::id`), so the golden bytes are checked against both encoders (SPEC 19.1).
+fn production_golden_objects() -> BTreeMap<&'static str, (Vec<u8>, ObjectId)> {
+    use scion_object::{Extensions, HistoryNode, Name, NodeKind};
+    fn root_of(t: &MTree) -> (Vec<u8>, ObjectId) {
+        let objs = prod_tree_objects(t);
+        let (id, bytes) = objs.get(b"".as_slice()).unwrap();
+        (bytes.clone(), *id)
+    }
+    fn obj<T: Canonical>(v: &T) -> (Vec<u8>, ObjectId) {
+        (v.encode(), v.id())
+    }
+    fn ext(tag: u64, value: &[u8]) -> Extensions {
+        let mut e = Extensions::new();
+        e.insert(tag, value.to_vec()).unwrap();
+        e
+    }
+    let mut out = BTreeMap::new();
+    let hello = b"hello\n".as_slice();
+    out.insert("blob_empty", (Vec::new(), ObjectId::hash_blob(b"")));
+    out.insert("blob_hello", (hello.to_vec(), ObjectId::hash_blob(hello)));
+
+    let empty = MTree::new();
+    let single = mtree(&[(b"hello.txt", 1, hello)]);
+    let all_modes = mtree(&[
+        (b"README", 1, hello),
+        (b"bin/inner.txt", 1, b"inner\n"),
+        (b"link", 3, b"../target"),
+        (b"run.sh", 2, b"#!/bin/sh\necho hi\n"),
+    ]);
+    let x200 = vec![b'x'; 200];
+    out.insert("tree_empty", root_of(&empty));
+    out.insert("tree_single_file", root_of(&single));
+    out.insert(
+        "tree_subdir",
+        root_of(&mtree(&[(b"inner.txt", 1, b"inner\n")])),
+    );
+    out.insert("tree_all_modes", root_of(&all_modes));
+    out.insert(
+        "tree_bytewise_names",
+        root_of(&mtree(&[
+            (b"B", 1, b"B"),
+            (b"a", 1, b"a"),
+            (&[0xc3, 0xa9], 1, &x200),
+            (&[0xff], 2, b""),
+        ])),
+    );
+    let mut single_ext = Tree::decode(&root_of(&single).0).unwrap();
+    single_ext.extensions = ext(6, b"scion-ext");
+    out.insert("tree_even_extension", obj(&single_ext));
+
+    let ada = b"Ada Lovelace <ada@example.com>".to_vec();
+    let ts = |seconds, tz_offset_minutes| scion_object::Timestamp {
+        seconds,
+        tz_offset_minutes,
+    };
+    let meta_root = Meta {
+        author: b"scion <scion@localhost>".to_vec(),
+        author_time: ts(0, 0),
+        committer: None,
+        committer_time: None,
+        creator: b"service:scion".to_vec(),
+        message: b"root".to_vec(),
+        extensions: Extensions::new(),
+    };
+    let meta_native = Meta {
+        author: ada.clone(),
+        author_time: ts(1_700_000_000, -300),
+        committer: None,
+        committer_time: None,
+        creator: b"github:ada".to_vec(),
+        message: b"Add hello\n".to_vec(),
+        extensions: Extensions::new(),
+    };
+    let meta_committer = Meta {
+        author: ada,
+        author_time: ts(1_600_000_000, 120),
+        committer: Some(b"Grace Hopper <grace@example.com>".to_vec()),
+        committer_time: Some(ts(1_600_000_100, -480)),
+        creator: b"service:importer".to_vec(),
+        message: b"Imported commit\n\nWith a body.\n".to_vec(),
+        extensions: Extensions::new(),
+    };
+    let mut meta_git = meta_committer.clone();
+    meta_git.extensions = ext(2, &from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904"));
+    let meta_negative = Meta {
+        author: vec![],
+        author_time: ts(-1, -720),
+        committer: None,
+        committer_time: Some(ts(i64::MIN, 840)),
+        creator: vec![],
+        message: vec![],
+        extensions: Extensions::new(),
+    };
+    out.insert("meta_root", obj(&meta_root));
+    out.insert("meta_native", obj(&meta_native));
+    out.insert("meta_with_committer", obj(&meta_committer));
+    out.insert("meta_git_commit_ext", obj(&meta_git));
+    out.insert("meta_negative_time", obj(&meta_negative));
+
+    let root_change_id: [u8; 16] = ObjectId::hash_encoded(Kind::Changeset, b"scion-root-v1")
+        .as_bytes()[2..18]
+        .try_into()
+        .unwrap();
+    let changeset = |parents: Vec<ObjectId>, t1: &MTree, t2: &MTree, meta: &Meta, cid| Changeset {
+        parents,
+        root_tree: root_of(t2).1,
+        meta: meta.id(),
+        change_id: ChangeId(cid),
+        delta: scion_object::file_diff(&flat_tree(t1), &flat_tree(t2)),
+        extensions: Extensions::new(),
+    };
+    let cs_root = changeset(vec![], &empty, &empty, &meta_root, root_change_id);
+    let cs_single = changeset(
+        vec![cs_root.id()],
+        &empty,
+        &single,
+        &meta_native,
+        ascending16(0x00),
+    );
+    let cs_merge = changeset(
+        vec![cs_single.id(), cs_root.id()],
+        &single,
+        &all_modes,
+        &meta_committer,
+        ascending16(0xa0),
+    );
+    let mut cs_ext = cs_single.clone();
+    cs_ext.extensions = ext(8, &[1, 2, 3]);
+    out.insert("changeset_root", obj(&cs_root));
+    out.insert("changeset_single_parent", obj(&cs_single));
+    out.insert("changeset_two_parents_mixed", obj(&cs_merge));
+    out.insert("changeset_even_extension", obj(&cs_ext));
+
+    let node = |kind, content, changeset, parents, children| HistoryNode {
+        kind,
+        content,
+        changeset,
+        parents,
+        children,
+        extensions: Extensions::new(),
+    };
+    let n_root = node(
+        NodeKind::Dir,
+        root_of(&empty).1,
+        cs_root.id(),
+        vec![],
+        vec![],
+    );
+    let n_file = node(
+        NodeKind::File,
+        ObjectId::hash_blob(hello),
+        cs_single.id(),
+        vec![],
+        vec![],
+    );
+    let n_dir = node(
+        NodeKind::Dir,
+        root_of(&single).1,
+        cs_single.id(),
+        vec![n_root.id()],
+        vec![(Name::new(b"hello.txt").unwrap(), n_file.id())],
+    );
+    out.insert("history_node_root_dir", obj(&n_root));
+    out.insert("history_node_file", obj(&n_file));
+    out.insert("history_node_dir", obj(&n_dir));
+    out
+}
+
 /// Production id text of a golden vector, decoded and re-identified by scion-object.
 fn production_id_text(kind: &str, bytes: &[u8]) -> String {
     match kind {
@@ -313,6 +488,12 @@ fn production_id_text(kind: &str, bytes: &[u8]) -> String {
 #[test]
 fn golden_objects_reproduced_by_refmodel_encoder() {
     let model = model_golden_objects();
+    let production = production_golden_objects();
+    assert_eq!(
+        model.keys().collect::<Vec<_>>(),
+        production.keys().collect::<Vec<_>>(),
+        "both constructions cover the same vectors"
+    );
     let files = load_golden("objects");
     assert!(files.len() >= 14, "at least 14 golden object vectors");
     let mut seen = BTreeSet::new();
@@ -348,6 +529,32 @@ fn golden_objects_reproduced_by_refmodel_encoder() {
                 "{file}: production id {prod} != refmodel {}",
                 id_text(&case.id)
             ));
+        }
+        // The production encoders, building the same description independently, agree.
+        match production.get(name) {
+            Some((bytes, id)) => {
+                if to_hex(bytes) != want_hex || id.to_text() != want_id {
+                    failures.push(format!(
+                        "{file}: production construction differs\n  bytes: {}\n  id:    {}",
+                        to_hex(bytes),
+                        id.to_text()
+                    ));
+                }
+            }
+            None => failures.push(format!("{file}: no production construction for {name}")),
+        }
+        // Production decode then encode is the identity on the golden bytes.
+        if kind != "blob" {
+            let raw = from_hex(want_hex);
+            let reenc = match kind {
+                "tree" => Tree::decode(&raw).unwrap().encode(),
+                "meta" => Meta::decode(&raw).unwrap().encode(),
+                "changeset" => Changeset::decode(&raw).unwrap().encode(),
+                _ => scion_object::HistoryNode::decode(&raw).unwrap().encode(),
+            };
+            if reenc != raw {
+                failures.push(format!("{file}: production encode(decode(b)) != b"));
+            }
         }
         // The id is the documented function of the bytes (kind byte from the id).
         let recomputed = if kind == "blob" {
@@ -619,6 +826,118 @@ fn golden_diff_vectors_reproduced_by_refmodel() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// `docs/contracts/line-diff3-v1.md` section 8 `render_markers`, transcribed here from the
+/// contract text (sections 6.2-6.6 and 8) on top of the refmodel's `split_lines` and
+/// `diff_hunks`. The refmodel has no marker renderer, so this test-local transcription is the
+/// oracle side for the golden `markers_hex` fields and for `scion_merge::render_markers`.
+fn model_render_markers(base: &[u8], ours: &[u8], theirs: &[u8]) -> Vec<u8> {
+    use scion_refmodel::diff::{MHunk, diff_hunks, split_lines};
+    struct Region {
+        rs: usize,
+        re: usize,
+        ours: Vec<MHunk>,
+        theirs: Vec<MHunk>,
+    }
+    let (bl, ol, tl) = (split_lines(base), split_lines(ours), split_lines(theirs));
+    let mut all: Vec<(MHunk, bool)> = diff_hunks(&bl, &ol)
+        .into_iter()
+        .map(|h| (h, false))
+        .chain(diff_hunks(&bl, &tl).into_iter().map(|h| (h, true)))
+        .collect();
+    all.sort_by_key(|(h, _)| (h.bs, h.be));
+    let mut regions: Vec<Region> = Vec::new();
+    for (h, is_theirs) in all {
+        let joins = regions.last().is_some_and(|r| h.bs <= r.re);
+        if !joins {
+            regions.push(Region {
+                rs: h.bs,
+                re: h.be,
+                ours: Vec::new(),
+                theirs: Vec::new(),
+            });
+        }
+        let r = regions.last_mut().unwrap();
+        r.re = r.re.max(h.be);
+        if is_theirs {
+            r.theirs.push(h);
+        } else {
+            r.ours.push(h);
+        }
+    }
+    // text_S of section 6.4.
+    let side_text = |side: &[&[u8]], hs: &[MHunk], rs: usize, re: usize| -> Vec<u8> {
+        let mut t = Vec::new();
+        let mut pos = rs;
+        for h in hs {
+            bl[pos..h.bs].iter().for_each(|l| t.extend_from_slice(l));
+            side[h.ns..h.ne].iter().for_each(|l| t.extend_from_slice(l));
+            pos = h.be;
+        }
+        bl[pos..re].iter().for_each(|l| t.extend_from_slice(l));
+        t
+    };
+    let marker = |out: &mut Vec<u8>, m: &[u8]| {
+        if out.last().is_some_and(|&c| c != b'\n') {
+            out.push(b'\n');
+        }
+        out.extend_from_slice(m);
+    };
+    let mut out = Vec::new();
+    let mut pos = 0;
+    for r in &regions {
+        bl[pos..r.rs].iter().for_each(|l| out.extend_from_slice(l));
+        let text_o = side_text(&ol, &r.ours, r.rs, r.re);
+        let text_t = side_text(&tl, &r.theirs, r.rs, r.re);
+        if r.theirs.is_empty() || text_o == text_t {
+            out.extend_from_slice(&text_o);
+        } else if r.ours.is_empty() {
+            out.extend_from_slice(&text_t);
+        } else {
+            marker(&mut out, b"<<<<<<< ours\n");
+            out.extend_from_slice(&text_o);
+            marker(&mut out, b"||||||| base\n");
+            bl[r.rs..r.re].iter().for_each(|l| out.extend_from_slice(l));
+            marker(&mut out, b"=======\n");
+            out.extend_from_slice(&text_t);
+            marker(&mut out, b">>>>>>> theirs\n");
+        }
+        pos = r.re;
+    }
+    bl[pos..].iter().for_each(|l| out.extend_from_slice(l));
+    out
+}
+
+#[test]
+fn golden_merge_markers_reproduced_by_contract_transcription() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    for (file, v) in load_golden("diff") {
+        if field(&v, "kind") != "merge" {
+            continue;
+        }
+        let base = from_hex(field(&v, "base_hex"));
+        let ours = from_hex(field(&v, "ours_hex"));
+        let theirs = from_hex(field(&v, "theirs_hex"));
+        let got = model_render_markers(&base, &ours, &theirs);
+        if to_hex(&got) != field(&v, "markers_hex") {
+            failures.push(format!(
+                "{file}: contract markers {:?}\n  golden {:?}",
+                Text(got.clone()),
+                Text(from_hex(field(&v, "markers_hex")))
+            ));
+        }
+        // Without conflicts the rendering is the clean merge (contract section 8).
+        if let Ok(clean) = scion_refmodel::diff::merge3_full(&base, &ours, &theirs)
+            && got != clean
+        {
+            failures.push(format!("{file}: clean rendering != refmodel merge3_full"));
+        }
+        checked += 1;
+    }
+    assert!(checked >= 12, "only {checked} merge vectors");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 // =============================================================================================
 // 4. merge3 / myers differential (SPEC 19.4)
 // =============================================================================================
@@ -627,6 +946,43 @@ fn merge3_agrees(t: Triple) -> TestCaseResult {
     let (b, o, th) = (&t.base.0, &t.ours.0, &t.theirs.0);
     let prod = scion_merge::merge3(b, o, th);
     let model = scion_refmodel::diff::merge3_full(b, o, th);
+    // SPEC 19.4 trivial-side properties, on the oracle (the production side then follows from
+    // the differential below).
+    if o == b {
+        ensure_eq(model.clone(), Ok(th.clone()), "o == b: result is t")?;
+    }
+    if th == b {
+        ensure_eq(model.clone(), Ok(o.clone()), "t == b: result is o")?;
+    }
+    if o == th {
+        ensure_eq(model.clone(), Ok(o.clone()), "o == t: result is o")?;
+    }
+    // Symmetry up to swapping the ours/theirs ranges (contract section 6), on both sides.
+    let swapped = scion_refmodel::diff::merge3_full(b, th, o).map_err(|cs| {
+        cs.into_iter()
+            .map(|(b, o, t)| (b, t, o))
+            .collect::<Vec<_>>()
+    });
+    ensure_eq(swapped, model.clone(), "refmodel merge3 symmetry")?;
+    let prod_swapped = match scion_merge::merge3(b, th, o) {
+        Merge3::Conflict(hs) => Merge3::Conflict(
+            hs.into_iter()
+                .map(|h| scion_core::ConflictHunk {
+                    base: h.base,
+                    ours: h.theirs,
+                    theirs: h.ours,
+                })
+                .collect(),
+        ),
+        clean => clean,
+    };
+    ensure_eq(prod_swapped, prod.clone(), "scion_merge merge3 symmetry")?;
+    // Client-side marker rendering (contract section 8) agrees with the transcription.
+    ensure_eq(
+        Text(scion_merge::render_markers(b, o, th)),
+        Text(model_render_markers(b, o, th)),
+        "render_markers",
+    )?;
     match (prod, model) {
         (Merge3::Clean(p), Ok(m)) => ensure_eq(Text(p), Text(m), "clean merge bytes"),
         (Merge3::Conflict(p), Err(m)) => ensure_eq(
@@ -670,7 +1026,23 @@ fn myers_agrees((a, b): (Text, Text)) -> TestCaseResult {
 }
 
 fn run_merge_differential(cases: u32) {
-    check("merge3 differential", cases, arb_triple(), merge3_agrees);
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let (clean, conflict) = (AtomicU32::new(0), AtomicU32::new(0));
+    check("merge3 differential", cases, arb_triple(), |t| {
+        match scion_refmodel::diff::merge3_full(&t.base.0, &t.ours.0, &t.theirs.0) {
+            Ok(_) => clean.fetch_add(1, Ordering::Relaxed),
+            Err(_) => conflict.fetch_add(1, Ordering::Relaxed),
+        };
+        merge3_agrees(t)
+    });
+    // Both outcomes are exercised substantially (each at least 10% of the cases).
+    let (clean, conflict) = (clean.into_inner(), conflict.into_inner());
+    if cases >= 100 {
+        assert!(
+            clean >= cases / 10 && conflict >= cases / 10,
+            "merge3 generator coverage: {clean} clean, {conflict} conflict of {cases}"
+        );
+    }
     check("myers differential", cases, arb_text_pair(), myers_agrees);
 }
 
@@ -746,26 +1118,54 @@ fn file_diff_agrees((a, b): (MTree, MTree)) -> TestCaseResult {
     )
 }
 
-#[test]
-fn file_diff_matches_refmodel() {
+/// Run the FileDiff differential and check that the generator exercises non-empty deltas and
+/// file <-> directory transitions (a Delete of `p` next to a Put under `p/`, or vice versa).
+fn run_file_diff_differential(cases: u32) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let (non_empty, flips) = (AtomicU32::new(0), AtomicU32::new(0));
     check(
         "file_diff differential",
-        default_cases(),
+        cases,
         arb_tree_pair(20),
-        file_diff_agrees,
+        |(a, b)| {
+            let d = scion_refmodel::file_diff(&a, &b);
+            if !d.is_empty() {
+                non_empty.fetch_add(1, Ordering::Relaxed);
+            }
+            let path = |e: &scion_refmodel::MDelta| match e {
+                scion_refmodel::MDelta::Put(p, _) | scion_refmodel::MDelta::Delete(p) => p.clone(),
+            };
+            let paths: Vec<Vec<u8>> = d.iter().map(path).collect();
+            let flip = paths.iter().any(|p| {
+                let mut dir = p.clone();
+                dir.push(b'/');
+                paths.iter().any(|q| q.starts_with(&dir))
+            });
+            if flip {
+                flips.fetch_add(1, Ordering::Relaxed);
+            }
+            file_diff_agrees((a, b))
+        },
     );
+    let (non_empty, flips) = (non_empty.into_inner(), flips.into_inner());
+    if cases >= 100 {
+        assert!(
+            non_empty >= cases / 2 && flips >= cases / 10,
+            "file_diff generator coverage: {non_empty} non-empty, {flips} flips of {cases}"
+        );
+    }
+}
+
+#[test]
+fn file_diff_matches_refmodel() {
+    run_file_diff_differential(default_cases());
 }
 
 #[test]
 #[ignore = "spec-sized (10^6); run with SCION_FULL=1 via scripts/check.sh --full"]
 fn full_file_diff_matches_refmodel() {
     if let Some(n) = full_cases("full_file_diff_matches_refmodel") {
-        check(
-            "file_diff differential",
-            n,
-            arb_tree_pair(20),
-            file_diff_agrees,
-        );
+        run_file_diff_differential(n);
     }
 }
 
@@ -867,5 +1267,42 @@ fn encode_tree_and_changesets_match_refmodel_on_corpus() {
             ..CorpusSpec::default()
         };
         repo_agrees(&format!("corpus seed {seed}"), &generate(&spec));
+    }
+}
+
+/// `scion_testkit::shared_subtree_repo` (the other testkit encoder, SPEC 19.18 corpora): its
+/// root id and encoded objects equal the refmodel's encoding of the materialized tree.
+#[test]
+fn shared_subtree_repos_match_refmodel() {
+    for depth in 1..=4u32 {
+        for files in [0u64, 1, 2, 3, 7, 16, 50, 81] {
+            let repo = scion_testkit::shared_subtree_repo(files, depth);
+            let t = repo.materialize();
+            assert_eq!(t.len() as u64, files, "files {files} depth {depth}");
+            let label = format!("shared_subtree_repo({files}, {depth})");
+            assert_eq!(
+                *repo.root_tree().as_bytes(),
+                tree_id(&t),
+                "{label}: root id"
+            );
+            let mut expected: BTreeMap<[u8; 34], (Kind, Vec<u8>)> = BTreeMap::new();
+            for dir in dirs_of(&t) {
+                let bytes = tree_bytes_for_dir(&t, &dir);
+                expected.insert(make_id(KIND_TREE, &bytes), (Kind::Tree, bytes));
+            }
+            for f in t.values() {
+                expected.insert(blob_id(&f.content), (Kind::Blob, f.content.clone()));
+            }
+            let objects = repo.encoded_objects();
+            let got: BTreeMap<[u8; 34], (Kind, Vec<u8>)> = objects
+                .iter()
+                .map(|(id, k, b)| (*id.as_bytes(), (*k, b.to_vec())))
+                .collect();
+            assert_eq!(got.len(), objects.len(), "{label}: deduplicated");
+            assert_eq!(got, expected, "{label}: objects");
+            if let Err(e) = encode_tree_agrees(&t) {
+                panic!("{label}: {e}");
+            }
+        }
     }
 }
