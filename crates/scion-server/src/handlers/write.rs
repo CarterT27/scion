@@ -22,13 +22,10 @@ use crate::context::caller;
 use crate::errors::{StatusExt, to_status};
 use crate::logging::{LogFields, LogSlot};
 use scion_core::{ObjectId, Principal, ScionError};
-use scion_history::{
-    CreateRequest, LandAuthorizer, LandAuthorizerSource, LandRequest, MetaFields,
-};
+use scion_history::{CreateRequest, LandAuthorizer, LandAuthorizerSource, LandRequest, MetaFields};
 use scion_object::{RefName, RepoPath};
 use scion_proto::convert::{
-    self, CreateChangesetParts, MergeParts, MetaFieldsParts, change_id_bytes, id_bytes,
-    required_id,
+    self, CreateChangesetParts, MergeParts, MetaFieldsParts, change_id_bytes, id_bytes, required_id,
 };
 use scion_proto::v1;
 use scion_store::LandedEntry;
@@ -125,7 +122,9 @@ pub async fn create_changeset(
         )
         .await
         .map_status()?;
-    note(&slot, |f| f.changeset_id = Some(created.changeset_id.to_text()));
+    note(&slot, |f| {
+        f.changeset_id = Some(created.changeset_id.to_text())
+    });
     Ok(Response::new(v1::CreateChangesetResponse {
         changeset_id: id_bytes(&created.changeset_id),
         root_tree: id_bytes(&created.root_tree),

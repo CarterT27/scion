@@ -88,7 +88,10 @@ impl PolicyLandAuthzSource {
 impl LandAuthorizerSource for PolicyLandAuthzSource {
     /// A fresh [`PolicyLandAuthz`] over `PolicyHandle::current()` (SPEC 8.4: every attempt).
     fn current(&self) -> Arc<dyn LandAuthorizer> {
-        Arc::new(PolicyLandAuthz::new(self.handle.current(), self.who.clone()))
+        Arc::new(PolicyLandAuthz::new(
+            self.handle.current(),
+            self.who.clone(),
+        ))
     }
 }
 
@@ -195,8 +198,11 @@ refs = ["group:admins", "github:half"]
         let src = PolicyLandAuthzSource::new(live.clone(), gh("alice"));
         let snap = src.current();
         assert!(snap.can_update(&main));
-        std::fs::write(&acl_path, ACL.replace("update = [\"group:eng\"]", "update = []"))
-            .unwrap();
+        std::fs::write(
+            &acl_path,
+            ACL.replace("update = [\"group:eng\"]", "update = []"),
+        )
+        .unwrap();
         assert!(live.reload_now().unwrap());
         assert!(snap.can_update(&main), "old snapshot is immutable");
         assert!(!src.current().can_update(&main), "current() re-reads");

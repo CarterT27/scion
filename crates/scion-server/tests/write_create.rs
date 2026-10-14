@@ -95,7 +95,9 @@ async fn client_cannot_supply_creator() {
     let mut req = tonic::Request::new(bytes::Bytes::from(spoof.encode_to_vec()));
     req.metadata_mut().insert(
         "authorization",
-        format!("Bearer {}", srv.token_for(&alice())).parse().unwrap(),
+        format!("Bearer {}", srv.token_for(&alice()))
+            .parse()
+            .unwrap(),
     );
     let resp = grpc
         .unary(
@@ -181,12 +183,7 @@ async fn expected_root_tree_is_checked() {
         .unwrap()
         .into_inner();
     req.expected_root_tree = Some(ok.root_tree.clone());
-    let again = c
-        .write()
-        .create_changeset(req)
-        .await
-        .unwrap()
-        .into_inner();
+    let again = c.write().create_changeset(req).await.unwrap().into_inner();
     assert_eq!(again, ok);
 }
 
@@ -274,11 +271,7 @@ async fn invalid_argument_subcodes() {
         ),
         (
             "unsorted delta",
-            create_req(
-                &[r],
-                vec![put_entry("b", &b, n), put_entry("a", &b, n)],
-                2,
-            ),
+            create_req(&[r], vec![put_entry("b", &b, n), put_entry("a", &b, n)], 2),
             subcode::DELTA_UNSORTED,
         ),
         (

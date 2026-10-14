@@ -40,7 +40,10 @@ async fn land_happy_path_and_ref_log() {
     let r = root(&srv).await;
     let c = srv.client(Some(&alice())).await;
     let metrics = srv.ctx().metrics.clone();
-    let committed_before = metrics.land_attempts.with_label_values(&["committed"]).get();
+    let committed_before = metrics
+        .land_attempts
+        .with_label_values(&["committed"])
+        .get();
     let durations_before = metrics.land_duration.get_sample_count();
 
     // A change on the tip lands as itself (rebase fast path).
@@ -61,12 +64,22 @@ async fn land_happy_path_and_ref_log() {
     assert_eq!(landed[0].1, s1);
     assert_eq!(landed[1].1, s2);
     assert_eq!(id(&resp.target), landed[1].2);
-    let tip = srv.ctx().history.changeset(&id(&resp.target)).await.unwrap();
+    let tip = srv
+        .ctx()
+        .history
+        .changeset(&id(&resp.target))
+        .await
+        .unwrap();
     assert_eq!(tip.changeset.parents, vec![landed[0].2]);
     let h = &srv.ctx().history;
     for p in ["one", "two", "three"] {
         let path = scion_object::RepoPath::parse(p.as_bytes()).unwrap();
-        assert!(h.lookup(&tip.changeset.root_tree, &path).await.unwrap().is_some());
+        assert!(
+            h.lookup(&tip.changeset.root_tree, &path)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
     assert_eq!(ref_state(&srv, "main").await, (id(&resp.target), 3));
 
@@ -82,7 +95,10 @@ async fn land_happy_path_and_ref_log() {
         .unwrap()
         .into_inner()
         .entries;
-    assert_eq!(log.iter().map(|e| e.version).collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(
+        log.iter().map(|e| e.version).collect::<Vec<_>>(),
+        vec![2, 3]
+    );
     assert_eq!(log[0].old_target, r.as_bytes().to_vec());
     assert_eq!(log[0].new_target, c1.as_bytes().to_vec());
     assert_eq!(log[1].landed.len(), 2);
@@ -90,10 +106,16 @@ async fn land_happy_path_and_ref_log() {
 
     // The land metrics moved (SPEC 15.2).
     assert_eq!(
-        metrics.land_attempts.with_label_values(&["committed"]).get(),
+        metrics
+            .land_attempts
+            .with_label_values(&["committed"])
+            .get(),
         committed_before + 2
     );
-    assert_eq!(metrics.land_duration.get_sample_count(), durations_before + 2);
+    assert_eq!(
+        metrics.land_duration.get_sample_count(),
+        durations_before + 2
+    );
 }
 
 /// SPEC 19.5 idempotency: the CAS commits but the response is lost; the retry returns the
@@ -293,8 +315,14 @@ async fn land_argument_errors() {
         .await
         .unwrap()
         .into_inner();
-    let e = land(&c, "main", &id(&m.changeset_id), false).await.unwrap_err();
-    expect_err(&e, ErrorCode::InvalidArgument, Some(subcode::MERGE_IN_STACK));
+    let e = land(&c, "main", &id(&m.changeset_id), false)
+        .await
+        .unwrap_err();
+    expect_err(
+        &e,
+        ErrorCode::InvalidArgument,
+        Some(subcode::MERGE_IN_STACK),
+    );
 }
 
 /// Concurrent non-overlapping lands through the RPC all land (lost CAS races retry); the ref
@@ -314,7 +342,9 @@ async fn concurrent_lands_all_succeed() {
     let mut tasks = Vec::new();
     for h in heads {
         let c = c.clone();
-        tasks.push(tokio::spawn(async move { land(&c, "main", &h, false).await }));
+        tasks.push(tokio::spawn(
+            async move { land(&c, "main", &h, false).await },
+        ));
     }
     for t in tasks {
         t.await.unwrap().unwrap();

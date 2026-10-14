@@ -8,7 +8,11 @@ use scion_proto::{ScionClient, v1};
 use scion_server::testing::InProcessServer;
 use write_support::*;
 
-async fn rebase(c: &ScionClient, cs: &ObjectId, onto: &ObjectId) -> Result<ObjectId, tonic::Status> {
+async fn rebase(
+    c: &ScionClient,
+    cs: &ObjectId,
+    onto: &ObjectId,
+) -> Result<ObjectId, tonic::Status> {
     c.write()
         .rebase(v1::RebaseRequest {
             changeset: cs.as_bytes().to_vec(),
@@ -150,13 +154,23 @@ async fn merge_success_sets_parents_and_creator() {
     let m = merge(&bob_c, &a, &b, 3).await.unwrap();
     let rec = srv.ctx().history.changeset(&m).await.unwrap();
     assert_eq!(rec.changeset.parents, vec![a, b]);
-    let meta = srv.ctx().objects.get_meta(&rec.changeset.meta).await.unwrap();
+    let meta = srv
+        .ctx()
+        .objects
+        .get_meta(&rec.changeset.meta)
+        .await
+        .unwrap();
     assert_eq!(meta.creator, b"github:bob".to_vec());
     // The merged tree has both files.
     let h = &srv.ctx().history;
     for p in ["a", "b"] {
         let path = scion_object::RepoPath::parse(p.as_bytes()).unwrap();
-        assert!(h.lookup(&rec.changeset.root_tree, &path).await.unwrap().is_some());
+        assert!(
+            h.lookup(&rec.changeset.root_tree, &path)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
     // Deterministic: the same request returns the same id.
     assert_eq!(merge(&bob_c, &a, &b, 3).await.unwrap(), m);
@@ -178,7 +192,12 @@ async fn merge_errors() {
     assert_eq!(report.conflicts.len(), 1);
     assert_eq!(report.conflicts[0].kind, ConflictKind::AddAdd);
     assert!(report.conflicts[0].base.is_none());
-    assert!(report.clean_entries.iter().any(|ce| ce.path == b"only_a".to_vec()));
+    assert!(
+        report
+            .clean_entries
+            .iter()
+            .any(|ce| ce.path == b"only_a".to_vec())
+    );
 
     // AMBIGUOUS_MERGE_BASE: criss-cross.
     let x = commit(&srv, &c, &r, &[("x", b"x\n")], 10).await;
@@ -254,10 +273,22 @@ async fn merge_message_limit_is_too_large() {
     let (b1, n1) = blob(&srv, b"1").await;
     a_req.delta = vec![put_entry("a", &b1, n1)];
     a_req.meta_fields.as_mut().unwrap().message = b"m".to_vec();
-    let a = id(&c.write().create_changeset(a_req).await.unwrap().into_inner().changeset_id);
+    let a = id(&c
+        .write()
+        .create_changeset(a_req)
+        .await
+        .unwrap()
+        .into_inner()
+        .changeset_id);
     let mut b_req = create_req(&[r], vec![put_entry("b", &b1, n1)], 2);
     b_req.meta_fields.as_mut().unwrap().message = b"m".to_vec();
-    let b = id(&c.write().create_changeset(b_req).await.unwrap().into_inner().changeset_id);
+    let b = id(&c
+        .write()
+        .create_changeset(b_req)
+        .await
+        .unwrap()
+        .into_inner()
+        .changeset_id);
     let e = merge(&c, &a, &b, 3).await.unwrap_err();
     expect_err(&e, ErrorCode::TooLarge, None);
 }
