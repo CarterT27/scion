@@ -215,30 +215,36 @@ impl History {
     ///
     /// Uses the SPEC 9.2 skip pointers: repeatedly jump to the farthest `skip[k]` whose
     /// generation is still `>= generation(a)`. Generations strictly decrease along a
-    /// first-parent chain, so this takes O(log n) jumps, each scanning O(log n) pointers.
+    /// first-parent chain, so the chain nodes with generation `>= generation(a)` form a prefix
+    /// of length `d`, and each jump takes the largest `2^k <= d` (binary decomposition of `d`).
+    /// After a jump by `2^k` the remaining distance is below `2^k`, so the next jump only needs
+    /// to consider pointers below `k`: O(log n) changeset reads in total.
     pub async fn is_first_parent_ancestor(&self, a: &ObjectId, b: &ObjectId) -> Result<bool> {
         let mut w = Walker::new(self);
         let ga = w.node(a).await?.generation;
         let mut c = *b;
         let mut cn = w.node(b).await?;
+        // Exclusive upper bound on the skip index that can still be useful.
+        let mut limit = usize::MAX;
         loop {
             if cn.generation <= ga {
                 return Ok(c == *a);
             }
             let mut next = None;
-            for s in cn.skip.iter().rev() {
+            for (k, s) in cn.skip.iter().enumerate().take(limit).rev() {
                 let sn = w.node(s).await?;
                 if sn.generation >= ga {
-                    next = Some((*s, sn));
+                    next = Some((k, *s, sn));
                     break;
                 }
             }
             match next {
-                Some((s, sn)) => {
+                Some((k, s, sn)) => {
+                    limit = k;
                     c = s;
                     cn = sn;
                 }
-                // Root reached, or the parent is already below generation(a).
+                // Root reached, or the first parent is already below generation(a).
                 None => return Ok(false),
             }
         }
@@ -335,14 +341,19 @@ impl History {
     }
 
     /// `c^k` (SPEC 11.8): the k-th parent (1-based); `None` when `c` has fewer than `k` parents.
-    /// `k == 0` denotes `c` itself (git's `^0`).
+    ///
+    /// `k == 0` is INVALID_ARGUMENT / `invalid_revision` (`^0` is invalid,
+    /// implementation-defined 6.6); NOT_FOUND when `c` is missing.
     pub async fn nth_parent(&self, c: &ObjectId, k: u32) -> Result<Option<ObjectId>> {
         let mut w = Walker::new(self);
         let n = w.node(c).await?;
-        if k == 0 {
-            return Ok(Some(*c));
-        }
-        Ok(n.parents.get(k as usize - 1).copied())
+        let Some(i) = (k as usize).checked_sub(1) else {
+            return Err(ScionError::invalid(
+                scion_core::subcode::INVALID_REVISION,
+                "^0 is invalid",
+            ));
+        };
+        Ok(n.parents.get(i).copied())
     }
 
     /// One page of history from `from` (SPEC 7.4 `Log` without a path), newest first: descending

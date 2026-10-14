@@ -489,7 +489,10 @@ async fn tilde_and_caret_edge_cases() {
     assert_eq!(h.nth_first_parent(&root, 0).await.unwrap(), Some(root));
     assert_eq!(h.nth_first_parent(&root, 1).await.unwrap(), None);
     assert_eq!(h.nth_parent(&root, 1).await.unwrap(), None);
-    assert_eq!(h.nth_parent(&root, 0).await.unwrap(), Some(root));
+    // `^0` is invalid (implementation-defined 6.6).
+    let e = h.nth_parent(&root, 0).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidArgument);
+    assert_eq!(e.subcode(), Some("invalid_revision"));
 
     // ~n follows first parents through merges: merge~1 = side, merge~2 = chain[3].
     let mid = dag.id(merge);
@@ -514,7 +517,10 @@ async fn tilde_and_caret_edge_cases() {
     }
     assert_eq!(h.nth_parent(&oid, 6).await.unwrap(), None);
     assert_eq!(h.nth_parent(&oid, u32::MAX).await.unwrap(), None);
-    assert_eq!(h.nth_parent(&oid, 0).await.unwrap(), Some(oid));
+    assert_eq!(
+        h.nth_parent(&oid, 0).await.unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
 
     // Differential against the model chain for every node and several n.
     for c in 0..dag.len() {
@@ -725,11 +731,23 @@ async fn skip_pointer_queries_are_logarithmic() {
             .unwrap()
     );
     let reads = dag.changesets_read() - before;
-    // 12 jumps of at most 13 pointer reads each, plus the endpoints; a linear walk reads 4096.
+    // 13 skip levels scanned once in total plus one read per jump and the endpoints; a linear
+    // walk reads 4096.
     assert!(
-        reads <= 200,
+        reads <= 30,
         "is_first_parent_ancestor read {reads} changesets"
     );
+    // Every distance (worst case: all bits set) stays logarithmic, for hits and misses.
+    for target in [1usize, 2, 3, 1000, 2047, 2048, 3071, 4094] {
+        let before = dag.changesets_read();
+        assert!(
+            h.is_first_parent_ancestor(&dag.id(target), &tip)
+                .await
+                .unwrap()
+        );
+        let reads = dag.changesets_read() - before;
+        assert!(reads <= 30, "fp ancestor at {target}: {reads} reads");
+    }
 
     let before = dag.changesets_read();
     assert!(
@@ -758,4 +776,80 @@ async fn skip_pointer_queries_are_logarithmic() {
     let before = dag.changesets_read();
     assert!(!h.is_ancestor(&tip, &dag.id(root)).await.unwrap());
     assert!(dag.changesets_read() - before <= 2);
+}
+
+/// First-parent ancestry stays logarithmic when merges make generations jump by more than one
+/// per first-parent step, for both hits and misses (an off-chain `a` whose generation lies
+/// inside the chain's range).
+#[tokio::test]
+async fn first_parent_ancestry_with_merges_is_logarithmic() {
+    let mut dag = Dag::new(7);
+    let root = dag.add(&[]).await;
+    let mut main = vec![root];
+    let mut side_tip = dag.add(&[root]).await;
+    let mut sides = vec![side_tip];
+    for i in 0..1024usize {
+        // The side line grows twice as fast, so each merge raises the main generation by ~2.
+        for _ in 0..2 {
+            side_tip = dag.add(&[side_tip]).await;
+            sides.push(side_tip);
+        }
+        let prev = *main.last().unwrap();
+        let next = if i % 3 == 0 {
+            dag.add(&[prev, side_tip]).await
+        } else {
+            dag.add(&[prev]).await
+        };
+        main.push(next);
+    }
+    let tip = *main.last().unwrap();
+    let tip_id = dag.id(tip);
+    let h = &dag.history;
+    let chain = dag.model_fp_chain(tip);
+    for &m in main.iter().step_by(37) {
+        let before = dag.changesets_read();
+        assert!(
+            h.is_first_parent_ancestor(&dag.id(m), &tip_id)
+                .await
+                .unwrap()
+        );
+        let reads = dag.changesets_read() - before;
+        assert!(reads <= 30, "fp hit: {reads} reads");
+    }
+    for &s in sides.iter().step_by(53) {
+        assert!(!chain.contains(&s));
+        let before = dag.changesets_read();
+        assert!(
+            !h.is_first_parent_ancestor(&dag.id(s), &tip_id)
+                .await
+                .unwrap()
+        );
+        let reads = dag.changesets_read() - before;
+        assert!(reads <= 30, "fp miss: {reads} reads");
+        // Full ancestry still sees merged side commits.
+        assert_eq!(
+            h.is_ancestor(&dag.id(s), &tip_id).await.unwrap(),
+            dag.model.is_ancestor(s, tip)
+        );
+    }
+}
+
+/// A token whose frontier names an unknown changeset is rejected as `bad_page_token`.
+#[tokio::test]
+async fn log_page_token_with_unknown_frontier_is_rejected() {
+    let mut dag = Dag::new(8);
+    let r = dag.add(&[]).await;
+    let a = dag.add(&[r]).await;
+    let b = dag.add(&[a]).await;
+    let h = &dag.history;
+    let bid = dag.id(b);
+    let (_, t) = h.log_page(&bid, false, 1, None).await.unwrap();
+    let mut t = t.unwrap();
+    // The token ends with the single frontier id, whose last bytes are its digest; corrupt the
+    // digest so it names a changeset that does not exist.
+    let n = t.len();
+    t[n - 1] ^= 0xff;
+    let e = h.log_page(&bid, false, 1, Some(&t)).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidArgument);
+    assert_eq!(e.subcode(), Some("bad_page_token"));
 }
