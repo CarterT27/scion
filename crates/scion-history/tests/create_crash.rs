@@ -114,3 +114,39 @@ async fn injected_errors_at_every_storage_write_leave_no_partial_changeset() {
         assert_fsck_clean(&e.h).await;
     }
 }
+
+#[tokio::test]
+async fn bootstrap_crash_at_every_point_recovers_to_the_same_root() {
+    let (reference, _, _) = history_with(scion_history::HistoryConfig::default());
+    let want = reference.bootstrap().await.unwrap();
+    let mut points_all: Vec<&str> = BEFORE_COMMIT.to_vec();
+    points_all.extend([points::CREATE_AFTER_COMMIT, "meta.commit_changeset.after"]);
+    for point in points_all {
+        let (h, mem, _clock) = history_with(scion_history::HistoryConfig::default());
+        let faults = h.objects().storage().faults.clone();
+        faults.arm(point, FaultAction::Crash, Some(1));
+        let err = h.bootstrap().await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Unavailable, "{point}: {err}");
+        faults.reset();
+        assert!(
+            h.meta()
+                .get_ref(&scion_object::RefName::main())
+                .await
+                .unwrap()
+                .is_none(),
+            "{point}"
+        );
+        assert_fsck_clean(&h).await;
+        // The restarted server bootstraps again: same root, ref main at version 1.
+        assert_eq!(h.bootstrap().await.unwrap(), want, "{point}");
+        assert_eq!(mem.meta.table_counts().changesets, 1, "{point}");
+        let main = h
+            .meta()
+            .get_ref(&scion_object::RefName::main())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((main.target, main.version), (want, 1), "{point}");
+        assert_fsck_clean(&h).await;
+    }
+}

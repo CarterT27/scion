@@ -1,6 +1,6 @@
 //! Repository bootstrap (PLAN 6.5; SPEC 4.3.4 root changeset; P12).
 
-use crate::create::{Parentless, Spec};
+use crate::create::Spec;
 use crate::history::History;
 use crate::types::{MetaFields, MetaSource};
 use scion_core::{ChangeId, ObjectId, Result, empty_tree_id};
@@ -43,6 +43,11 @@ impl History {
     /// `creator = config.bootstrap_principal`; its change id is `BLAKE3("scion-root-v1")[0..16]`.
     /// Ref `main` is created at version 1 via `cas_ref(Absent)`; an existing `main` is left as
     /// it is. Returns the root changeset id.
+    ///
+    /// The SPEC 8.1 parentless rule applies: when a different parentless changeset already
+    /// exists (for example the root of an earlier bootstrap with another
+    /// `bootstrap_principal`), no second root is created and INVALID_ARGUMENT /
+    /// parentless_not_allowed is returned (SPEC 4.3.4: exactly one root changeset).
     pub async fn bootstrap(&self) -> Result<ObjectId> {
         let who = self.cfg.bootstrap_principal.clone();
         let created = self
@@ -56,7 +61,6 @@ impl History {
                 who: &who,
                 authz: None,
                 check_redacted: true,
-                parentless: Parentless::Always,
             })
             .await?;
         let root = created.changeset_id;

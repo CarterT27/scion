@@ -5,8 +5,8 @@
 mod create_support;
 
 use create_support::*;
-use scion_core::{ChangeId, Kind, ObjectId, Principal};
-use scion_history::{AllowAll, HistoryConfig};
+use scion_core::{ChangeId, Kind, ObjectId, Principal, SystemClock, subcode};
+use scion_history::{AllowAll, History, HistoryConfig, NoEager};
 use scion_object::{Canonical, Changeset, RefName};
 use std::sync::Arc;
 
@@ -146,4 +146,91 @@ async fn bootstrap_principal_is_configurable() {
     let rec = h.changeset(&root).await.unwrap();
     let meta = h.objects().get_meta(&rec.changeset.meta).await.unwrap();
     assert_eq!(meta.creator, b"service:custom".to_vec());
+}
+
+#[tokio::test]
+async fn bootstrap_root_tree_has_a_path_index_row() {
+    // Tree reads are authorized through object_paths; the root tree sits at the empty path
+    // (implementation-defined 6.12), including the empty root tree of the root changeset.
+    let (h, _mem, _clock) = history_with(HistoryConfig::default());
+    let root = h.bootstrap().await.unwrap();
+    let rows = h
+        .meta()
+        .object_paths(&scion_core::empty_tree_id(), 10)
+        .await
+        .unwrap();
+    assert!(
+        rows.iter()
+            .any(|r| r.path.is_root() && r.first_changeset == root),
+        "{rows:?}"
+    );
+}
+
+#[tokio::test]
+async fn identical_parentless_retry_returns_the_same_id() {
+    // A repository without bootstrap: the first parentless changeset becomes the root.
+    let (h, mem, _clock) = history_with(HistoryConfig::default());
+    let delta = vec![put(&h, "a", "a").await];
+    let first = create(&h, vec![], delta.clone()).await;
+    // SPEC 8.1: an identical retry (e.g. after a lost response) returns the same id.
+    for _ in 0..3 {
+        assert_eq!(create(&h, vec![], delta.clone()).await, first);
+    }
+    assert_eq!(mem.meta.table_counts().changesets, 1);
+
+    // Any other parentless request still fails step 1, even when a later step fails too.
+    let b = put(&h, "b", "b").await;
+    let err = h
+        .create_changeset(req(vec![], vec![b]), &alice(), &AllowAll)
+        .await
+        .unwrap_err();
+    assert_eq!(err.subcode(), Some(subcode::PARENTLESS_NOT_ALLOWED));
+    let err = h
+        .create_changeset(
+            req(vec![], vec![put_unstored("z", "never uploaded")]),
+            &alice(),
+            &AllowAll,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.subcode(), Some(subcode::PARENTLESS_NOT_ALLOWED));
+    // The same request by a principal without write permission is not an exact retry path.
+    let deny = Deny {
+        denied: Some(p("a")),
+        import: false,
+    };
+    let err = h
+        .create_changeset(req(vec![], delta), &alice(), &deny)
+        .await
+        .unwrap_err();
+    assert_eq!(err.subcode(), Some(subcode::PARENTLESS_NOT_ALLOWED));
+
+    // Bootstrap does not add a second root next to the existing one.
+    let err = h.bootstrap().await.unwrap_err();
+    assert_eq!(err.subcode(), Some(subcode::PARENTLESS_NOT_ALLOWED));
+    assert_eq!(mem.meta.table_counts().changesets, 1);
+    assert!(h.meta().get_ref(&RefName::main()).await.unwrap().is_none());
+    assert_fsck_clean(&h).await;
+}
+
+#[tokio::test]
+async fn bootstrap_with_another_principal_creates_no_second_root() {
+    let (h, mem, _clock) = history_with(HistoryConfig::default());
+    let root = h.bootstrap().await.unwrap();
+    let other = History::new(
+        h.objects().clone(),
+        HistoryConfig {
+            bootstrap_principal: Principal::Service("renamed".to_owned()),
+            ..HistoryConfig::default()
+        },
+        Arc::new(NoEager),
+        Arc::new(SystemClock),
+    );
+    let err = other.bootstrap().await.unwrap_err();
+    assert_eq!(err.subcode(), Some(subcode::PARENTLESS_NOT_ALLOWED));
+    assert_eq!(mem.meta.table_counts().changesets, 1);
+    let main = h.meta().get_ref(&RefName::main()).await.unwrap().unwrap();
+    assert_eq!((main.target, main.version), (root, 1));
+    // The original configuration still bootstraps idempotently.
+    assert_eq!(h.bootstrap().await.unwrap(), root);
 }

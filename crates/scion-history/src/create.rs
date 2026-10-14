@@ -26,7 +26,7 @@
 use crate::compute_commit_graph;
 use crate::history::History;
 use crate::hooks::{EagerInput, WriteAuthorizer};
-use crate::types::{CreateRequest, Created, MetaFields, MetaSource};
+use crate::types::{Applied, CreateRequest, Created, MetaFields, MetaSource};
 use bytes::Bytes;
 use scion_core::{
     ChangeId, ErrorCode, Kind, ObjectId, Principal, Result, ScionError, empty_tree_id, points,
@@ -35,15 +35,6 @@ use scion_core::{
 use scion_object::{Canonical, Changeset, DeltaEntry, DeltaOp, Extensions, Meta, RepoPath, Tree};
 use scion_store::{ChangesetBundle, ChangesetRow, Consistency, ObjectPathRow, ObjectState};
 use std::collections::{BTreeMap, BTreeSet};
-
-/// When an empty parent list is acceptable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Parentless {
-    /// SPEC 8.1 step 1: only before the root changeset exists, or in authorized import mode.
-    Rule,
-    /// Bootstrap of the root changeset (PLAN 6.5): always.
-    Always,
-}
 
 /// One creation, client facing (`authz` set) or internal (`authz` = `None`).
 pub(crate) struct Spec<'a> {
@@ -58,7 +49,32 @@ pub(crate) struct Spec<'a> {
     pub(crate) authz: Option<&'a dyn WriteAuthorizer>,
     /// SPEC 8.1 step 4 (REDACTED for redacted Put blobs).
     pub(crate) check_redacted: bool,
-    pub(crate) parentless: Parentless,
+}
+
+/// A validated changeset with everything persistence needs (SPEC 8.1 done, nothing written).
+struct Prepared {
+    id: ObjectId,
+    encoded: Bytes,
+    changeset: Changeset,
+    applied: Applied,
+    t1: ObjectId,
+    parent_rows: Vec<ChangesetRow>,
+    meta_id: ObjectId,
+    meta_obj: Meta,
+    /// Canonical bytes of a new Meta (`None` for an existing one).
+    meta_bytes: Option<Bytes>,
+    import_mode: bool,
+    created_by: String,
+}
+
+impl Prepared {
+    fn created(&self) -> Created {
+        Created {
+            changeset_id: self.id,
+            root_tree: self.applied.root,
+            meta_id: self.meta_id,
+        }
+    }
 }
 
 fn missing_parent(i: usize) -> ScionError {
@@ -113,7 +129,6 @@ impl History {
             who,
             authz: Some(authz),
             check_redacted: true,
-            parentless: Parentless::Rule,
         })
         .await
     }
@@ -140,13 +155,41 @@ impl History {
             who,
             authz: None,
             check_redacted: false,
-            parentless: Parentless::Rule,
         })
         .await
     }
 
     /// The shared SPEC 8.1 + 5.3 implementation.
+    ///
+    /// A parentless request after the root exists fails parentless_not_allowed (step 1), except
+    /// when the identical changeset already exists: SPEC 8.1 requires an identical retry (for
+    /// example after a crash past the commit point, SPEC 16.1 class 4) to return the same id.
+    /// The remaining validation still runs first, so any request that is not an exact retry
+    /// reports the step-1 failure.
     pub(crate) async fn create_core(&self, spec: Spec<'_>) -> Result<Created> {
+        let mut parentless_denied = false;
+        let prepared = self.prepare(spec, &mut parentless_denied).await;
+        if parentless_denied {
+            match &prepared {
+                Ok(p) if self.objects.stat(&p.id).await?.is_some() => {
+                    tracing::debug!(changeset = %p.id, "identical parentless changeset exists");
+                    return Ok(p.created());
+                }
+                // A transient failure must not turn into a permanent validation error.
+                Err(e) if e.retryable() => return Err(e.clone()),
+                _ => {}
+            }
+            return Err(ScionError::invalid(
+                subcode::PARENTLESS_NOT_ALLOWED,
+                "a parentless changeset is allowed only for the root or in import mode",
+            ));
+        }
+        self.persist(prepared?).await
+    }
+
+    /// SPEC 8.1 validation, tree construction (SPEC 18.2), the Meta and the identifier; no
+    /// writes. A violated parentless rule sets `parentless_denied` instead of failing.
+    async fn prepare(&self, spec: Spec<'_>, parentless_denied: &mut bool) -> Result<Prepared> {
         let limits = &self.cfg.limits;
         let Spec {
             parents,
@@ -158,7 +201,6 @@ impl History {
             who,
             authz,
             check_redacted,
-            parentless,
         } = spec;
 
         // 1. Parents: exist, unique, count; the parentless rule.
@@ -181,19 +223,14 @@ impl History {
             if n > limits.max_parents {
                 return Err(ScionError::too_large("max_parents", limits.max_parents, n));
             }
-        } else if parentless == Parentless::Rule {
-            if import_mode {
-                if !authz.is_some_and(|a| a.can_import()) {
-                    return Err(ScionError::permission_denied(
-                        "import mode requires admin.refs and write on /",
-                    ));
-                }
-            } else if self.meta().has_root_changeset().await? {
-                return Err(ScionError::invalid(
-                    subcode::PARENTLESS_NOT_ALLOWED,
-                    "a parentless changeset is allowed only for the root or in import mode",
+        } else if import_mode {
+            if !authz.is_some_and(|a| a.can_import()) {
+                return Err(ScionError::permission_denied(
+                    "import mode requires admin.refs and write on /",
                 ));
             }
+        } else if self.meta().has_root_changeset().await? {
+            *parentless_denied = true;
         }
 
         // 2. Delta shape (sorted, unique, count, path rules) via the shared shape check.
@@ -344,6 +381,36 @@ impl History {
         };
         let encoded = Bytes::from(changeset.encode());
         let id = ObjectId::hash_encoded(Kind::Changeset, &encoded);
+        Ok(Prepared {
+            id,
+            encoded,
+            changeset,
+            applied,
+            t1,
+            parent_rows,
+            meta_id,
+            meta_obj,
+            meta_bytes,
+            import_mode,
+            created_by: who.id_string(),
+        })
+    }
+
+    /// SPEC 5.3 step 2 persistence of a prepared changeset, with the create.* checkpoints.
+    async fn persist(&self, prepared: Prepared) -> Result<Created> {
+        let Prepared {
+            id,
+            encoded,
+            changeset,
+            applied,
+            t1,
+            parent_rows,
+            meta_id,
+            meta_obj,
+            meta_bytes,
+            import_mode,
+            created_by,
+        } = prepared;
         let faults = self.objects.storage().faults.clone();
         faults.check(points::CREATE_AFTER_VALIDATE).await?;
 
@@ -428,6 +495,18 @@ impl History {
             first_changeset: id,
             at: now,
         }));
+        // An empty root tree also unchanged from T1 (the root changeset, or an empty change on
+        // an empty parent) still gets its row at the root path: tree reads are authorized
+        // through `object_paths` and the root tree sits at the empty path (implementation-defined
+        // 6.12). ON CONFLICT DO NOTHING makes a repeated row harmless.
+        if applied.root == empty_tree_id() && applied.root == t1 {
+            object_paths.push(ObjectPathRow {
+                object: applied.root,
+                path: RepoPath::root(),
+                first_changeset: id,
+                at: now,
+            });
+        }
 
         let bundle = ChangesetBundle {
             row: ChangesetRow {
@@ -435,8 +514,8 @@ impl History {
                 encoded,
                 generation,
                 skip,
-                change_id,
-                created_by: who.id_string(),
+                change_id: changeset.change_id,
+                created_by,
                 created_at: now,
             },
             parents: changeset.parents.clone(),
