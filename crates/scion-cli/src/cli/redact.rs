@@ -199,7 +199,12 @@ pub(crate) async fn redact(ctx: &mut Ctx<'_>, a: &RedactArgs) -> CliResult<Reply
         .collect();
     let mut human = String::new();
     for t in &targets {
-        let _ = writeln!(human, "redacted {} {}", t.kind, t.id);
+        let _ = writeln!(
+            human,
+            "redacted {} {}",
+            t.kind,
+            t.id.chars().take(14).collect::<String>()
+        );
     }
     let _ = writeln!(
         human,

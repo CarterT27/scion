@@ -5,7 +5,7 @@ use super::ctx::{Ctx, Reply, SCION_DIR};
 use super::error::{CliResult, local, usage};
 use super::util::{
     REDACTED, cs_from_item, encode_content, fmt_time, lossy, meta_json, parse_file_path,
-    parse_path, path_text, resolve, summary,
+    parse_path, path_text, resolve, short, summary,
 };
 use crate::output::views::{
     BlameData, BlameRangeView, CatData, HunkView, LogData, LogEntryView, MetaJson, ShowChange,
@@ -360,7 +360,7 @@ pub(crate) async fn show(ctx: &mut Ctx<'_>, a: &ShowArgs) -> CliResult<Reply> {
         .map(|p| ObjectId::parse_text(p))
         .transpose()?;
     let changes = diff_items(&client, first_parent.as_ref(), &id).await?;
-    let mut human = format!("changeset {}\n", id.to_text());
+    let mut human = format!("changeset {}\n", short(&id));
     if !view.parents.is_empty() {
         let ps: Vec<String> = view.parents.iter().map(|p| short_text(p)).collect();
         let _ = writeln!(human, "Parents: {}", ps.join(" "));
