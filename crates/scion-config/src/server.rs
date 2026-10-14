@@ -128,7 +128,8 @@ pub struct AuthSection {
 pub struct ServicePrincipalConfig {
     /// Service name.
     pub name: String,
-    /// SHA-256 of the secret, lowercase hex.
+    /// SHA-256 of the secret as 64 hex characters (normalized to lowercase by
+    /// [`parse_server`]).
     pub secret_sha256: String,
 }
 
@@ -396,8 +397,14 @@ impl ServerConfig {
 
 /// Parse server TOML text (SPEC 6.1): `$NAME` resolution, unknown-key rejection naming the
 /// full key, SPEC 6.5 defaults.
+///
+/// `auth.service_principals[].secret_sha256` accepts hex in either case and is normalized to
+/// lowercase.
 pub fn parse_server(text: &str, env: &dyn Env) -> Result<ServerConfig, ConfigError> {
-    let cfg: ServerConfig = decode(text, env)?;
+    let mut cfg: ServerConfig = decode(text, env)?;
+    for sp in &mut cfg.auth.service_principals {
+        sp.secret_sha256.make_ascii_lowercase();
+    }
     cfg.validate()?;
     Ok(cfg)
 }

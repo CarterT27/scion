@@ -9,7 +9,9 @@ use crate::capture::{CaptureMakeWriter, capture_enabled};
 use std::sync::OnceLock;
 use tracing::Metadata;
 use tracing::level_filters::LevelFilter;
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry, filter};
 
 /// Log output format (SPEC 15.1: JSON by default).
@@ -39,21 +41,33 @@ fn capture_wants(meta: &Metadata<'_>) -> bool {
     *meta.level() <= max
 }
 
-fn stderr_layer(format: LogFormat) -> BoxedLayer {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+/// The operator log layer in `format`, writing to `writer` (stderr in production; a buffer in
+/// unit tests). JSON events are one object per line with the event fields flattened to
+/// top-level keys (SPEC 15.1).
+fn fmt_layer<W>(format: LogFormat, writer: W, ansi: bool) -> BoxedLayer
+where
+    W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
+{
     match format {
         LogFormat::Json => tracing_subscriber::fmt::layer()
             .json()
             .flatten_event(true)
-            .with_writer(std::io::stderr)
-            .with_filter(filter)
+            .with_ansi(false)
+            .with_writer(writer)
             .boxed(),
         LogFormat::Text => tracing_subscriber::fmt::layer()
-            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
-            .with_writer(std::io::stderr)
-            .with_filter(filter)
+            .with_ansi(ansi)
+            .with_writer(writer)
             .boxed(),
     }
+}
+
+fn stderr_layer(format: LogFormat) -> BoxedLayer {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    fmt_layer(format, std::io::stderr, ansi)
+        .with_filter(filter)
+        .boxed()
 }
 
 fn capture_layer() -> BoxedLayer {
@@ -79,7 +93,17 @@ pub(crate) fn ensure_installed(stderr: Option<LogFormat>) -> bool {
             None => vec![capture_layer()],
         };
         let subscriber = Registry::default().with(layers);
-        tracing::subscriber::set_global_default(subscriber).is_ok()
+        // `try_init` also bridges `log` records from dependencies into tracing. It fails if
+        // a global subscriber is already set (then ours is not installed) or if a `log`
+        // logger is already set (then ours is installed but `log` records are not bridged).
+        let already_set = tracing::dispatcher::has_been_set();
+        if let Err(e) = subscriber.try_init() {
+            if already_set {
+                return false;
+            }
+            tracing::debug!(target: "scion::obs", error = %e, "log records are not bridged");
+        }
+        true
     })
 }
 
@@ -89,4 +113,90 @@ pub(crate) fn ensure_installed(stderr: Option<LogFormat>) -> bool {
 pub fn init_logging(format: LogFormat) -> LogGuard {
     ensure_installed(Some(format));
     LogGuard
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::RpcLogEvent;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Buf(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buf {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn emit_with(format: LogFormat) -> String {
+        let buf = Buf::default();
+        let writer = buf.clone();
+        let subscriber = Registry::default().with(fmt_layer(format, move || writer.clone(), false));
+        tracing::subscriber::with_default(subscriber, || {
+            RpcLogEvent {
+                request_id: "req-fmt-1".into(),
+                rpc: "Land".into(),
+                tier: "server",
+                principal: Some("github:octocat".into()),
+                repo: "monorepo".into(),
+                status: "OK".into(),
+                duration_ms: 3,
+                ref_name: Some("main".into()),
+                ref_version: Some(4),
+                land_attempt: Some(1),
+                changeset_id: Some("c1".into()),
+            }
+            .emit();
+            tracing::warn!(target: "scion::test", multi = "line\nbreak", "second");
+        });
+        String::from_utf8(buf.0.lock().unwrap().clone()).unwrap()
+    }
+
+    /// SPEC 15.1: the operator JSON format is one object per line with the RPC fields as
+    /// top-level keys, even when a value contains a newline.
+    #[test]
+    fn json_format_is_one_event_per_line() {
+        let out = emit_with(LogFormat::Json);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "{out}");
+        let e: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        for key in [
+            "request_id",
+            "rpc",
+            "tier",
+            "principal",
+            "repo",
+            "status",
+            "duration_ms",
+            "changeset_id",
+            "ref",
+            "ref_version",
+            "land_attempt",
+        ] {
+            assert!(e.get(key).is_some(), "missing {key} in {e}");
+        }
+        assert_eq!(e["target"], "scion::rpc");
+        assert_eq!(e["level"], "INFO");
+        let w: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(w["multi"], "line\nbreak");
+        assert!(!out.contains('\u{1b}'), "no ANSI escapes in JSON");
+    }
+
+    #[test]
+    fn text_format_names_fields() {
+        let out = emit_with(LogFormat::Text);
+        assert!(out.contains("request_id=\"req-fmt-1\"") || out.contains("request_id=req-fmt-1"));
+        assert!(
+            out.contains("ref=\"main\"") || out.contains("ref=main"),
+            "{out}"
+        );
+        assert!(!out.contains('\u{1b}'));
+    }
 }
