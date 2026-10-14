@@ -1,0 +1,47 @@
+{
+  "name": "move_line_down",
+  "kind": "diff",
+  "description": "move the first line to the end",
+  "a_hex": "310a320a330a340a",
+  "b_hex": "320a330a340a310a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 1,
+      "b": 0,
+      "len": 3
+    },
+    {
+      "op": "insert",
+      "b": 3,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        0
+      ]
+    },
+    {
+      "base": [
+        4,
+        4
+      ],
+      "new": [
+        3,
+        4
+      ]
+    }
+  ]
+}

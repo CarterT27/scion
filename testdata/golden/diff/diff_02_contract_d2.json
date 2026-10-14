@@ -1,0 +1,26 @@
+{
+  "name": "contract_D2",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D2: insert into empty",
+  "a_hex": "",
+  "b_hex": "780a",
+  "edits": [
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        0
+      ],
+      "new": [
+        0,
+        1
+      ]
+    }
+  ]
+}

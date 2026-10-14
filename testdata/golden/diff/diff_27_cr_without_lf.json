@@ -1,0 +1,31 @@
+{
+  "name": "cr_without_lf",
+  "kind": "diff",
+  "description": "a trailing CR is part of an unterminated line",
+  "a_hex": "780d",
+  "b_hex": "78",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        1
+      ]
+    }
+  ]
+}

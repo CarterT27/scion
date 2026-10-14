@@ -1,0 +1,10 @@
+{
+  "name": "insert_same_point_same",
+  "kind": "merge",
+  "description": "identical insertions at the same point",
+  "base_hex": "610a620a",
+  "ours_hex": "610a580a620a",
+  "theirs_hex": "610a580a620a",
+  "result_hex": "610a580a620a",
+  "markers_hex": "610a580a620a"
+}

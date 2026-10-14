@@ -1,0 +1,10 @@
+{
+  "name": "empty_base_one_side",
+  "kind": "merge",
+  "description": "empty base, only ours adds",
+  "base_hex": "",
+  "ours_hex": "780a790a",
+  "theirs_hex": "",
+  "result_hex": "780a790a",
+  "markers_hex": "780a790a"
+}

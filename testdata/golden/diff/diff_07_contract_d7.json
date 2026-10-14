@@ -1,0 +1,32 @@
+{
+  "name": "contract_D7",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D7: repeated lines: an inserted copy goes at the END",
+  "a_hex": "780a",
+  "b_hex": "780a780a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 1,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        1,
+        1
+      ],
+      "new": [
+        1,
+        2
+      ]
+    }
+  ]
+}

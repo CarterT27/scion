@@ -1,0 +1,37 @@
+{
+  "name": "terminator_gained_mid",
+  "kind": "diff",
+  "description": "the same bytes with and without a final newline",
+  "a_hex": "610a620a63",
+  "b_hex": "610a620a630a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 2
+    },
+    {
+      "op": "delete",
+      "a": 2,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 2,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        2,
+        3
+      ],
+      "new": [
+        2,
+        3
+      ]
+    }
+  ]
+}

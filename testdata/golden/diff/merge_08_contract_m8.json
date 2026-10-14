@@ -1,0 +1,25 @@
+{
+  "name": "contract_M8",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M8: both sides add different content to an empty base: conflict",
+  "base_hex": "",
+  "ours_hex": "780a",
+  "theirs_hex": "790a",
+  "conflicts": [
+    {
+      "base": [
+        0,
+        0
+      ],
+      "ours": [
+        0,
+        1
+      ],
+      "theirs": [
+        0,
+        1
+      ]
+    }
+  ],
+  "markers_hex": "3c3c3c3c3c3c3c206f7572730a780a7c7c7c7c7c7c7c20626173650a3d3d3d3d3d3d3d0a790a3e3e3e3e3e3e3e207468656972730a"
+}

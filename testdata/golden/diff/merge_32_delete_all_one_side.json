@@ -1,0 +1,10 @@
+{
+  "name": "delete_all_one_side",
+  "kind": "merge",
+  "description": "ours deletes everything, theirs unchanged",
+  "base_hex": "610a620a",
+  "ours_hex": "",
+  "theirs_hex": "610a620a",
+  "result_hex": "",
+  "markers_hex": ""
+}

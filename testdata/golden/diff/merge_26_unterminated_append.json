@@ -1,0 +1,25 @@
+{
+  "name": "unterminated_append",
+  "kind": "merge",
+  "description": "ours appends after an unterminated last line, theirs edits line 0",
+  "base_hex": "610a62",
+  "ours_hex": "610a620a63",
+  "theirs_hex": "410a62",
+  "conflicts": [
+    {
+      "base": [
+        0,
+        2
+      ],
+      "ours": [
+        0,
+        3
+      ],
+      "theirs": [
+        0,
+        2
+      ]
+    }
+  ],
+  "markers_hex": "3c3c3c3c3c3c3c206f7572730a610a620a630a7c7c7c7c7c7c7c20626173650a610a620a3d3d3d3d3d3d3d0a410a620a3e3e3e3e3e3e3e207468656972730a"
+}

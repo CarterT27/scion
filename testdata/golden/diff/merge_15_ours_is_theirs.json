@@ -1,0 +1,10 @@
+{
+  "name": "ours_is_theirs",
+  "kind": "merge",
+  "description": "o == t: result is ours",
+  "base_hex": "610a620a630a",
+  "ours_hex": "630a620a610a",
+  "theirs_hex": "630a620a610a",
+  "result_hex": "630a620a610a",
+  "markers_hex": "630a620a610a"
+}

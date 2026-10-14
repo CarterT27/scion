@@ -1,0 +1,25 @@
+{
+  "name": "insert_inside_deletion",
+  "kind": "merge",
+  "description": "an insertion inside a deleted range",
+  "base_hex": "610a620a630a640a",
+  "ours_hex": "610a640a",
+  "theirs_hex": "610a620a4e0a630a640a",
+  "conflicts": [
+    {
+      "base": [
+        1,
+        3
+      ],
+      "ours": [
+        1,
+        1
+      ],
+      "theirs": [
+        1,
+        4
+      ]
+    }
+  ],
+  "markers_hex": "610a3c3c3c3c3c3c3c206f7572730a7c7c7c7c7c7c7c20626173650a620a630a3d3d3d3d3d3d3d0a620a4e0a630a3e3e3e3e3e3e3e207468656972730a640a"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "identical",
+  "kind": "diff",
+  "description": "identical inputs: one Equal run",
+  "a_hex": "610a620a630a",
+  "b_hex": "610a620a630a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 3
+    }
+  ],
+  "hunks": []
+}

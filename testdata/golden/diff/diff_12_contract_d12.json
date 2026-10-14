@@ -1,0 +1,89 @@
+{
+  "name": "contract_D12",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D12: Myers paper example ABCABBA -> CBABAC",
+  "a_hex": "410a420a430a410a420a420a410a",
+  "b_hex": "430a420a410a420a410a430a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 2
+    },
+    {
+      "op": "equal",
+      "a": 2,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 1,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 3,
+      "b": 2,
+      "len": 2
+    },
+    {
+      "op": "delete",
+      "a": 5,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 6,
+      "b": 4,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 5,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        2
+      ],
+      "new": [
+        0,
+        0
+      ]
+    },
+    {
+      "base": [
+        3,
+        3
+      ],
+      "new": [
+        1,
+        2
+      ]
+    },
+    {
+      "base": [
+        5,
+        6
+      ],
+      "new": [
+        4,
+        4
+      ]
+    },
+    {
+      "base": [
+        7,
+        7
+      ],
+      "new": [
+        5,
+        6
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "insert_touches_change_start",
+  "kind": "merge",
+  "description": "insertion at the start touches a change of line 0",
+  "base_hex": "610a620a630a",
+  "ours_hex": "4e0a610a620a630a",
+  "theirs_hex": "410a620a630a",
+  "conflicts": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "ours": [
+        0,
+        2
+      ],
+      "theirs": [
+        0,
+        1
+      ]
+    }
+  ],
+  "markers_hex": "3c3c3c3c3c3c3c206f7572730a4e0a610a7c7c7c7c7c7c7c20626173650a610a3d3d3d3d3d3d3d0a410a3e3e3e3e3e3e3e207468656972730a620a630a"
+}

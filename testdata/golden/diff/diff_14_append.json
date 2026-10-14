@@ -1,0 +1,32 @@
+{
+  "name": "append",
+  "kind": "diff",
+  "description": "append a line at the end",
+  "a_hex": "610a620a",
+  "b_hex": "610a620a630a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 2
+    },
+    {
+      "op": "insert",
+      "b": 2,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        2,
+        2
+      ],
+      "new": [
+        2,
+        3
+      ]
+    }
+  ]
+}

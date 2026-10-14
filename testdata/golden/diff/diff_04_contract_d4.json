@@ -1,0 +1,47 @@
+{
+  "name": "contract_D4",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D4: swap AB/BA (tie: the deletion branch wins, so B is kept)",
+  "a_hex": "410a420a",
+  "b_hex": "420a410a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 1,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 1,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        0
+      ]
+    },
+    {
+      "base": [
+        2,
+        2
+      ],
+      "new": [
+        1,
+        2
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "name": "blank_delete",
+  "kind": "diff",
+  "description": "delete a blank line among blank lines: the last copy goes",
+  "a_hex": "780a0a0a0a790a",
+  "b_hex": "780a0a0a790a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 3
+    },
+    {
+      "op": "delete",
+      "a": 3,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 4,
+      "b": 3,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        3,
+        4
+      ],
+      "new": [
+        3,
+        3
+      ]
+    }
+  ]
+}

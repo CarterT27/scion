@@ -1,0 +1,25 @@
+{
+  "name": "crlf_to_lf_vs_edit",
+  "kind": "merge",
+  "description": "ours converts CRLF to LF, theirs edits a line",
+  "base_hex": "610d0a620d0a630d0a",
+  "ours_hex": "610a620a630a",
+  "theirs_hex": "610d0a420d0a630d0a",
+  "conflicts": [
+    {
+      "base": [
+        0,
+        3
+      ],
+      "ours": [
+        0,
+        3
+      ],
+      "theirs": [
+        0,
+        3
+      ]
+    }
+  ],
+  "markers_hex": "3c3c3c3c3c3c3c206f7572730a610a620a630a7c7c7c7c7c7c7c20626173650a610d0a620d0a630d0a3d3d3d3d3d3d3d0a610d0a420d0a630d0a3e3e3e3e3e3e3e207468656972730a"
+}

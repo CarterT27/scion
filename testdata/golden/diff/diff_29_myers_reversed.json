@@ -1,0 +1,94 @@
+{
+  "name": "myers_reversed",
+  "kind": "diff",
+  "description": "Myers paper example reversed: CBABAC -> ABCABBA",
+  "a_hex": "430a420a410a420a410a430a",
+  "b_hex": "410a420a430a410a420a420a410a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 1,
+      "b": 1,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 2,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 2,
+      "b": 3,
+      "len": 2
+    },
+    {
+      "op": "insert",
+      "b": 5,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 4,
+      "b": 6,
+      "len": 1
+    },
+    {
+      "op": "delete",
+      "a": 5,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        1
+      ]
+    },
+    {
+      "base": [
+        2,
+        2
+      ],
+      "new": [
+        2,
+        3
+      ]
+    },
+    {
+      "base": [
+        4,
+        4
+      ],
+      "new": [
+        5,
+        6
+      ]
+    },
+    {
+      "base": [
+        5,
+        6
+      ],
+      "new": [
+        7,
+        7
+      ]
+    }
+  ]
+}

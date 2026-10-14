@@ -1,0 +1,32 @@
+{
+  "name": "seeded_6",
+  "kind": "diff",
+  "description": "seeded SplitMix64 small-alphabet case (tie-breaks)",
+  "a_hex": "630a630a620a610a",
+  "b_hex": "630a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "delete",
+      "a": 1,
+      "len": 3
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        1,
+        4
+      ],
+      "new": [
+        1,
+        1
+      ]
+    }
+  ]
+}

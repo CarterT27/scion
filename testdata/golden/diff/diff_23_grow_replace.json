@@ -1,0 +1,31 @@
+{
+  "name": "grow_replace",
+  "kind": "diff",
+  "description": "replace two lines with three",
+  "a_hex": "700a710a",
+  "b_hex": "780a790a7a0a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 2
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 3
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        2
+      ],
+      "new": [
+        0,
+        3
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "contract_M1",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M1: non-overlapping edits on both sides",
+  "base_hex": "610a620a630a",
+  "ours_hex": "410a620a630a",
+  "theirs_hex": "610a620a430a",
+  "result_hex": "410a620a430a",
+  "markers_hex": "410a620a430a"
+}
