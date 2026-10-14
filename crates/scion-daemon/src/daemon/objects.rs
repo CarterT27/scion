@@ -99,10 +99,13 @@ impl Inner {
         range: Option<(Option<u64>, Option<u64>)>,
         tx: tokio::sync::mpsc::Sender<std::result::Result<v1::ObjectChunk, Status>>,
     ) -> Result<()> {
-        if self.fail_closed_now() {
+        // Fail-closed (SPEC 13.3) is normally routed to forwarding before this point; if the
+        // set went stale meanwhile, nothing is served from cache.
+        let closed = self.fail_closed_now();
+        if closed {
             self.poll_now.notify_one();
         }
-        let synced = self.ensure_synced().await;
+        let use_cache = self.ensure_synced().await && !closed;
 
         // Plan every id; misses join an in-flight batch or go into this request's batch
         // (SPEC 10.2 coalescing). The cache is re-checked under the in-flight lock: a batch
@@ -119,7 +122,7 @@ impl Inner {
                     plans.push(Plan::Redacted);
                 } else if let Some(b) = inflight.get(id) {
                     plans.push(Plan::Miss(b.clone()));
-                } else if synced && self.cache.contains(id) {
+                } else if use_cache && self.cache.contains(id) {
                     if self.decided(&caller, id).is_none() && undecided_seen.insert(*id) {
                         undecided.push(*id);
                     }
