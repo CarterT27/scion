@@ -323,7 +323,16 @@ impl History {
         match merge3(cb, co, ct) {
             Merge3::Clean(merged) => {
                 let size = merged.len() as u64;
-                let (id, _) = self.objects.put_blob(Bytes::from(merged)).await?;
+                let id = match self.objects.put_blob(Bytes::from(merged)).await {
+                    Ok((id, _)) => id,
+                    // The merged bytes equal redacted content: re-introducing it is refused
+                    // (SPEC 13.6), so the path is reported as a `redacted` conflict instead of
+                    // failing the whole operation.
+                    Err(e) if e.code == ErrorCode::Redacted => {
+                        return Ok(Content::Conflict(ConflictKind::Redacted, Vec::new()));
+                    }
+                    Err(e) => return Err(e),
+                };
                 Ok(Content::Clean(EntryInfo {
                     mode: merge_mode(b.mode, o.mode, t.mode),
                     id,

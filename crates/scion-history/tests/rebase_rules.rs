@@ -352,6 +352,51 @@ async fn redacted_content_conflict() {
 }
 
 #[tokio::test]
+async fn merged_content_equal_to_redacted_content_is_a_redacted_conflict() {
+    // SPEC 13.6: the clean merge result would re-introduce redacted bytes. The engine reports
+    // a `redacted` conflict (with the other paths as clean entries) instead of storing it or
+    // failing the whole rebase with REDACTED.
+    let k = case(
+        &[("f", file("1\n2\n3\n")), ("g", file("g\n"))],
+        &[("f", file("one\n2\n3\n"))],
+        &[("f", file("1\n2\nthree\n")), ("g", file("g2\n"))],
+    )
+    .await;
+    let merged = upload(&k.env.h, Mode::File, b"one\n2\nthree\n").await;
+    redact(&k.env, &[merged.id]).await;
+    let r = k.conflict().await;
+    assert_eq!(kinds(&r), vec![("f".to_owned(), ConflictKind::Redacted)]);
+    let c = &r.conflicts[0];
+    assert_eq!(c.base.unwrap().id, ObjectId::hash_blob(b"1\n2\n3\n"));
+    assert_eq!(c.ours.unwrap().id, ObjectId::hash_blob(b"one\n2\n3\n"));
+    assert_eq!(c.theirs.unwrap().id, ObjectId::hash_blob(b"1\n2\nthree\n"));
+    assert_eq!(r.clean_entries.len(), 1);
+    assert_eq!(r.clean_entries[0].path, b"g".to_vec());
+    assert_eq!(
+        r.clean_entries[0].entry.unwrap().id,
+        ObjectId::hash_blob(b"g2\n")
+    );
+    // The same through Merge(a, b).
+    let err = k
+        .env
+        .h
+        .merge(
+            &k.x,
+            &k.c,
+            fields("m"),
+            change_id_for(&[k.x, k.c], "m"),
+            &alice(),
+            &scion_history::AllowAll,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        kinds(report(&err)),
+        vec![("f".to_owned(), ConflictKind::Redacted)]
+    );
+}
+
+#[tokio::test]
 async fn content_clean_merge() {
     let k = case(
         &[("dir/f", file("1\n2\n3\n4\n5\n6\n"))],
