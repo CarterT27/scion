@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "CatData": {
+      "additionalProperties": false,
+      "description": "`scion cat <rev>:<path>` (SPEC 7.4 ReadPath).",
+      "properties": {
+        "changeset": {
+          "description": "Changeset read.",
+          "type": "string"
+        },
+        "content": {
+          "description": "Content.",
+          "type": "string"
+        },
+        "encoding": {
+          "description": "`utf8` or `hex`: how `content` is encoded.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Blob id.",
+          "type": "string"
+        },
+        "mode": {
+          "description": "Mode (1 file, 2 executable, 3 symlink).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Path.",
+          "type": "string"
+        },
+        "size": {
+          "description": "Size in bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "changeset",
+        "path",
+        "id",
+        "mode",
+        "size",
+        "encoding",
+        "content"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion cat --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/CatData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.cat.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.cat.v1",
+  "type": "object"
+}

@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "RebaseData": {
+      "additionalProperties": false,
+      "description": "`scion rebase --onto` / `--abort` (SPEC 11.7).",
+      "properties": {
+        "aborted": {
+          "description": "Whether this was `--abort`.",
+          "type": "boolean"
+        },
+        "base": {
+          "description": "Base after the command.",
+          "type": "string"
+        },
+        "conflicts": {
+          "description": "Conflicting paths (non-empty: exit code 3).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "head": {
+          "description": "New head when the rebase completed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "onto": {
+          "description": "Destination (`--onto`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rebased": {
+          "description": "Rebased results in stack order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "aborted",
+        "base",
+        "rebased",
+        "conflicts"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion rebase --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/RebaseData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.rebase.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.rebase.v1",
+  "type": "object"
+}

@@ -1,0 +1,56 @@
+{
+  "$defs": {
+    "ErrorData": {
+      "additionalProperties": false,
+      "description": "Error envelope (`scion.cli.error.v1`), printed on stdout under `--json` when a command\nfails (PLAN 6.15).",
+      "properties": {
+        "code": {
+          "description": "SPEC 7.2 error code (`NOT_FOUND`, ...), or `USAGE` / `LOCAL` for client-side errors.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "Process exit code (PLAN 6.15).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "message": {
+          "description": "Message.",
+          "type": "string"
+        },
+        "subcode": {
+          "description": "Subcode, when the error carries one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "exit_code"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion error --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/ErrorData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.error.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.error.v1",
+  "type": "object"
+}

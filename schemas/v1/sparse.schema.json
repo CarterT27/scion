@@ -1,0 +1,54 @@
+{
+  "$defs": {
+    "SparseData": {
+      "additionalProperties": false,
+      "description": "`scion sparse add|remove` (SPEC 11.2).",
+      "properties": {
+        "action": {
+          "description": "`add` or `remove`.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "The prefixes given.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sparse": {
+          "description": "The resulting profile.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "paths",
+        "sparse"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion sparse --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/SparseData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.sparse.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.sparse.v1",
+  "type": "object"
+}

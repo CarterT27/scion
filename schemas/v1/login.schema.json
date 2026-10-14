@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "LoginData": {
+      "additionalProperties": false,
+      "description": "`scion login` (SPEC 12.2, 12.3, 17).",
+      "properties": {
+        "credentials_path": {
+          "description": "Where the credentials were written (mode 0600).",
+          "type": "string"
+        },
+        "expires_at_unix": {
+          "description": "Token expiry, Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "github_token_stored": {
+          "description": "Whether the GitHub token was stored for silent re-exchange (SPEC 12.2).",
+          "type": "boolean"
+        },
+        "method": {
+          "description": "`github` (device flow) or `service`.",
+          "type": "string"
+        },
+        "principal": {
+          "description": "The principal the server issued the token for (`github:<login>` or `service:<name>`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal",
+        "expires_at_unix",
+        "method",
+        "credentials_path",
+        "github_token_stored"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion login --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/LoginData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.login.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.login.v1",
+  "type": "object"
+}

@@ -1,0 +1,57 @@
+{
+  "$defs": {
+    "WhoamiData": {
+      "additionalProperties": false,
+      "description": "`scion whoami` (SPEC 7.7).",
+      "properties": {
+        "endpoint": {
+          "description": "The endpoint that answered.",
+          "type": "string"
+        },
+        "expires_at_unix": {
+          "description": "Token expiry, Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "groups": {
+          "description": "Its groups under the current policy, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "principal": {
+          "description": "Authenticated principal.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal",
+        "groups",
+        "expires_at_unix",
+        "endpoint"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion whoami --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/WhoamiData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.whoami.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.whoami.v1",
+  "type": "object"
+}

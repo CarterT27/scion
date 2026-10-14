@@ -1,0 +1,275 @@
+{
+  "$defs": {
+    "HunkView": {
+      "additionalProperties": false,
+      "description": "One unified hunk (SPEC 7.4 `include_content_hunks`).",
+      "properties": {
+        "lines": {
+          "description": "Lines, each starting with ` `, `-` or `+` (lossy UTF-8).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "new_lines": {
+          "description": "New line count.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "new_start": {
+          "description": "First new line (1-based).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "old_lines": {
+          "description": "Old line count.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "old_start": {
+          "description": "First old line (1-based).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "old_start",
+        "old_lines",
+        "new_start",
+        "new_lines",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "MetaJson": {
+      "additionalProperties": false,
+      "description": "A Meta as shown to clients (SPEC 4.3.3, 13.4): when `redacted`, only `meta_id` is set and\nhumans see `<redacted>`.",
+      "properties": {
+        "author": {
+          "description": "Author.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Author time."
+        },
+        "committer": {
+          "description": "Committer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "committer_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Committer time."
+        },
+        "creator": {
+          "description": "Creator principal.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "Message.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "meta_id": {
+          "description": "Meta object id.",
+          "type": "string"
+        },
+        "redacted": {
+          "description": "The Meta is redacted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "redacted",
+        "meta_id"
+      ],
+      "type": "object"
+    },
+    "ShowChange": {
+      "additionalProperties": false,
+      "description": "One file changed by a changeset (SPEC 4.3.4).",
+      "properties": {
+        "binary": {
+          "description": "Treated as binary (no hunks).",
+          "type": "boolean"
+        },
+        "hunks": {
+          "description": "Content hunks.",
+          "items": {
+            "$ref": "#/$defs/HunkView"
+          },
+          "type": "array"
+        },
+        "new_id": {
+          "description": "New blob.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new_mode": {
+          "description": "New mode.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "old_id": {
+          "description": "Old blob.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old_mode": {
+          "description": "Old mode.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Path.",
+          "type": "string"
+        },
+        "status": {
+          "description": "`added`, `deleted`, `modified` or `mode_changed`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status",
+        "binary",
+        "hunks"
+      ],
+      "type": "object"
+    },
+    "ShowData": {
+      "additionalProperties": false,
+      "description": "`scion show` (SPEC 11.8, 13.4).",
+      "properties": {
+        "change_id": {
+          "description": "Change id (32 hex).",
+          "type": "string"
+        },
+        "changes": {
+          "description": "Changes against the first parent (the empty tree for a root).",
+          "items": {
+            "$ref": "#/$defs/ShowChange"
+          },
+          "type": "array"
+        },
+        "filtered": {
+          "description": "Filtered view (SPEC 12.6).",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Changeset id.",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/MetaJson",
+          "description": "Meta (`<redacted>` for humans when redacted)."
+        },
+        "parents": {
+          "description": "Parents.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "root_tree": {
+          "description": "Root tree.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parents",
+        "root_tree",
+        "change_id",
+        "filtered",
+        "meta",
+        "changes"
+      ],
+      "type": "object"
+    },
+    "TimeView": {
+      "additionalProperties": false,
+      "description": "A timestamp (SPEC 4.3.3).",
+      "properties": {
+        "seconds": {
+          "description": "Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "tz_offset_minutes": {
+          "description": "Time-zone offset in minutes.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds",
+        "tz_offset_minutes"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion show --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/ShowData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.show.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.show.v1",
+  "type": "object"
+}

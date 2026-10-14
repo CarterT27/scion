@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "GotoReport": {
+      "description": "Result of a goto (`--json` schema `scion.cli.goto.v1`).",
+      "properties": {
+        "from": {
+          "description": "Previous base (id text).",
+          "type": "string"
+        },
+        "preserved_dirty": {
+          "description": "Dirty files preserved untouched.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "removed": {
+          "description": "Files removed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "to": {
+          "description": "New base (id text).",
+          "type": "string"
+        },
+        "written": {
+          "description": "Files written.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "written",
+        "removed",
+        "preserved_dirty"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion goto --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/GotoReport",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.goto.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.goto.v1",
+  "type": "object"
+}
