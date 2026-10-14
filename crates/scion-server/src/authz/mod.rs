@@ -39,6 +39,8 @@ pub struct ObjectAuthorizer {
     storage: Storage,
     policy: Arc<PolicyHandle>,
     redactions: Arc<RedactionSet>,
+    /// Decision cache and other private state; its type lives in `object.rs` (P25).
+    state: object::AuthzState,
 }
 
 impl ObjectAuthorizer {
@@ -48,6 +50,7 @@ impl ObjectAuthorizer {
             storage,
             policy,
             redactions,
+            state: object::AuthzState::default(),
         }
     }
 }

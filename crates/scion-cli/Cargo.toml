@@ -37,6 +37,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 humantime = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+zstd = { workspace = true }
 
 [dev-dependencies]
 scion-testkit = { workspace = true }

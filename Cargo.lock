@@ -4091,7 +4091,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "bytes",
  "clap",
+ "futures",
  "humantime",
  "jsonschema",
  "schemars",
@@ -4108,9 +4110,11 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "zstd",
 ]
 
 [[package]]
@@ -4168,6 +4172,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
@@ -4238,6 +4243,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "futures",
+ "hex",
  "parking_lot",
  "proptest",
  "scion-core",

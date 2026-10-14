@@ -45,6 +45,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 parking_lot = { workspace = true }
+zstd = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

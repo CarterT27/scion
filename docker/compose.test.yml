@@ -6,40 +6,32 @@ name: scion-test
 services:
   cockroach:
     image: cockroachdb/cockroach:v24.3.5
-    command: start-single-node --insecure --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080
+    # v24.3 rejects a non-localhost --listen-addr in insecure mode; the default listens on all
+    # interfaces of the container.
+    command: start-single-node --insecure
     ports:
       - "26257:26257"
-      - "8080:8080"
     healthcheck:
       test: ["CMD", "cockroach", "sql", "--insecure", "--host=localhost:26257", "-e", "SELECT 1"]
       interval: 2s
       timeout: 5s
       retries: 60
 
+  # The official minio/minio and minio/mc images are no longer pullable anonymously (Docker Hub
+  # and quay.io); the Bitnami legacy MinIO image is used instead. It creates the bucket itself.
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --address ":9000" --console-address ":9001"
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_DEFAULT_BUCKETS: scion-test
+      MINIO_API_PORT_NUMBER: "9000"
+      MINIO_CONSOLE_PORT_NUMBER: "9001"
     ports:
       - "9000:9000"
       - "9001:9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/ready"]
       interval: 2s
       timeout: 5s
       retries: 60
-
-  minio-setup:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        mc alias set local http://minio:9000 minioadmin minioadmin &&
-        mc mb --ignore-existing local/scion-test
-    restart: "no"

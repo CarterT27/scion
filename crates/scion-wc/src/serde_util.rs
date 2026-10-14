@@ -79,3 +79,42 @@ pub(crate) mod opt_ref {
             .transpose()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{PendingOperation, WcState};
+    use scion_core::empty_tree_id;
+
+    #[test]
+    fn wc_state_toml_round_trip_without_optional_fields() {
+        let s = WcState {
+            endpoint: None,
+            base: empty_tree_id(),
+            tracking_ref: None,
+            sparse: Vec::new(),
+            inaccessible: Vec::new(),
+            pending: Some(PendingOperation::Checkout {
+                target: empty_tree_id(),
+            }),
+        };
+        let text = toml::to_string(&s).unwrap();
+        let back: WcState = toml::from_str(&text).unwrap();
+        assert_eq!(back, s);
+
+        let r = WcState {
+            pending: Some(PendingOperation::Rebase {
+                original: empty_tree_id(),
+                onto: empty_tree_id(),
+                remaining_stack: vec![empty_tree_id()],
+                done: Vec::new(),
+                conflicts: vec![b"a/b".to_vec(), vec![0xff, 0x00]],
+                resolved: Vec::new(),
+                current: None,
+            }),
+            ..s
+        };
+        let text = toml::to_string(&r).unwrap();
+        let back: WcState = toml::from_str(&text).unwrap();
+        assert_eq!(back, r);
+    }
+}

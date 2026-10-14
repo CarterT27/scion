@@ -26,6 +26,7 @@ parking_lot = { workspace = true }
 dashmap = { workspace = true }
 arc-swap = { workspace = true }
 thiserror = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 scion-testkit = { workspace = true }

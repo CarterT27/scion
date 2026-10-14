@@ -65,7 +65,7 @@ pub struct WcState {
     /// Base changeset.
     pub base: ObjectId,
     /// Tracked ref.
-    #[serde(with = "crate::serde_util::opt_ref")]
+    #[serde(default, with = "crate::serde_util::opt_ref")]
     pub tracking_ref: Option<RefName>,
     /// Sparse profile prefixes.
     #[serde(with = "crate::serde_util::paths")]
