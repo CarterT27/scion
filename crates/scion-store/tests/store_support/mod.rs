@@ -8,8 +8,8 @@ use scion_object::{
     Timestamp, Tree, TreeEntry,
 };
 use scion_store::{
-    ChangesetBundle, ChangesetRow, MemHandles, MemOptions, ObjectRepo, ObjectRepoConfig,
-    ObjectRow, ObjectState, Storage,
+    ChangesetBundle, ChangesetRow, MemHandles, MemOptions, ObjectRepo, ObjectRepoConfig, ObjectRow,
+    ObjectState, Storage,
 };
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -145,4 +145,61 @@ pub fn bundle(row: ChangesetRow, parents: Vec<ObjectId>) -> ChangesetBundle {
         object_paths: vec![],
         derived: vec![],
     }
+}
+
+/// A minimal tracing subscriber recording span `target:name` pairs and events as
+/// `LEVEL target field=value ...` lines.
+#[derive(Clone, Default)]
+pub struct Capture {
+    pub spans: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+    pub events: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+    next: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+struct FieldText(String);
+
+impl tracing::field::Visit for FieldText {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0.push_str(&format!(" {}={:?}", field.name(), value));
+    }
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.push_str(&format!(" {}={}", field.name(), value));
+    }
+}
+
+impl tracing::Subscriber for Capture {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, a: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        self.spans
+            .lock()
+            .push(format!("{}:{}", a.metadata().target(), a.metadata().name()));
+        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        tracing::span::Id::from_u64(n)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, e: &tracing::Event<'_>) {
+        let mut f = FieldText(format!(
+            "{} {}",
+            e.metadata().level(),
+            e.metadata().target()
+        ));
+        e.record(&mut f);
+        self.events.lock().push(f.0);
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+/// Run `fut` on a current-thread runtime with `cap` as the default subscriber.
+pub fn with_capture<F: std::future::Future>(cap: &Capture, fut: F) -> F::Output {
+    tracing::subscriber::with_default(cap.clone(), || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
+    })
 }

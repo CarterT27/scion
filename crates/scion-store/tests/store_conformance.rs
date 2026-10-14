@@ -1,5 +1,6 @@
 //! The shared backend conformance suites on the in-memory backends (PLAN 3.2), both raw and
 //! wrapped in the instrumented decorators (which must be transparent when no fault is armed).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test crate
 
 use scion_core::FaultRegistry;
 use scion_store::conformance::{blob_store_suite, meta_store_suite};
