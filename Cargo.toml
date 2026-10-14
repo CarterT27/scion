@@ -36,7 +36,6 @@ repository = "https://github.com/scion-scm/scion"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
-missing_docs = "warn"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
