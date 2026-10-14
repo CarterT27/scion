@@ -78,6 +78,32 @@ async fn create_ref(c: &TestCluster, name: &str, target: &ObjectId) {
         .unwrap();
 }
 
+/// `(tree id, [(entry name, entry id)])` of the directory `path` in changeset `cs`.
+async fn listed_tree(
+    client: &scion_proto::ScionClient,
+    cs: &ObjectId,
+    path: &[u8],
+) -> (ObjectId, Vec<(Vec<u8>, ObjectId)>) {
+    let r = client
+        .query()
+        .list_tree(v1::ListTreeRequest {
+            changeset: cs.as_bytes().to_vec(),
+            path: path.to_vec(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let entries = r
+        .entries
+        .iter()
+        .map(|e| {
+            let info = e.entry.as_ref().unwrap();
+            (e.name.clone(), ObjectId::from_bytes(&info.id).unwrap())
+        })
+        .collect();
+    (ObjectId::from_bytes(&r.tree_id).unwrap(), entries)
+}
+
 async fn run_client_scenarios(backend: Backend, via: Via) {
     let c = TestCluster::start(opts(backend)).await;
     let v = via.as_str();
@@ -182,6 +208,28 @@ async fn run_client_scenarios(backend: Backend, via: Via) {
         .copied()
         .collect();
     assert_eq!(fetched_blobs, inside, "{v}: sparse fetch object set");
+    // ... and exactly the trees on the path to the scope (the root) plus every tree under it.
+    let mut want_trees: BTreeSet<ObjectId> = BTreeSet::new();
+    want_trees.insert(listed_tree(&direct, &ids[last], b"").await.0);
+    let mut stack = vec![dirs[0].clone()];
+    while let Some(path) = stack.pop() {
+        let (tree, entries) = listed_tree(&direct, &ids[last], &path).await;
+        want_trees.insert(tree);
+        for (name, id) in entries {
+            if id.kind() == Kind::Tree {
+                let mut child = path.clone();
+                child.push(b'/');
+                child.extend_from_slice(&name);
+                stack.push(child);
+            }
+        }
+    }
+    let fetched_trees: BTreeSet<ObjectId> = fetched
+        .iter()
+        .filter(|id| id.kind() == Kind::Tree)
+        .copied()
+        .collect();
+    assert_eq!(fetched_trees, want_trees, "{v}: sparse fetch tree set");
 
     // --- P28: commit, amend, conflicts, land, crash recovery, placeholders. ---
     let work = RefName::parse("work").unwrap();

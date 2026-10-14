@@ -21,6 +21,7 @@
 
 use scion_conformance::{Backend, ClusterOpts, TestCluster, Via, invariants};
 use scion_core::{ConflictKind, ErrorCode, ErrorPayload, ObjectId, Principal};
+use scion_derived::history;
 use scion_object::{RefName, RepoPath};
 use scion_proto::{ScionClient, error_from_status, v1};
 use scion_store::{Area, Consistency, ObjectState};
@@ -35,6 +36,9 @@ const POLL_MS: u64 = 400;
 const STALENESS_MS: u64 = 1500;
 /// Scheduling slack added to every bound.
 const SLACK_MS: u64 = 150;
+/// Scheduling slack for the daemon's poll bound (a poll round trip plus timer jitter under a
+/// loaded test run); still well inside the servers' propagation bound.
+const DAEMON_SLACK_MS: u64 = 300;
 
 fn gh(login: &str) -> Principal {
     TestCluster::gh(login)
@@ -233,6 +237,36 @@ async fn run_runbook(backend: Backend) {
         "effective_by = commit time + propagation bound"
     );
 
+    // The daemon: within one poll interval plus one request of the commit (which is
+    // effective_by minus the propagation bound), with its cached copy deleted. This bound is
+    // independent of (and here shorter than) the servers' propagation bound, so it is checked
+    // first.
+    let committed_at = r.effective_by_unix_ms - bound;
+    assert!(
+        POLL_MS + DAEMON_SLACK_MS < bound as u64,
+        "the daemon check precedes effective_by"
+    );
+    sleep_until_ms(committed_at + (POLL_MS + DAEMON_SLACK_MS) as i64).await;
+    let mut stale = 0;
+    for _ in 0..2 {
+        match read_status(&alice_d, &sid).await {
+            (s, _) if s == REDACTED => {}
+            (s, content) => {
+                assert_eq!((s, content), (OK, secret.clone()));
+                stale += 1;
+            }
+        }
+    }
+    assert!(
+        stale <= 1,
+        "the daemon served a redacted object for {stale} requests"
+    );
+    assert_eq!(read_status(&alice_d, &sid).await.0, REDACTED);
+    eventually("the daemon deletes its cached copy", || {
+        !d.handle.cache().contains(&sid)
+    })
+    .await;
+
     // Every server returns `redacted` by effective_by.
     sleep_until_ms(r.effective_by_unix_ms).await;
     for (name, client) in [("server 0", &alice), ("server 1", &alice_1)] {
@@ -256,28 +290,6 @@ async fn run_runbook(backend: Backend) {
         },
         (idb(&sid), secret.len() as u64)
     );
-
-    // The daemon: within one poll interval plus one request, with its cached copy deleted.
-    sleep_until_ms(redacted_at + (POLL_MS + SLACK_MS) as i64).await;
-    let mut stale = 0;
-    for _ in 0..2 {
-        match read_status(&alice_d, &sid).await {
-            (s, _) if s == REDACTED => {}
-            (s, content) => {
-                assert_eq!((s, content), (OK, secret.clone()));
-                stale += 1;
-            }
-        }
-    }
-    assert!(
-        stale <= 1,
-        "the daemon served a redacted object for {stale} requests"
-    );
-    assert_eq!(read_status(&alice_d, &sid).await.0, REDACTED);
-    eventually("the daemon deletes its cached copy", || {
-        !d.handle.cache().contains(&sid)
-    })
-    .await;
 
     // No identifier changed.
     assert_eq!(
@@ -371,6 +383,30 @@ async fn run_runbook(backend: Backend) {
         }
         other => panic!("conflict payload expected: {other:?}"),
     }
+    // The same through Merge (SPEC 13.6: rebase and merge).
+    let e = alice
+        .write()
+        .merge(v1::MergeRequest {
+            a: idb(&x),
+            b: idb(&y),
+            meta_fields: Some(TestCluster::meta("merge needing redacted content")),
+            change_id: TestCluster::change_id(7),
+        })
+        .await
+        .unwrap_err();
+    let err = error_from_status(&e);
+    assert_eq!(err.code, ErrorCode::MergeConflict, "merge: {err:?}");
+    match &err.payload {
+        ErrorPayload::MergeConflict(report) => {
+            let conflict = report
+                .conflicts
+                .iter()
+                .find(|c| c.path == b"app/secret.txt")
+                .expect("the merge conflict names the path");
+            assert_eq!(conflict.kind, ConflictKind::Redacted);
+        }
+        other => panic!("merge conflict payload expected: {other:?}"),
+    }
 
     // --- Meta redaction: Log renders <redacted>, ids unchanged. ---
     let log = |from: ObjectId| {
@@ -458,6 +494,53 @@ async fn run_runbook(backend: Backend) {
     assert_eq!(error_from_status(&e).code, ErrorCode::InvalidArgument);
     // Purged trees and changesets are untouched.
     assert_eq!(list_tree(&alice, &c3, "app").await, carried);
+    // Purging an inline object (the redacted Meta) deletes its inline data.
+    let meta_row = c
+        .storage
+        .meta
+        .get_objects(&[meta_id], Consistency::Strong)
+        .await
+        .unwrap()
+        .pop()
+        .flatten()
+        .unwrap();
+    assert!(
+        meta_row.inline_data.is_some(),
+        "a small Meta is stored inline"
+    );
+    admin
+        .admin()
+        .purge_now(v1::PurgeNowRequest {
+            object_ids: vec![idb(&meta_id)],
+            reason: "personal data purged".into(),
+        })
+        .await
+        .unwrap();
+    let meta_row = c
+        .storage
+        .meta
+        .get_objects(&[meta_id], Consistency::Strong)
+        .await
+        .unwrap()
+        .pop()
+        .flatten()
+        .unwrap();
+    assert_eq!(meta_row.state, ObjectState::Purged);
+    assert!(
+        meta_row.inline_data.is_none(),
+        "purge deleted the inline data"
+    );
+    assert!(log(c2).await.entries[0].meta.as_ref().unwrap().redacted);
+    // Non-content-bearing derived values (history) are retained (SPEC 13.5).
+    for cs in [c1, c2, c3] {
+        let row = c
+            .storage
+            .meta
+            .get_derived(&history::derived_key(&cs), Consistency::Strong)
+            .await
+            .unwrap();
+        assert!(row.is_some(), "history value of {cs} retained after purge");
+    }
 
     // --- The audit log records every action with actor and reason. ---
     let audit = c.storage.meta.audit_log(1000).await.unwrap();
@@ -466,6 +549,7 @@ async fn run_runbook(backend: Backend) {
         ("redact", meta_id.to_text(), "personal data in message"),
         ("unredact", kid.to_text(), ""),
         ("purge", sid.to_text(), "credential rotated"),
+        ("purge", meta_id.to_text(), "personal data purged"),
     ] {
         let found = audit.iter().find(|a| {
             a.action == action

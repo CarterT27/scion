@@ -516,6 +516,10 @@ async fn run_stale_read_retry(backend: Backend) {
     let t = tag();
     let alice = c.client(Via::Server, &gh("alice")).await;
     let (root, _) = c.ref_head("main").await;
+    // A row the stale view will contain (written before the freeze).
+    let old = format!("stale read, visible to stale reads {t}\n").into_bytes();
+    let old_id = ObjectId::hash_blob(&old);
+    let root = TestCluster::commit(&alice, &root, &[("stale/old.txt", &old)], &[], 3).await;
     // Freeze the stale view: from now on stale reads see none of the writes below.
     if let Some(mem) = c.mem() {
         mem.meta.set_stale_lag(1_000_000);
@@ -539,8 +543,24 @@ async fn run_stale_read_retry(backend: Backend) {
             .unwrap();
         assert_eq!(stale, vec![None], "the stale view misses the new changeset");
     }
-    // Every read of the new immutable rows succeeds through the strong retry.
+    // Every read of the new immutable rows succeeds through the strong retry. On the Memory
+    // backend the retry is observable: reading the stale-invisible row costs more
+    // `get_objects` calls than reading the stale-visible one (a stale miss, then the strong
+    // read).
+    let get_objects = scion_core::fault::points::meta_before("get_objects");
+    c.faults().reset_hits();
+    assert_eq!(fetch_one(&alice, &old_id).await, old);
+    let visible_calls = c.faults().hits(&get_objects);
+    c.faults().reset_hits();
     assert_eq!(fetch_one(&alice, &id).await, content);
+    let invisible_calls = c.faults().hits(&get_objects);
+    if c.mem().is_some() {
+        assert!(
+            invisible_calls > visible_calls,
+            "stale miss retried strongly: {invisible_calls} get_objects calls vs \
+             {visible_calls} for a stale-visible row"
+        );
+    }
     let items = alice
         .query()
         .get_changesets(v1::GetChangesetsRequest {

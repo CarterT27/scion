@@ -946,10 +946,12 @@ async fn run_corrupt_objects(backend: Backend) {
     let original = flip_last_byte(&cached);
     let mut wc = WorkingCopy::open(&wc_root, s.client.clone(), WcOptions::default()).unwrap();
     let calls = s.client.calls();
-    // The digest mismatch is detected on read and the entry discarded; the scion-wc status
-    // engine never contacts the server (SPEC 11.5), so the command that hit the corrupt
-    // entry may report the tree as missing locally (NOT_FOUND) and the next command
-    // re-fetches it.
+    // The digest mismatch is detected on read and the entry discarded. KNOWN scion-wc GAP
+    // (reported to the orchestrator): `TreeCache::contains` consults only the DiskCache index,
+    // so `fetch::ensure_trees` does not re-fetch the corrupt entry and the command that hits
+    // it fails NOT_FOUND ("not in the local cache"); only the next command re-fetches it.
+    // SPEC 16.1 class 7 wants the re-fetch within the same command; tighten this to
+    // `assert!(wc.status().await.unwrap().is_clean())` once scion-wc verifies on `contains`.
     match wc.status().await {
         Ok(st) => assert!(st.is_clean(), "{st:?}"),
         Err(e) => assert_eq!(e.code, ErrorCode::NotFound, "{e:?}"),
