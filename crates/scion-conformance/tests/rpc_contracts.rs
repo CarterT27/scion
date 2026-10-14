@@ -39,7 +39,11 @@ const SPEC_7_2: &[(&str, tonic::Code, bool)] = &[
     ("INTEGRITY", tonic::Code::DataLoss, true),
     ("REDACTED", tonic::Code::FailedPrecondition, false),
     ("MERGE_CONFLICT", tonic::Code::Aborted, false),
-    ("AMBIGUOUS_MERGE_BASE", tonic::Code::FailedPrecondition, false),
+    (
+        "AMBIGUOUS_MERGE_BASE",
+        tonic::Code::FailedPrecondition,
+        false,
+    ),
     ("REF_VERSION_MISMATCH", tonic::Code::Aborted, true),
     ("NOT_FAST_FORWARD", tonic::Code::FailedPrecondition, false),
     ("ALREADY_LANDED", tonic::Code::AlreadyExists, false),
@@ -323,7 +327,11 @@ impl Env {
             "{method} via {}: unknown fields must be ignored ({status:?})",
             via.as_str()
         );
-        check_trailers(&md, tier_of(via, method), &format!("{method} unknown fields"));
+        check_trailers(
+            &md,
+            tier_of(via, method),
+            &format!("{method} unknown fields"),
+        );
     }
 }
 
@@ -340,7 +348,12 @@ fn cid(via: Via, n: u32) -> u32 {
     }
 }
 
-async fn land(env: &Env, via: Via, who: &str, head: &ObjectId) -> Result<v1::LandResponse, tonic::Status> {
+async fn land(
+    env: &Env,
+    via: Via,
+    who: &str,
+    head: &ObjectId,
+) -> Result<v1::LandResponse, tonic::Status> {
     env.client(via, who)
         .await
         .write()
@@ -361,14 +374,17 @@ async fn case_get_server_info(env: &Env, via: Via) {
     let t = tier_of(via, "GetServerInfo");
     let anon = env.c.client_with_token(via, None).await;
     let info = ok(
-        anon.objects().get_server_info(v1::GetServerInfoRequest {}).await,
+        anon.objects()
+            .get_server_info(v1::GetServerInfoRequest {})
+            .await,
         t,
         "GetServerInfo without a token",
     );
     assert_eq!(info.protocol_versions, vec!["scion.v1".to_owned()]);
     assert!(!info.token_public_keys.is_empty());
     assert_eq!(info.limits.unwrap().max_blob_bytes, MAX_BLOB);
-    env.unknown_fields_ok(via, "GetServerInfo", Vec::new(), "-").await;
+    env.unknown_fields_ok(via, "GetServerInfo", Vec::new(), "-")
+        .await;
 }
 
 async fn case_get_objects(env: &Env, via: Via) {
@@ -394,7 +410,9 @@ async fn case_get_objects(env: &Env, via: Via) {
     );
     assert!(f.items[0].verified && f.items[0].content == b"readme\n");
     // Range read: raw bytes.
-    let f = TestCluster::fetch(&alice, &[readme], Some(1), Some(3)).await.unwrap();
+    let f = TestCluster::fetch(&alice, &[readme], Some(1), Some(3))
+        .await
+        .unwrap();
     assert_eq!(f.items[0].content, b"ead");
     assert_eq!(f.items[0].encoding, v1::Encoding::Raw as i32);
     assert_eq!(f.items[0].total_size, 7);
@@ -427,7 +445,12 @@ async fn case_get_objects(env: &Env, via: Via) {
     let ctx = env.c.servers[0].ctx();
     let key = ctx.objects.key(&bad, Area::Live);
     let frame = zstd::encode_all(&b"tampered bytes\n"[..], 3).unwrap();
-    env.c.storage.blobs.put(&key, Bytes::from(frame)).await.unwrap();
+    env.c
+        .storage
+        .blobs
+        .put(&key, Bytes::from(frame))
+        .await
+        .unwrap();
     let r = alice
         .objects()
         .get_objects(v1::GetObjectsRequest {
@@ -444,14 +467,20 @@ async fn case_get_objects(env: &Env, via: Via) {
     }
     // Repair the stored copy so the run ends with the 16.2 invariants intact.
     let good = zstd::encode_all(&content[..], 3).unwrap();
-    env.c.storage.blobs.put(&key, Bytes::from(good)).await.unwrap();
+    env.c
+        .storage
+        .blobs
+        .put(&key, Bytes::from(good))
+        .await
+        .unwrap();
     let body = v1::GetObjectsRequest {
         ids: vec![idb(&readme)],
         offset: None,
         length: None,
     }
     .encode_to_vec();
-    env.unknown_fields_ok(via, "GetObjects", body, "alice").await;
+    env.unknown_fields_ok(via, "GetObjects", body, "alice")
+        .await;
 }
 
 async fn case_has_objects(env: &Env, via: Via) {
@@ -489,7 +518,8 @@ async fn case_has_objects(env: &Env, via: Via) {
         ids: vec![idb(&env.red)],
     }
     .encode_to_vec();
-    env.unknown_fields_ok(via, "HasObjects", body, "alice").await;
+    env.unknown_fields_ok(via, "HasObjects", body, "alice")
+        .await;
 }
 
 async fn case_resolve_ref(env: &Env, via: Via) {
@@ -506,7 +536,10 @@ async fn case_resolve_ref(env: &Env, via: Via) {
         t,
         "ResolveRef",
     );
-    assert_eq!((ObjectId::from_bytes(&r.target).unwrap(), r.version), (env.c1, 2));
+    assert_eq!(
+        (ObjectId::from_bytes(&r.target).unwrap(), r.version),
+        (env.c1, 2)
+    );
     err(
         alice
             .objects()
@@ -538,7 +571,8 @@ async fn case_resolve_ref(env: &Env, via: Via) {
         at_version: None,
     }
     .encode_to_vec();
-    env.unknown_fields_ok(via, "ResolveRef", body, "alice").await;
+    env.unknown_fields_ok(via, "ResolveRef", body, "alice")
+        .await;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -553,7 +587,11 @@ async fn case_get_changesets(env: &Env, via: Via) {
         ids: vec![idb(&env.c1), idb(&ObjectId::hash_blob(b"no changeset"))],
     };
     // alice cannot read secrets/s.txt: filtered view; carol gets the canonical encoding.
-    let r = ok(alice.query().get_changesets(req.clone()).await, t, "GetChangesets");
+    let r = ok(
+        alice.query().get_changesets(req.clone()).await,
+        t,
+        "GetChangesets",
+    );
     assert_eq!(r.items[0].status, v1::ItemStatus::Ok as i32);
     match &r.items[0].view {
         Some(v1::changeset_item::View::FilteredView(f)) => {
@@ -563,7 +601,11 @@ async fn case_get_changesets(env: &Env, via: Via) {
         other => panic!("expected a filtered view, got {other:?}"),
     }
     assert_eq!(r.items[1].status, v1::ItemStatus::NotFound as i32);
-    let r = ok(carol.query().get_changesets(req.clone()).await, t, "GetChangesets full");
+    let r = ok(
+        carol.query().get_changesets(req.clone()).await,
+        t,
+        "GetChangesets full",
+    );
     assert!(matches!(
         r.items[0].view,
         Some(v1::changeset_item::View::Encoded(_))
@@ -603,7 +645,13 @@ async fn case_read_path(env: &Env, via: Via) {
     let t = tier_of(via, "ReadPath");
     let alice = env.client(via, "alice").await;
     let chunks = ok_stream(
-        drain(alice.query().read_path(read_path_req(&env.c1, "docs/a.txt")).await).await,
+        drain(
+            alice
+                .query()
+                .read_path(read_path_req(&env.c1, "docs/a.txt"))
+                .await,
+        )
+        .await,
         t,
         "ReadPath",
     );
@@ -669,10 +717,17 @@ fn list_req(cs: &ObjectId, path: &str) -> v1::ListTreeRequest {
 async fn case_list_tree(env: &Env, via: Via) {
     let t = tier_of(via, "ListTree");
     let alice = env.client(via, "alice").await;
-    let r = ok(alice.query().list_tree(list_req(&env.c1, "")).await, t, "ListTree");
+    let r = ok(
+        alice.query().list_tree(list_req(&env.c1, "")).await,
+        t,
+        "ListTree",
+    );
     let names: Vec<&[u8]> = r.entries.iter().map(|e| e.name.as_slice()).collect();
     // SPEC 12.6: restricted subdirectories are listed (name and id) in readable parents.
-    assert_eq!(names, vec![&b"README.md"[..], b"docs", b"notes", b"secrets"]);
+    assert_eq!(
+        names,
+        vec![&b"README.md"[..], b"docs", b"notes", b"secrets"]
+    );
     for (what, req, code, sub) in [
         (
             "ListTree missing path",
@@ -701,8 +756,13 @@ async fn case_list_tree(env: &Env, via: Via) {
     ] {
         err(alice.query().list_tree(req).await, code, sub, t, what);
     }
-    env.unknown_fields_ok(via, "ListTree", list_req(&env.c1, "docs").encode_to_vec(), "alice")
-        .await;
+    env.unknown_fields_ok(
+        via,
+        "ListTree",
+        list_req(&env.c1, "docs").encode_to_vec(),
+        "alice",
+    )
+    .await;
 }
 
 fn log_req(from: &ObjectId, path: Option<&str>) -> v1::LogRequest {
@@ -726,7 +786,10 @@ async fn case_log(env: &Env, via: Via) {
     let r2 = ok(alice.query().log(next).await, t, "Log page 2");
     assert_eq!(r2.entries.len(), 1);
     let r = ok(
-        alice.query().log(log_req(&env.c1, Some("docs/a.txt"))).await,
+        alice
+            .query()
+            .log(log_req(&env.c1, Some("docs/a.txt")))
+            .await,
         t,
         "Log(path)",
     );
@@ -743,7 +806,10 @@ async fn case_log(env: &Env, via: Via) {
     err(
         alice
             .query()
-            .log(log_req(&ObjectId::hash_encoded(Kind::Changeset, b"z"), None))
+            .log(log_req(
+                &ObjectId::hash_encoded(Kind::Changeset, b"z"),
+                None,
+            ))
             .await,
         ErrorCode::NotFound,
         None,
@@ -848,21 +914,30 @@ fn diff_req(a: Option<&ObjectId>, b: &ObjectId, paths: &[&str]) -> v1::DiffReque
 async fn case_diff(env: &Env, via: Via) {
     let t = tier_of(via, "Diff");
     let alice = env.client(via, "alice").await;
-    let (root, _) = (env.c.servers[0].ctx().history.resolve_ref(
-        &scion_object::RefName::parse("main").unwrap(),
-        Some(1),
-    ))
+    let (root, _) = (env.c.servers[0]
+        .ctx()
+        .history
+        .resolve_ref(&scion_object::RefName::parse("main").unwrap(), Some(1)))
     .await
     .map(|r| (r.target, r.version))
     .unwrap();
     let items = ok_stream(
-        drain(alice.query().diff(diff_req(Some(&root), &env.c1, &[])).await).await,
+        drain(
+            alice
+                .query()
+                .diff(diff_req(Some(&root), &env.c1, &[]))
+                .await,
+        )
+        .await,
         t,
         "Diff",
     );
     let paths: Vec<&[u8]> = items.iter().map(|i| i.path.as_slice()).collect();
     // SPEC 12.6: unreadable entries are omitted.
-    assert_eq!(paths, vec![&b"README.md"[..], b"docs/a.txt", b"notes/red.txt"]);
+    assert_eq!(
+        paths,
+        vec![&b"README.md"[..], b"docs/a.txt", b"notes/red.txt"]
+    );
     for (what, req, code) in [
         (
             "Diff missing changeset",
@@ -885,7 +960,13 @@ async fn case_diff(env: &Env, via: Via) {
             ErrorCode::InvalidArgument,
         ),
     ] {
-        err_stream(drain(alice.query().diff(req).await).await, code, None, t, what);
+        err_stream(
+            drain(alice.query().diff(req).await).await,
+            code,
+            None,
+            t,
+            what,
+        );
     }
     env.unknown_fields_ok(
         via,
@@ -902,7 +983,10 @@ async fn case_is_ancestor(env: &Env, via: Via) {
     let main1 = env.c1;
     let req = |a: Vec<u8>, b: Vec<u8>| v1::IsAncestorRequest { a, b };
     let r = ok(
-        alice.query().is_ancestor(req(idb(&main1), idb(&main1))).await,
+        alice
+            .query()
+            .is_ancestor(req(idb(&main1), idb(&main1)))
+            .await,
         t,
         "IsAncestor",
     );
@@ -952,7 +1036,10 @@ async fn case_merge_base(env: &Env, via: Via) {
     let alice = env.client(via, "alice").await;
     let req = |a: Vec<u8>, b: Vec<u8>| v1::MergeBaseRequest { a, b };
     let r = ok(
-        alice.query().merge_base(req(idb(&env.c1), idb(&env.c1))).await,
+        alice
+            .query()
+            .merge_base(req(idb(&env.c1), idb(&env.c1)))
+            .await,
         t,
         "MergeBase",
     );
@@ -971,7 +1058,10 @@ async fn case_merge_base(env: &Env, via: Via) {
         "MergeBase missing",
     );
     err(
-        alice.query().merge_base(req(Vec::new(), idb(&env.c1))).await,
+        alice
+            .query()
+            .merge_base(req(Vec::new(), idb(&env.c1)))
+            .await,
         ErrorCode::InvalidArgument,
         Some(subcode::MISSING_FIELD),
         t,
@@ -1005,10 +1095,19 @@ async fn case_resolve(env: &Env, via: Via) {
     };
     let r = ok(alice.query().resolve(req("main")).await, t, "Resolve");
     assert_eq!(r.changeset, idb(&env.main().await));
-    let r = ok(alice.query().resolve(req(&env.c1.to_text())).await, t, "Resolve id");
+    let r = ok(
+        alice.query().resolve(req(&env.c1.to_text())).await,
+        t,
+        "Resolve id",
+    );
     assert_eq!(r.changeset, idb(&env.c1));
     for (what, rev, code, sub) in [
-        ("Resolve unknown", "no-such-thing", ErrorCode::NotFound, None),
+        (
+            "Resolve unknown",
+            "no-such-thing",
+            ErrorCode::NotFound,
+            None,
+        ),
         (
             "Resolve malformed",
             "main~~x!",
@@ -1025,7 +1124,11 @@ async fn case_resolve(env: &Env, via: Via) {
         err(alice.query().resolve(req(rev)).await, code, sub, t, what);
     }
     err(
-        env.client(via, "mallory").await.query().resolve(req("main")).await,
+        env.client(via, "mallory")
+            .await
+            .query()
+            .resolve(req("main"))
+            .await,
         ErrorCode::PermissionDenied,
         None,
         t,
@@ -1044,14 +1147,20 @@ async fn case_get_derived(env: &Env, via: Via) {
         key,
     };
     let r = ok(
-        alice.query().get_derived(req("history", idb(&env.c1))).await,
+        alice
+            .query()
+            .get_derived(req("history", idb(&env.c1)))
+            .await,
         t,
         "GetDerived",
     );
     assert_eq!(r.version, 1);
     assert!(!r.value.is_empty());
     err(
-        alice.query().get_derived(req("no-such-type", Vec::new())).await,
+        alice
+            .query()
+            .get_derived(req("no-such-type", Vec::new()))
+            .await,
         ErrorCode::NotFound,
         None,
         t,
@@ -1060,7 +1169,10 @@ async fn case_get_derived(env: &Env, via: Via) {
     err(
         alice
             .query()
-            .get_derived(req("history", idb(&ObjectId::hash_encoded(Kind::Changeset, b"d"))))
+            .get_derived(req(
+                "history",
+                idb(&ObjectId::hash_encoded(Kind::Changeset, b"d")),
+            ))
             .await,
         ErrorCode::NotFound,
         None,
@@ -1122,7 +1234,10 @@ async fn case_upload_objects(env: &Env, via: Via) {
         upload_item(&ObjectId::hash_blob(b"secret\n"), Kind::Blob, b"secret\n"),
     ];
     let r = ok(
-        alice.write().upload_objects(futures::stream::iter(items)).await,
+        alice
+            .write()
+            .upload_objects(futures::stream::iter(items))
+            .await,
         t,
         "UploadObjects",
     );
@@ -1140,7 +1255,8 @@ async fn case_upload_objects(env: &Env, via: Via) {
     assert_eq!(got[5], (okv, String::new()), "{got:?}");
     assert!(got[1..5].iter().all(|(s, _)| *s != okv));
     let body = upload_item(&ObjectId::hash_blob(&good), Kind::Blob, &good).encode_to_vec();
-    env.unknown_fields_ok(via, "UploadObjects", body, "alice").await;
+    env.unknown_fields_ok(via, "UploadObjects", body, "alice")
+        .await;
 }
 
 async fn case_create_changeset(env: &Env, via: Via) {
@@ -1150,9 +1266,17 @@ async fn case_create_changeset(env: &Env, via: Via) {
     let path = format!("w/{}/create.txt", via.as_str());
     TestCluster::upload(&alice, &[&content]).await;
     let req = TestCluster::create_request(&env.c1, &[(&path, &content)], &[], cid(via, 10));
-    let r = ok(alice.write().create_changeset(req.clone()).await, t, "CreateChangeset");
+    let r = ok(
+        alice.write().create_changeset(req.clone()).await,
+        t,
+        "CreateChangeset",
+    );
     // Identical requests return the same identifiers (SPEC 8.1).
-    let again = ok(alice.write().create_changeset(req.clone()).await, t, "CreateChangeset again");
+    let again = ok(
+        alice.write().create_changeset(req.clone()).await,
+        t,
+        "CreateChangeset again",
+    );
     assert_eq!(r.changeset_id, again.changeset_id);
 
     let missing = uniq("never uploaded", via, 2);
@@ -1161,7 +1285,13 @@ async fn case_create_changeset(env: &Env, via: Via) {
     let mut no_parent =
         TestCluster::create_request(&env.c1, &[(&path, &content)], &[], cid(via, 12));
     no_parent.parents = vec![idb(&ObjectId::hash_encoded(Kind::Changeset, b"p"))];
-    let cases: Vec<(&str, &str, v1::CreateChangesetRequest, ErrorCode, Option<&str>)> = vec![
+    let cases: Vec<(
+        &str,
+        &str,
+        v1::CreateChangesetRequest,
+        ErrorCode,
+        Option<&str>,
+    )> = vec![
         (
             "missing blob",
             "alice",
@@ -1176,13 +1306,7 @@ async fn case_create_changeset(env: &Env, via: Via) {
             ErrorCode::InvalidArgument,
             Some(subcode::MISSING_PARENT),
         ),
-        (
-            "message too long",
-            "alice",
-            long,
-            ErrorCode::TooLarge,
-            None,
-        ),
+        ("message too long", "alice", long, ErrorCode::TooLarge, None),
         (
             "redacted blob",
             "alice",
@@ -1267,7 +1391,11 @@ async fn case_rebase(env: &Env, via: Via) {
         onto: idb(onto),
     };
     let r = ok(alice.write().rebase(req(&other, &ours)).await, t, "Rebase");
-    let r2 = ok(alice.write().rebase(req(&other, &ours)).await, t, "Rebase deterministic");
+    let r2 = ok(
+        alice.write().rebase(req(&other, &ours)).await,
+        t,
+        "Rebase deterministic",
+    );
     assert_eq!(r.changeset_id, r2.changeset_id);
     let e = err(
         alice.write().rebase(req(&theirs, &ours)).await,
@@ -1307,7 +1435,11 @@ async fn case_rebase(env: &Env, via: Via) {
         "Rebase missing",
     );
     err(
-        env.client(via, "mallory").await.write().rebase(req(&other, &ours)).await,
+        env.client(via, "mallory")
+            .await
+            .write()
+            .rebase(req(&other, &ours))
+            .await,
         ErrorCode::PermissionDenied,
         None,
         t,
@@ -1371,7 +1503,14 @@ async fn case_merge(env: &Env, via: Via) {
         "Merge missing meta",
     );
     // A merge whose result touches /secrets needs write there.
-    let sec = put(env, &base, "secrets/merge-in.txt", &uniq("sec", via, 1), cid(via, 42)).await;
+    let sec = put(
+        env,
+        &base,
+        "secrets/merge-in.txt",
+        &uniq("sec", via, 1),
+        cid(via, 42),
+    )
+    .await;
     err(
         alice.write().merge(req(&x, &sec, 43)).await,
         ErrorCode::PermissionDenied,
@@ -1475,9 +1614,14 @@ async fn case_land(env: &Env, via: Via) {
         "Land unwritable member",
     );
     check_err(
-        &land(env, via, "alice", &ObjectId::hash_encoded(Kind::Changeset, b"l"))
-            .await
-            .unwrap_err(),
+        &land(
+            env,
+            via,
+            "alice",
+            &ObjectId::hash_encoded(Kind::Changeset, b"l"),
+        )
+        .await
+        .unwrap_err(),
         ErrorCode::NotFound,
         None,
         t,
@@ -1528,13 +1672,19 @@ async fn case_update_ref(env: &Env, via: Via) {
     let next = put(env, &env.c1, &format!("w/{name}.txt"), b"u\n", cid(via, 60)).await;
     let next2 = put(env, &next, &format!("w/{name}.txt"), b"u2\n", cid(via, 61)).await;
     let r = ok(
-        alice.refs().update_ref(update_req(&name, 1, &next, false)).await,
+        alice
+            .refs()
+            .update_ref(update_req(&name, 1, &next, false))
+            .await,
         t,
         "UpdateRef",
     );
     assert_eq!(r.version, 2);
     let e = err(
-        alice.refs().update_ref(update_req(&name, 1, &next2, false)).await,
+        alice
+            .refs()
+            .update_ref(update_req(&name, 1, &next2, false))
+            .await,
         ErrorCode::RefVersionMismatch,
         None,
         t,
@@ -1548,7 +1698,10 @@ async fn case_update_ref(env: &Env, via: Via) {
         }
     );
     err(
-        alice.refs().update_ref(update_req(&name, 2, &env.c1, false)).await,
+        alice
+            .refs()
+            .update_ref(update_req(&name, 2, &env.c1, false))
+            .await,
         ErrorCode::NotFastForward,
         None,
         t,
@@ -1556,7 +1709,10 @@ async fn case_update_ref(env: &Env, via: Via) {
     );
     let admin = env.client(via, "admin").await;
     let r = ok(
-        admin.refs().update_ref(update_req(&name, 2, &env.c1, true)).await,
+        admin
+            .refs()
+            .update_ref(update_req(&name, 2, &env.c1, true))
+            .await,
         t,
         "UpdateRef forced",
     );
@@ -1615,7 +1771,11 @@ async fn case_create_ref(env: &Env, via: Via) {
         reason: "contract".into(),
     };
     let name = format!("cr-{}", via.as_str());
-    let r = ok(admin.refs().create_ref(req(&name, &env.c1)).await, t, "CreateRef");
+    let r = ok(
+        admin.refs().create_ref(req(&name, &env.c1)).await,
+        t,
+        "CreateRef",
+    );
     assert_eq!(r.version, 1);
     err(
         admin.refs().create_ref(req(&name, &env.c1)).await,
@@ -1725,7 +1885,11 @@ async fn case_get_ref_log(env: &Env, via: Via) {
     assert_eq!(r.entries.len(), 2);
     assert_eq!(r.entries[0].version, 1);
     assert_eq!(r.entries[1].new_target, idb(&env.c1));
-    let r = ok(alice.refs().get_ref_log(req("never-existed")).await, t, "GetRefLog empty");
+    let r = ok(
+        alice.refs().get_ref_log(req("never-existed")).await,
+        t,
+        "GetRefLog empty",
+    );
     assert!(r.entries.is_empty());
     err(
         env.client(via, "mallory")
@@ -1776,20 +1940,36 @@ async fn case_login(env: &Env, via: Via) {
     let t = tier_of(via, "Login");
     let anon = env.c.client_with_token(via, None).await;
     let (name, secret) = TestCluster::SERVICES[0];
-    let r = ok(anon.auth().login(service_login(name, secret)).await, t, "Login service");
+    let r = ok(
+        anon.auth().login(service_login(name, secret)).await,
+        t,
+        "Login service",
+    );
     assert_eq!(r.principal, format!("service:{name}"));
     env.c.github.add_user("gho_contract", "alice", 7001);
-    let r = ok(anon.auth().login(github_login("gho_contract")).await, t, "Login github");
+    let r = ok(
+        anon.auth().login(github_login("gho_contract")).await,
+        t,
+        "Login github",
+    );
     assert_eq!(r.principal, "github:alice");
     for (what, req) in [
         ("Login wrong secret", service_login(name, "wrong")),
         ("Login unknown service", service_login("nobody", secret)),
         ("Login bad github token", github_login("gho_not_a_user")),
     ] {
-        err(anon.auth().login(req).await, ErrorCode::Unauthenticated, None, t, what);
+        err(
+            anon.auth().login(req).await,
+            ErrorCode::Unauthenticated,
+            None,
+            t,
+            what,
+        );
     }
     err(
-        anon.auth().login(v1::LoginRequest { credential: None }).await,
+        anon.auth()
+            .login(v1::LoginRequest { credential: None })
+            .await,
         ErrorCode::InvalidArgument,
         Some(subcode::MISSING_FIELD),
         t,
@@ -1804,14 +1984,23 @@ async fn case_login(env: &Env, via: Via) {
         "Login while GitHub is down",
     );
     env.c.github.set_down(false);
-    env.unknown_fields_ok(via, "Login", service_login(name, secret).encode_to_vec(), "-")
-        .await;
+    env.unknown_fields_ok(
+        via,
+        "Login",
+        service_login(name, secret).encode_to_vec(),
+        "-",
+    )
+    .await;
 }
 
 async fn case_who_am_i(env: &Env, via: Via) {
     let t = tier_of(via, "WhoAmI");
     let r = ok(
-        env.client(via, "carol").await.auth().who_am_i(v1::WhoAmIRequest {}).await,
+        env.client(via, "carol")
+            .await
+            .auth()
+            .who_am_i(v1::WhoAmIRequest {})
+            .await,
         t,
         "WhoAmI",
     );
@@ -1822,7 +2011,8 @@ async fn case_who_am_i(env: &Env, via: Via) {
         .unwrap()
         .as_secs() as i64;
     assert!(r.expires_at_unix > now);
-    env.unknown_fields_ok(via, "WhoAmI", Vec::new(), "alice").await;
+    env.unknown_fields_ok(via, "WhoAmI", Vec::new(), "alice")
+        .await;
 }
 
 async fn case_check_access(env: &Env, via: Via) {
@@ -1853,14 +2043,20 @@ async fn case_check_access(env: &Env, via: Via) {
         ]
     );
     err(
-        caller.auth().check_access(req("garbage".into(), ids.clone())).await,
+        caller
+            .auth()
+            .check_access(req("garbage".into(), ids.clone()))
+            .await,
         ErrorCode::Unauthenticated,
         None,
         t,
         "CheckAccess invalid subject",
     );
     err(
-        caller.auth().check_access(req(String::new(), ids.clone())).await,
+        caller
+            .auth()
+            .check_access(req(String::new(), ids.clone()))
+            .await,
         ErrorCode::InvalidArgument,
         Some(subcode::MISSING_FIELD),
         t,
@@ -1916,7 +2112,11 @@ async fn case_redact(env: &Env, via: Via) {
     let r = ok(admin.admin().redact(redact_req(&[id])).await, t, "Redact");
     assert!(r.epoch > before);
     err(
-        env.client(via, "alice").await.admin().redact(redact_req(&[id])).await,
+        env.client(via, "alice")
+            .await
+            .admin()
+            .redact(redact_req(&[id]))
+            .await,
         ErrorCode::PermissionDenied,
         None,
         t,
@@ -1924,7 +2124,11 @@ async fn case_redact(env: &Env, via: Via) {
     );
     let tree = {
         let alice = env.client(Via::Server, "alice").await;
-        let l = alice.query().list_tree(list_req(&env.c1, "docs")).await.unwrap();
+        let l = alice
+            .query()
+            .list_tree(list_req(&env.c1, "docs"))
+            .await
+            .unwrap();
         ObjectId::from_bytes(&l.into_inner().tree_id).unwrap()
     };
     err(
@@ -1966,7 +2170,11 @@ async fn case_unredact(env: &Env, via: Via) {
         object_ids: ids.iter().map(idb).collect(),
     };
     err(
-        env.client(via, "alice").await.admin().unredact(req(&[id])).await,
+        env.client(via, "alice")
+            .await
+            .admin()
+            .unredact(req(&[id]))
+            .await,
         ErrorCode::PermissionDenied,
         None,
         t,
@@ -1996,7 +2204,11 @@ async fn case_purge_now(env: &Env, via: Via) {
         reason: "contract".into(),
     };
     err(
-        env.client(via, "alice").await.admin().purge_now(req(&[id])).await,
+        env.client(via, "alice")
+            .await
+            .admin()
+            .purge_now(req(&[id]))
+            .await,
         ErrorCode::PermissionDenied,
         None,
         t,
@@ -2037,9 +2249,13 @@ async fn case_list_redactions(env: &Env, via: Via) {
         "ListRedactions",
     );
     assert!(r.entries.iter().any(|e| e.object_id == idb(&env.red)));
-    assert!(r.entries.iter().all(|e| e.reason.is_empty()), "reasons only for admins");
+    assert!(
+        r.entries.iter().all(|e| e.reason.is_empty()),
+        "reasons only for admins"
+    );
     let body = v1::ListRedactionsRequest { since_epoch: 0 }.encode_to_vec();
-    env.unknown_fields_ok(via, "ListRedactions", body, "alice").await;
+    env.unknown_fields_ok(via, "ListRedactions", body, "alice")
+        .await;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2171,9 +2387,17 @@ fn every_descriptor_rpc_has_a_contract_case() {
     ];
     let rpcs = TestCluster::rpcs();
     for r in &rpcs {
-        assert!(known.contains(&r.method.as_str()), "{} has no contract case", r.path);
+        assert!(
+            known.contains(&r.method.as_str()),
+            "{} has no contract case",
+            r.path
+        );
     }
-    assert_eq!(rpcs.len(), known.len(), "a case names an RPC the descriptor lacks");
+    assert_eq!(
+        rpcs.len(),
+        known.len(),
+        "a case names an RPC the descriptor lacks"
+    );
 }
 
 macro_rules! matrix_tests {
@@ -2378,7 +2602,10 @@ async fn run_unavailable(backend: Backend) {
             ErrorCode::Unavailable,
             None,
             tier_of(via, "ResolveRef"),
-            &format!("ResolveRef with the metadata store down via {}", via.as_str()),
+            &format!(
+                "ResolveRef with the metadata store down via {}",
+                via.as_str()
+            ),
         );
         faults.arm(
             "meta.commit_changeset.before",
@@ -2402,7 +2629,10 @@ async fn run_unavailable(backend: Backend) {
             ErrorCode::Unavailable,
             None,
             Tier::Server,
-            &format!("CreateChangeset with the metadata store down via {}", via.as_str()),
+            &format!(
+                "CreateChangeset with the metadata store down via {}",
+                via.as_str()
+            ),
         );
     }
     invariants::check_16_2(&env.c).await.unwrap();
