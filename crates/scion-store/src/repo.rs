@@ -114,6 +114,13 @@ fn digest_matches(id: &ObjectId, raw: &[u8]) -> bool {
     computed == *id
 }
 
+/// [`digest_matches`] off the async worker for large payloads (hashing 100 MiB takes tens of
+/// milliseconds).
+async fn verify_digest(id: &ObjectId, raw: &Bytes) -> Result<bool> {
+    let (id, raw) = (*id, raw.clone());
+    maybe_blocking(raw.len(), move || digest_matches(&id, &raw)).await
+}
+
 /// Run `f` inline for small payloads and on the blocking pool for large ones.
 async fn maybe_blocking<T: Send + 'static>(
     len: usize,
@@ -234,7 +241,16 @@ impl ObjectRepo {
     /// The common SPEC 5.3 step 1 write path for a validated object.
     async fn store(&self, id: ObjectId, raw: Bytes) -> Result<InsertOutcome> {
         let kind = id.kind();
-        if let Some(row) = self.stat(&id).await? {
+        // Re-introduction blocking reads redaction state, so it must not use a stale read
+        // (SPEC 5.4, 13.6): a stale `live` row could hide a fresh redaction.
+        let existing = self
+            .storage
+            .meta
+            .get_objects(&[id], Consistency::Strong)
+            .await?
+            .pop()
+            .flatten();
+        if let Some(row) = existing {
             return match row.state {
                 ObjectState::Live => Ok(InsertOutcome::AlreadyExists),
                 ObjectState::Quarantined | ObjectState::Purged => Err(ScionError::redacted(&id)),
@@ -293,7 +309,10 @@ impl ObjectRepo {
     /// Store a blob: TOO_LARGE check, bytes first, then the row (SPEC 5.3 step 1).
     pub async fn put_blob(&self, raw: Bytes) -> Result<(ObjectId, InsertOutcome)> {
         self.check_size(raw.len())?;
-        let id = ObjectId::hash_blob(&raw);
+        let id = {
+            let raw = raw.clone();
+            maybe_blocking(raw.len(), move || ObjectId::hash_blob(&raw)).await?
+        };
         let outcome = self.store(id, raw).await?;
         Ok((id, outcome))
     }
@@ -319,7 +338,7 @@ impl ObjectRepo {
         if id.kind() == Kind::Changeset {
             Self::validate_decoded(Kind::Changeset, &data)?;
         }
-        if !digest_matches(id, &data) {
+        if !verify_digest(id, &data).await? {
             return Err(ScionError::integrity(id));
         }
         if id.kind() != Kind::Blob {
@@ -437,7 +456,7 @@ impl ObjectRepo {
                 (raw, StoredFrame::Zstd(frame))
             }
         };
-        if !digest_matches(id, &raw) {
+        if !verify_digest(id, &raw).await? {
             return Err(self.integrity_alert(id));
         }
         Ok((raw, frame, row))

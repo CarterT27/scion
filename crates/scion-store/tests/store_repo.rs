@@ -554,7 +554,7 @@ async fn counters_count_exactly() {
     assert_eq!(d.objects_written, 1);
     assert_eq!(d.trees_written, 0);
     assert_eq!(d.blob_puts, 1);
-    assert_eq!(d.meta_txns, 3, "stale stat, strong stat, insert");
+    assert_eq!(d.meta_txns, 2, "strong redaction check, insert");
 
     // Re-putting an existing object writes nothing.
     let s1 = c.snapshot();
@@ -761,6 +761,38 @@ async fn redacted_ids_are_blocked_and_bytes_move() {
     let mid = ObjectId::hash_encoded(Kind::Meta, b"inline meta");
     repo.quarantine_bytes(&mid).await.unwrap();
     repo.restore_bytes(&mid).await.unwrap();
+}
+
+#[tokio::test]
+async fn reintroduction_is_blocked_even_when_stale_reads_lag() {
+    // SPEC 13.6 / 5.4: redaction state is never taken from a stale read on the write path.
+    let (repo, h) = repo_with(
+        MemOptions {
+            stale_lag_commits: 5,
+            ..MemOptions::default()
+        },
+        ObjectRepoConfig::default(),
+    );
+    let data = Bytes::from_static(b"leaked secret");
+    let (id, _) = repo.put_blob(data.clone()).await.unwrap();
+    h.meta.advance_stale_view();
+    repo.storage()
+        .meta
+        .redact(redact_txn(vec![id]))
+        .await
+        .unwrap();
+    let stale = h
+        .meta
+        .get_objects(&[id], scion_store::Consistency::Stale)
+        .await
+        .unwrap();
+    assert_eq!(
+        stale[0].as_ref().map(|r| r.state),
+        Some(ObjectState::Live),
+        "the stale view still shows the row live"
+    );
+    assert_code(repo.put_blob(data.clone()).await, ErrorCode::Redacted);
+    assert_code(repo.put_verified(&id, data).await, ErrorCode::Redacted);
 }
 
 #[tokio::test]

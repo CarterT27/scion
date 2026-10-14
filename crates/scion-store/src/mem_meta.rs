@@ -237,6 +237,22 @@ impl MemMetaStore {
         removed
     }
 
+    /// Test support: delete the `object_paths` row `(object, path)`, bypassing every rule.
+    pub fn remove_object_path_raw(&self, object: &ObjectId, path: &RepoPath) -> bool {
+        let mut removed = false;
+        self.tamper(|t| {
+            if let Some(mut m) = t.object_paths.get(object).cloned() {
+                removed = m.remove(path).is_some();
+                if m.is_empty() {
+                    t.object_paths.remove(object);
+                } else {
+                    t.object_paths.insert(*object, m);
+                }
+            }
+        });
+        removed
+    }
+
     /// Test support: overwrite or insert a refs row, bypassing every rule.
     pub fn put_ref_row_raw(&self, row: RefRow) {
         self.tamper(|t| {

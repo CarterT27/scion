@@ -316,6 +316,16 @@ async fn meta_changesets(s: Arc<dyn MetaStore>) -> CaseResult {
         vec![None],
         "absent changeset"
     );
+    // has_root_changeset means "a generation-1 row exists", not "any row exists".
+    let orphan = cs_row(b"generation 3 without its ancestors", 3, vec![]);
+    ok(
+        s.commit_changeset(bundle(orphan, vec![])).await,
+        "commit gen 3",
+    )?;
+    ensure!(
+        !ok(s.has_root_changeset().await, "has_root")?,
+        "no generation-1 row yet"
+    );
     ensure_eq!(
         ok(
             s.commit_changeset(bundle(root.clone(), vec![])).await,
@@ -621,6 +631,20 @@ async fn meta_refs_delete(s: Arc<dyn MetaStore>) -> CaseResult {
         ok(s.ref_log(&main, 0, 10).await, "ref_log")?.is_empty(),
         "no ref_log row on error"
     );
+    // Expecting a version of a ref that does not exist is a mismatch with no current row.
+    let o = ok(
+        s.cas_ref(cas(&main, RefExpect::Version(1), Some(a))).await,
+        "version on absent",
+    )?;
+    ensure_eq!(
+        o,
+        CasOutcome::VersionMismatch { current: None },
+        "version expectation on an absent ref"
+    );
+    ensure!(
+        ok(s.ref_log(&main, 0, 10).await, "ref_log")?.is_empty(),
+        "no ref_log row on mismatch"
+    );
     ok(
         s.cas_ref(cas(&main, RefExpect::Absent, Some(a))).await,
         "create",
@@ -644,6 +668,15 @@ async fn meta_refs_delete(s: Arc<dyn MetaStore>) -> CaseResult {
     ensure_eq!(log[2].version, 3, "delete version");
     ensure_eq!(log[2].old_target, Some(b), "delete old target");
     ensure_eq!(log[2].new_target, None, "delete new target");
+    let o = ok(
+        s.cas_ref(cas(&main, RefExpect::Version(3), Some(a))).await,
+        "update deleted",
+    )?;
+    ensure_eq!(
+        o,
+        CasOutcome::VersionMismatch { current: None },
+        "a deleted ref cannot be updated by version"
+    );
     // Re-creating continues the numbering after the last ref_log version.
     let o = ok(
         s.cas_ref(cas(&main, RefExpect::Absent, Some(a))).await,

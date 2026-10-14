@@ -72,6 +72,33 @@ fn opts(verify_bytes: bool) -> FsckOptions {
     }
 }
 
+/// Trees of `b` that differ from `a` at their directory path, with that path: the "new trees"
+/// that SPEC 9.2 `path_index` indexes (the root tree sits at the empty path).
+async fn new_trees(repo: &ObjectRepo, a: ObjectId, b: ObjectId) -> Vec<(RepoPath, ObjectId)> {
+    let mut out = Vec::new();
+    let mut stack = vec![(RepoPath::root(), Some(a), b)];
+    while let Some((path, ta, tb)) = stack.pop() {
+        if ta == Some(tb) {
+            continue;
+        }
+        out.push((path.clone(), tb));
+        let tree_b = repo.get_tree(&tb).await.unwrap();
+        let tree_a = match ta {
+            Some(x) => Some(repo.get_tree(&x).await.unwrap()),
+            None => None,
+        };
+        for e in tree_b.entries.iter().filter(|e| e.mode == Mode::Tree) {
+            let old = tree_a
+                .as_ref()
+                .and_then(|t| t.get(e.name.as_bytes()))
+                .filter(|o| o.mode == Mode::Tree)
+                .map(|o| o.id);
+            stack.push((path.join(&e.name).unwrap(), old, e.id));
+        }
+    }
+    out
+}
+
 impl Fx {
     async fn tree(&mut self, name: &'static str, entries: Vec<TreeEntry>) -> ObjectId {
         let enc = Tree {
@@ -159,7 +186,7 @@ impl Fx {
             created_by: "service:test".to_owned(),
             created_at: t(1),
         };
-        let object_paths = cs
+        let mut object_paths: Vec<ObjectPathRow> = cs
             .delta
             .iter()
             .filter_map(|d| match d.op {
@@ -172,6 +199,17 @@ impl Fx {
                 DeltaOp::Delete => None,
             })
             .collect();
+        let t1 = parents
+            .first()
+            .map_or(scion_core::empty_tree_id(), |p| self.css[p].root_tree);
+        for (path, tree) in new_trees(&self.repo, t1, root_tree).await {
+            object_paths.push(ObjectPathRow {
+                object: tree,
+                path,
+                first_changeset: id,
+                at: t(1),
+            });
+        }
         self.repo
             .storage()
             .meta
@@ -512,6 +550,33 @@ async fn missing_eager() {
     };
     assert_eq!(fsck(&fx.repo, &none).await.unwrap(), vec![]);
 
+    // path_index: a new tree (here `dir` of c1, and the root tree of c3) without its row.
+    let fx = Fx::build().await;
+    let dir_path = RepoPath::parse(b"dir").unwrap();
+    assert!(
+        fx.h.meta
+            .remove_object_path_raw(&fx.trees["dir"], &dir_path)
+    );
+    assert_eq!(
+        fx.check(false).await,
+        vec![Violation::MissingEager {
+            changeset: fx.id("c1"),
+            ty: "path_index".to_owned()
+        }]
+    );
+    let fx = Fx::build().await;
+    assert!(
+        fx.h.meta
+            .remove_object_path_raw(&fx.trees["root3"], &RepoPath::root())
+    );
+    assert_eq!(
+        fx.check(false).await,
+        vec![Violation::MissingEager {
+            changeset: fx.id("c3"),
+            ty: "path_index".to_owned()
+        }]
+    );
+
     // path_index: a Put whose (blob, path) has no object_paths row.
     let mut fx = Fx::build().await;
     let (nb2, ns2) = fx.blob("new2", b"never indexed").await;
@@ -661,4 +726,62 @@ async fn quarantined_and_purged_bytes_are_not_violations() {
         .await
         .unwrap();
     assert_eq!(fx.check(true).await, vec![]);
+}
+
+#[tokio::test]
+async fn unreachable_live_objects_are_verified() {
+    // SPEC 4.5 invariant 1 covers every stored object, not only those a changeset reaches.
+    let (repo, h) = store_support::repo();
+    let verify = FsckOptions {
+        required_eager: vec![],
+        verify_bytes: true,
+    };
+    let (good, _) = repo
+        .put_blob(Bytes::from_static(b"unreferenced"))
+        .await
+        .unwrap();
+    let (bad, _) = repo
+        .put_blob(Bytes::from_static(b"unreferenced, then corrupted"))
+        .await
+        .unwrap();
+    // Orphan bytes (no row) are harmless.
+    let orphan = ObjectId::hash_blob(b"orphan");
+    h.blobs.insert_raw(
+        &repo.key(&orphan, Area::Live),
+        Bytes::from_static(b"not even zstd"),
+    );
+    // Foreign keys are ignored.
+    h.blobs
+        .insert_raw("scion/elsewhere", Bytes::from_static(b"x"));
+    assert_eq!(fsck(&repo, &verify).await.unwrap(), vec![]);
+
+    h.blobs.corrupt(&repo.key(&bad, Area::Live));
+    assert_eq!(
+        fsck(&repo, &verify).await.unwrap(),
+        vec![Violation::DigestMismatch { id: bad }]
+    );
+    // Without verify_bytes nothing is read.
+    let quick = FsckOptions {
+        required_eager: vec![],
+        verify_bytes: false,
+    };
+    assert_eq!(fsck(&repo, &quick).await.unwrap(), vec![]);
+
+    // A redacted object whose bytes have not moved yet is not a violation.
+    repo.storage()
+        .meta
+        .redact(RedactTxn {
+            ids: vec![bad],
+            reason: "r".to_owned(),
+            actor: "github:admin".to_owned(),
+            at: t(1),
+            purge_after: t(2),
+        })
+        .await
+        .unwrap();
+    assert_eq!(fsck(&repo, &verify).await.unwrap(), vec![]);
+    assert_eq!(
+        repo.get(&good).await.unwrap(),
+        Bytes::from_static(b"unreferenced")
+    );
 }
