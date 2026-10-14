@@ -2,7 +2,8 @@
 //! land (SPEC 11.2-11.7).
 
 use super::args::{
-    AmendArgs, CheckoutArgs, CommitArgs, GotoArgs, LandArgs, RebaseArgs, ResolveArgs, SparseCmd,
+    AmendArgs, CheckoutArgs, CommitArgs, DiffArgs, GotoArgs, LandArgs, RebaseArgs, ResolveArgs,
+    SparseCmd,
 };
 use super::ctx::{Ctx, ENV_AUTHOR, Reply, write_wc_config};
 use super::error::{CliResult, EXIT_CONFLICTS, usage};
@@ -15,7 +16,7 @@ use scion_config::WcConfig;
 use scion_object::{DeltaOp, RefName, RepoPath};
 use scion_proto::{error_from_status, v1};
 use scion_wc::state::{PendingOperation, WcState};
-use scion_wc::{CommitReport, WcOptions, WorkingCopy};
+use scion_wc::{CommitReport, FileChangeView, WcOptions, WorkingCopy};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -225,12 +226,39 @@ fn status_letter(s: &str) -> char {
     }
 }
 
-/// `scion diff`: changed files against the base (SPEC 11.5).
-pub(crate) async fn diff(ctx: &mut Ctx<'_>) -> CliResult<Reply> {
+/// `scion diff`: working-copy changes against the base (SPEC 11.5) as unified diffs, or the
+/// changed files alone with `--name-only`.
+pub(crate) async fn diff(ctx: &mut Ctx<'_>, a: &DiffArgs) -> CliResult<Reply> {
     let mut wc = open_lazy(ctx)?;
-    let changes = wc.diff().await?;
+    let (changes, human) = if a.name_only {
+        let changes = wc.diff().await?;
+        let human = name_only_text(&changes).into_bytes();
+        (changes, human)
+    } else {
+        let changes = wc.diff_with_hunks(a.unified).await.map_err(|mut e| {
+            if e.code == scion_core::ErrorCode::Unavailable {
+                e.message = format!(
+                    "{} (content diffs need the server; use `scion diff --name-only` to list \
+                     changed files offline)",
+                    e.message
+                );
+            }
+            e
+        })?;
+        let human = unified_text(&changes);
+        (changes, human)
+    };
+    let data = DiffData {
+        base: wc.state().base.to_text(),
+        changes,
+    };
+    Reply::new("diff", data, human)
+}
+
+/// `--name-only` human output: status letter, path and abbreviated ids.
+fn name_only_text(changes: &[FileChangeView]) -> String {
     let mut human = String::new();
-    for c in &changes {
+    for c in changes {
         let ids = match (&c.old_id, &c.new_id) {
             (Some(o), Some(n)) => {
                 format!("  {} -> {}", &o[..o.len().min(14)], &n[..n.len().min(14)])
@@ -244,11 +272,71 @@ pub(crate) async fn diff(ctx: &mut Ctx<'_>) -> CliResult<Reply> {
     if changes.is_empty() {
         human.push_str("no changes\n");
     }
-    let data = DiffData {
-        base: wc.state().base.to_text(),
-        changes,
-    };
-    Reply::new("diff", data, human)
+    human
+}
+
+/// Git-style octal mode text of a Scion mode (1 file, 2 executable, 3 symlink).
+fn git_mode(m: u8) -> &'static str {
+    match m {
+        2 => "100755",
+        3 => "120000",
+        _ => "100644",
+    }
+}
+
+/// Unified human output (implementation-defined 6.15): per file a `diff --scion` header, mode
+/// lines when modes differ, `---`/`+++` names (`/dev/null` for an absent side), `@@` hunk
+/// headers and raw line bytes, `\ No newline at end of file` after an unterminated line.
+fn unified_text(changes: &[FileChangeView]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    for c in changes {
+        let a = if c.old_id.is_some() {
+            format!("a/{}", c.path)
+        } else {
+            "/dev/null".to_owned()
+        };
+        let b = if c.new_id.is_some() {
+            format!("b/{}", c.path)
+        } else {
+            "/dev/null".to_owned()
+        };
+        let mut head = format!("diff --scion a/{0} b/{0}\n", c.path);
+        if let (Some(o), Some(n)) = (c.old_mode, c.new_mode)
+            && o != n
+        {
+            let _ = writeln!(head, "old mode {}\nnew mode {}", git_mode(o), git_mode(n));
+        }
+        if c.binary {
+            let _ = writeln!(head, "Binary files {a} and {b} differ");
+        }
+        out.extend_from_slice(head.as_bytes());
+        let Some(hunks) = c.hunks.as_ref().filter(|h| !h.is_empty()) else {
+            continue;
+        };
+        out.extend_from_slice(format!("--- {a}\n+++ {b}\n").as_bytes());
+        for h in hunks {
+            out.extend_from_slice(
+                format!(
+                    "@@ -{},{} +{},{} @@\n",
+                    h.old_start, h.old_lines, h.new_start, h.new_lines
+                )
+                .as_bytes(),
+            );
+            for l in &h.lines {
+                out.push(match l.kind.as_str() {
+                    "delete" => b'-',
+                    "insert" => b'+',
+                    _ => b' ',
+                });
+                let bytes = l.bytes();
+                out.extend_from_slice(&bytes);
+                if !bytes.ends_with(b"\n") {
+                    out.extend_from_slice(b"\n\\ No newline at end of file\n");
+                }
+            }
+        }
+    }
+    out
 }
 
 fn delta_view(r: &CommitReport) -> Vec<DeltaView> {

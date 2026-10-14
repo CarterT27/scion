@@ -138,6 +138,18 @@ These are allowed because the config schema is ours. Unknown keys are still reje
 | CLI exit codes | 0 ok, 1 error, 2 usage, 3 conflicts, 4 dirty refusal |
 | `--json` envelope | `{"schema":"scion.cli.<cmd>.v1","data":...}`; schemas in `schemas/v1/` |
 
+`scion diff` unified output (amendment W7-2): per changed file, in path order, a header
+`diff --scion a/<path> b/<path>`; `old mode <m>` / `new mode <m>` lines when both sides exist
+with different modes (git octal: 100644 file, 100755 executable, 120000 symlink); for binary
+changes (same rule as the server Diff RPC) `Binary files <a> and <b> differ`; otherwise, when
+there is a content change, `--- <a>` / `+++ <b>` (`a/<path>` and `b/<path>`, `/dev/null` for an
+absent side) followed by hunks headed `@@ -<old_start>,<old_lines> +<new_start>,<new_lines> @@`
+(counts always written). Hunk lines are prefixed `' '`, `'-'` or `'+'` and written as raw bytes
+with their own terminators; an unterminated last line is followed by a newline and
+`\ No newline at end of file`. Symlinks diff their target text. Default context is 3 lines
+(`-U <n>`); `--name-only` prints the `<letter> <path>  <old> -> <new>` listing. No changes
+prints nothing.
+
 ## 6.16 Backups (SPEC 13.8)
 
 `docs/operations/backup-retention.md` is owned by P22. It covers retention of at most 30 days for CockroachDB backups and object-store versions, the redaction runbook, and verification steps.

@@ -122,7 +122,7 @@ async fn dispatch(cmd: &Cmd, ctx: &mut Ctx<'_>, io: &mut dyn CliIo) -> CliResult
         Cmd::Checkout(a) => wc_cmds::checkout(ctx, a).await,
         Cmd::Sparse { action } => wc_cmds::sparse(ctx, action).await,
         Cmd::Status => wc_cmds::status(ctx).await,
-        Cmd::Diff => wc_cmds::diff(ctx).await,
+        Cmd::Diff(a) => wc_cmds::diff(ctx, a).await,
         Cmd::Commit(a) => wc_cmds::commit(ctx, a).await,
         Cmd::Amend(a) => wc_cmds::amend(ctx, a).await,
         Cmd::Goto(a) => wc_cmds::goto(ctx, a).await,

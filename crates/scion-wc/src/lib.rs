@@ -38,7 +38,7 @@ pub mod testing;
 mod testing_write;
 
 pub use commit::CommitReport;
-pub use diff::FileChangeView;
+pub use diff::{FileChangeView, HunkLineView, HunkView};
 pub use goto::GotoReport;
 pub use land::LandReport;
 pub use placeholder::{REDACTED_PLACEHOLDER_PREFIX, placeholder_bytes};

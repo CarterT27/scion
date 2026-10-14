@@ -62,7 +62,11 @@ async fn human_output_of_every_command() {
         st.contains("A a.txt\n") && st.contains("A dir/b.txt\n"),
         "{st}"
     );
-    assert!(out("diff").contains("A a.txt"), "{}", out("diff"));
+    assert!(
+        out("diff").contains("diff --scion a/a.txt b/a.txt\n--- /dev/null\n+++ b/a.txt\n"),
+        "{}",
+        out("diff")
+    );
     assert!(
         out("commit").starts_with("Committed c1"),
         "{}",
@@ -277,12 +281,175 @@ async fn status_and_diff_work_offline_when_trees_are_cached() {
     let j = st.json();
     assert_eq!(j["data"]["clean"], false);
     assert_eq!(j["data"]["added"][0], "offline.txt");
-    let d = scion(&offline, &["-C", wcs, "--json", "diff"]).await;
+    let d = scion(&offline, &["-C", wcs, "--json", "diff", "--name-only"]).await;
     assert_eq!(d.code, 0, "{}", d.stderr);
     assert_eq!(d.json()["data"]["changes"][0]["path"], "offline.txt");
+    assert!(d.json()["data"]["changes"][0]["hunks"].is_null());
+    let n = scion(&offline, &["-C", wcs, "diff", "--name-only"]).await;
+    assert_eq!(n.code, 0, "{}", n.stderr);
+    assert_eq!(
+        n.text().lines().next().unwrap().get(..14),
+        Some("A offline.txt ")
+    );
     // A command that needs the server still reports the unreachable endpoint.
     let l = scion(&offline, &["-C", wcs, "log", "--oneline"]).await;
     assert_ne!(l.code, 0, "{}", l.text());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diff_shows_unified_hunks() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let h = Harness::start(false).await;
+    let env = h.env_as("alice");
+    let wc = h.path("wc");
+    let wcs = wc.to_str().unwrap();
+    let co = scion(&env, &["checkout", "main", wcs]).await;
+    assert_eq!(co.code, 0, "{}", co.stderr);
+    std::fs::write(wc.join("mod.txt"), b"a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n").unwrap();
+    std::fs::write(wc.join("del.txt"), b"gone\n").unwrap();
+    std::fs::write(wc.join("exe.sh"), b"#!/bin/sh\n").unwrap();
+    std::fs::write(wc.join("bin.dat"), b"x\0y\n").unwrap();
+    std::fs::write(wc.join("nonl.txt"), b"x\n").unwrap();
+    symlink("mod.txt", wc.join("link")).unwrap();
+    let c = scion(&env, &["-C", wcs, "commit", "-m", "base"]).await;
+    assert_eq!(c.code, 0, "{}", c.stderr);
+    let empty = scion(&env, &["-C", wcs, "diff"]).await;
+    assert_eq!(empty.code, 0, "{}", empty.stderr);
+    assert_eq!(empty.text(), "");
+
+    std::fs::write(wc.join("mod.txt"), b"a\nb\nc\nd\nE\nf\ng\nh\ni\nj\n").unwrap();
+    std::fs::remove_file(wc.join("del.txt")).unwrap();
+    std::fs::set_permissions(wc.join("exe.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(wc.join("bin.dat"), b"x\0z\n").unwrap();
+    std::fs::write(wc.join("nonl.txt"), b"x\ny").unwrap();
+    std::fs::remove_file(wc.join("link")).unwrap();
+    symlink("nonl.txt", wc.join("link")).unwrap();
+    std::fs::write(wc.join("new.txt"), b"hi\n").unwrap();
+
+    let d = scion(&env, &["-C", wcs, "diff"]).await;
+    assert_eq!(d.code, 0, "{}", d.stderr);
+    let expected = "\
+diff --scion a/bin.dat b/bin.dat
+Binary files a/bin.dat and b/bin.dat differ
+diff --scion a/del.txt b/del.txt
+--- a/del.txt
++++ /dev/null
+@@ -1,1 +0,0 @@
+-gone
+diff --scion a/exe.sh b/exe.sh
+old mode 100644
+new mode 100755
+diff --scion a/link b/link
+--- a/link
++++ b/link
+@@ -1,1 +1,1 @@
+-mod.txt
+\\ No newline at end of file
++nonl.txt
+\\ No newline at end of file
+diff --scion a/mod.txt b/mod.txt
+--- a/mod.txt
++++ b/mod.txt
+@@ -2,7 +2,7 @@
+ b
+ c
+ d
+-e
++E
+ f
+ g
+ h
+diff --scion a/new.txt b/new.txt
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,1 @@
++hi
+diff --scion a/nonl.txt b/nonl.txt
+--- a/nonl.txt
++++ b/nonl.txt
+@@ -1,1 +1,2 @@
+ x
++y
+\\ No newline at end of file
+";
+    assert_eq!(d.text(), expected);
+
+    let u0 = scion(&env, &["-C", wcs, "diff", "-U0"]).await;
+    assert_eq!(u0.code, 0, "{}", u0.stderr);
+    assert!(
+        u0.text()
+            .contains("+++ b/mod.txt\n@@ -5,1 +5,1 @@\n-e\n+E\ndiff --scion a/new.txt"),
+        "{}",
+        u0.text()
+    );
+    let u1 = scion(&env, &["-C", wcs, "diff", "--unified", "1"]).await;
+    assert!(
+        u1.text().contains("@@ -4,3 +4,3 @@\n d\n-e\n+E\n f\n"),
+        "{}",
+        u1.text()
+    );
+
+    let names = scion(&env, &["-C", wcs, "diff", "--name-only"]).await;
+    assert_eq!(names.code, 0, "{}", names.stderr);
+    let letters: Vec<String> = names
+        .text()
+        .lines()
+        .map(|l| l.split_whitespace().take(2).collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(
+        letters,
+        [
+            "M bin.dat",
+            "D del.txt",
+            "T exe.sh",
+            "M link",
+            "M mod.txt",
+            "A new.txt",
+            "M nonl.txt"
+        ]
+    );
+    let bad = scion(&env, &["-C", wcs, "diff", "--name-only", "-U", "1"]).await;
+    assert_eq!(bad.code, 2, "{}", bad.text());
+
+    let j = scion(&env, &["-C", wcs, "--json", "diff"]).await;
+    assert_eq!(j.code, 0, "{}", j.stderr);
+    let v = j.json();
+    assert_eq!(cli_support::validate(&v), "diff");
+    let changes = v["data"]["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 7);
+    assert_eq!(changes[0]["binary"], true);
+    assert!(changes[0]["hunks"].is_null());
+    assert_eq!(changes[2]["status"], "mode_changed");
+    assert_eq!(changes[2]["hunks"], serde_json::json!([]));
+    let m = &changes[4]["hunks"][0];
+    assert_eq!(
+        (m["old_start"].as_u64(), m["new_lines"].as_u64()),
+        (Some(2), Some(7))
+    );
+    assert_eq!(
+        m["lines"][3],
+        serde_json::json!({"kind": "delete", "text": "e\n"})
+    );
+    assert_eq!(
+        m["lines"][4],
+        serde_json::json!({"kind": "insert", "text": "E\n"})
+    );
+    let nj = scion(&env, &["-C", wcs, "--json", "diff", "--name-only"]).await;
+    let nv = nj.json();
+    assert_eq!(cli_support::validate(&nv), "diff");
+    assert!(nv["data"]["changes"][4]["hunks"].is_null());
+
+    // Content hunks need the server for base blobs; the error points to --name-only.
+    let mut offline = env.clone();
+    offline.0.insert(
+        "SCION_ENDPOINT".into(),
+        format!("unix://{}", h.path("no-server.sock").display()),
+    );
+    let off = scion(&offline, &["-C", wcs, "diff"]).await;
+    assert_ne!(off.code, 0, "{}", off.text());
+    assert!(off.stderr.contains("--name-only"), "{}", off.stderr);
+    let off_names = scion(&offline, &["-C", wcs, "diff", "--name-only"]).await;
+    assert_eq!(off_names.code, 0, "{}", off_names.stderr);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -72,8 +72,8 @@ pub(crate) enum Cmd {
     },
     /// Show working-copy changes.
     Status,
-    /// List changed files against the base.
-    Diff,
+    /// Show working-copy changes against the base as unified diffs.
+    Diff(DiffArgs),
     /// Commit every change (or only --path) on top of the base.
     Commit(CommitArgs),
     /// Amend the base changeset (same change id).
@@ -107,7 +107,7 @@ impl Cmd {
             Cmd::Checkout(_) => "checkout",
             Cmd::Sparse { .. } => "sparse",
             Cmd::Status => "status",
-            Cmd::Diff => "diff",
+            Cmd::Diff(_) => "diff",
             Cmd::Commit(_) => "commit",
             Cmd::Amend(_) => "amend",
             Cmd::Goto(_) => "goto",
@@ -132,6 +132,22 @@ pub(crate) struct LoginArgs {
     /// Do not store the GitHub token for silent re-exchange.
     #[arg(long)]
     pub no_store_github_token: bool,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct DiffArgs {
+    /// List changed files only (no content; no server contact when every tree is cached).
+    #[arg(long)]
+    pub name_only: bool,
+    /// Lines of context around each hunk.
+    #[arg(
+        short = 'U',
+        long = "unified",
+        value_name = "N",
+        default_value_t = 3,
+        conflicts_with = "name_only"
+    )]
+    pub unified: usize,
 }
 
 #[derive(Args, Debug)]

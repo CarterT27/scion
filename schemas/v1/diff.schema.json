@@ -25,6 +25,20 @@
     "FileChangeView": {
       "description": "One changed file (`--json` schema `scion.cli.diff.v1`).",
       "properties": {
+        "binary": {
+          "description": "Either side is binary (a NUL in its first 8000 bytes, or larger than\n`merge_max_text_bytes`); no hunks are produced then. Always `false` without hunks.",
+          "type": "boolean"
+        },
+        "hunks": {
+          "description": "Unified content hunks (`diff_with_hunks` only); `None` when not requested, for binary\nchanges, and when a side's content is unavailable (redacted or denied).",
+          "items": {
+            "$ref": "#/$defs/HunkView"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "new_id": {
           "description": "New blob id text.",
           "type": [
@@ -70,7 +84,77 @@
       },
       "required": [
         "path",
-        "status"
+        "status",
+        "binary"
+      ],
+      "type": "object"
+    },
+    "HunkLineView": {
+      "description": "One line of a [`HunkView`].",
+      "properties": {
+        "kind": {
+          "description": "`context`, `delete` or `insert`.",
+          "type": "string"
+        },
+        "text": {
+          "description": "The line including its terminator (lossy UTF-8).",
+          "type": "string"
+        },
+        "text_hex": {
+          "description": "Hex of the exact line bytes, present only when the line is not valid UTF-8.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "type": "object"
+    },
+    "HunkView": {
+      "description": "One unified-diff hunk (1-based starts as in `@@ -a,b +c,d @@`).",
+      "properties": {
+        "lines": {
+          "description": "The hunk's lines in order.",
+          "items": {
+            "$ref": "#/$defs/HunkLineView"
+          },
+          "type": "array"
+        },
+        "new_lines": {
+          "description": "Line count in the new text.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "new_start": {
+          "description": "Start line in the new text.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "old_lines": {
+          "description": "Line count in the old text.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "old_start": {
+          "description": "Start line in the old text.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "old_start",
+        "old_lines",
+        "new_start",
+        "new_lines",
+        "lines"
       ],
       "type": "object"
     }
