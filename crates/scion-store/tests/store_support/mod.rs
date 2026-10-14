@@ -147,13 +147,12 @@ pub fn bundle(row: ChangesetRow, parents: Vec<ObjectId>) -> ChangesetBundle {
     }
 }
 
-/// A minimal tracing subscriber recording span `target:name` pairs and events as
-/// `LEVEL target field=value ...` lines.
+/// Per-test view of the tracing records made on the test's thread: span `target:name` pairs and
+/// events as `LEVEL target field=value ...` lines. Filled in by [`with_capture`].
 #[derive(Clone, Default)]
 pub struct Capture {
     pub spans: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
     pub events: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
-    next: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 struct FieldText(String);
@@ -167,15 +166,43 @@ impl tracing::field::Visit for FieldText {
     }
 }
 
-impl tracing::Subscriber for Capture {
+/// The one global subscriber of the test binary. It records every span and event together with
+/// the thread that emitted it; [`with_capture`] hands each test the records of its own thread.
+///
+/// A global subscriber is used instead of a scoped one because scoped dispatch raced with the
+/// callsite interest cache under parallel tests and occasionally dropped events.
+#[derive(Default)]
+struct GlobalCapture {
+    spans: parking_lot::Mutex<Vec<(std::thread::ThreadId, String)>>,
+    events: parking_lot::Mutex<Vec<(std::thread::ThreadId, String)>>,
+    next: std::sync::atomic::AtomicU64,
+}
+
+static GLOBAL_CAPTURE: std::sync::LazyLock<std::sync::Arc<GlobalCapture>> =
+    std::sync::LazyLock::new(|| {
+        let g = std::sync::Arc::new(GlobalCapture::default());
+        // Another global may already be installed (never the case in this binary); then the
+        // capture silently records nothing and the tests that need it fail loudly.
+        let _ = tracing::subscriber::set_global_default(Shared(g.clone()));
+        g
+    });
+
+struct Shared(std::sync::Arc<GlobalCapture>);
+
+impl tracing::Subscriber for Shared {
     fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
         true
     }
     fn new_span(&self, a: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-        self.spans
-            .lock()
-            .push(format!("{}:{}", a.metadata().target(), a.metadata().name()));
-        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        self.0.spans.lock().push((
+            std::thread::current().id(),
+            format!("{}:{}", a.metadata().target(), a.metadata().name()),
+        ));
+        let n = self
+            .0
+            .next
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
         tracing::span::Id::from_u64(n)
     }
     fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
@@ -187,23 +214,41 @@ impl tracing::Subscriber for Capture {
             e.metadata().target()
         ));
         e.record(&mut f);
-        self.events.lock().push(f.0);
+        self.0
+            .events
+            .lock()
+            .push((std::thread::current().id(), f.0));
     }
     fn enter(&self, _: &tracing::span::Id) {}
     fn exit(&self, _: &tracing::span::Id) {}
 }
 
-/// Run `fut` on a current-thread runtime with `cap` as the default subscriber.
+fn take_for_thread(
+    v: &parking_lot::Mutex<Vec<(std::thread::ThreadId, String)>>,
+    me: std::thread::ThreadId,
+) -> Vec<String> {
+    let mut g = v.lock();
+    let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut *g)
+        .into_iter()
+        .partition(|(t, _)| *t == me);
+    *g = rest;
+    mine.into_iter().map(|(_, s)| s).collect()
+}
+
+/// Run `fut` on a current-thread runtime and copy the spans and events recorded on this thread
+/// while it ran into `cap`.
 pub fn with_capture<F: std::future::Future>(cap: &Capture, fut: F) -> F::Output {
-    tracing::subscriber::with_default(cap.clone(), || {
-        // Callsites first hit by a parallel test while no dispatcher was registered may have a
-        // cached `Interest::never()`; force a rebuild now that `cap` is registered so every event
-        // emitted on this thread reaches it.
-        tracing::callsite::rebuild_interest_cache();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(fut)
-    })
+    let g = GLOBAL_CAPTURE.clone();
+    let me = std::thread::current().id();
+    // Drop stale records from an earlier test that ran on this (reused) thread.
+    let _ = take_for_thread(&g.spans, me);
+    let _ = take_for_thread(&g.events, me);
+    let out = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(fut);
+    cap.spans.lock().extend(take_for_thread(&g.spans, me));
+    cap.events.lock().extend(take_for_thread(&g.events, me));
+    out
 }
