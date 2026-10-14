@@ -1,0 +1,662 @@
+// Scion RPC protocol, package scion.v1 (SPEC 7; frozen by docs/PLAN.md section 2.13).
+//
+// Protobuf is transport only (SPEC 3.4): object ids travel as their 34 raw bytes (SPEC 4.2) and
+// changesets as their canonical encoding (SPEC 4.1). Object identity never depends on protobuf
+// serialization.
+//
+// Evolution rules (SPEC 7.1): breaking changes require a new package (scion.v2). Non-breaking
+// additions use new fields and new RPCs only. Field numbers 1-15 are used densely; numbers 100
+// and above are set aside in every message for additive evolution.
+//
+// Fields marked `// required` must be present; when one is missing the server returns
+// INVALID_ARGUMENT with subcode missing_field.
+//
+// Every response carries the trailers scion-policy-epoch, scion-redaction-epoch and scion-tier
+// (SPEC 7.1). Errors carry a gRPC status plus ErrorDetail in the status details (SPEC 7.2).
+
+syntax = "proto3";
+
+package scion.v1;
+
+// Object RPCs, served by every tier (SPEC 7.3).
+service ObjectService {
+  rpc GetServerInfo(GetServerInfoRequest) returns (ServerInfo);
+  rpc GetObjects(GetObjectsRequest) returns (stream ObjectChunk);
+  rpc HasObjects(HasObjectsRequest) returns (HasObjectsResponse);
+  rpc ResolveRef(ResolveRefRequest) returns (ResolveRefResponse);
+}
+
+// Query RPCs: served by the server, forwarded verbatim by daemons (SPEC 7.4).
+service QueryService {
+  rpc GetChangesets(GetChangesetsRequest) returns (GetChangesetsResponse);
+  rpc ReadPath(ReadPathRequest) returns (stream ReadPathChunk);
+  rpc ListTree(ListTreeRequest) returns (ListTreeResponse);
+  rpc Log(LogRequest) returns (LogResponse);
+  rpc Blame(BlameRequest) returns (BlameResponse);
+  rpc Diff(DiffRequest) returns (stream DiffItem);
+  rpc IsAncestor(IsAncestorRequest) returns (IsAncestorResponse);
+  rpc MergeBase(MergeBaseRequest) returns (MergeBaseResponse);
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+  // Additive: generic derived-data query path (SPEC 9.1, 19.6).
+  rpc GetDerived(GetDerivedRequest) returns (GetDerivedResponse);
+}
+
+// Write RPCs (SPEC 7.5).
+service WriteService {
+  rpc UploadObjects(stream UploadItem) returns (UploadObjectsResponse);
+  rpc CreateChangeset(CreateChangesetRequest) returns (CreateChangesetResponse);
+  rpc Rebase(RebaseRequest) returns (RebaseResponse);
+  rpc Merge(MergeRequest) returns (MergeResponse);
+  rpc Land(LandRequest) returns (LandResponse);
+}
+
+// Ref RPCs (SPEC 7.6).
+service RefService {
+  rpc UpdateRef(UpdateRefRequest) returns (UpdateRefResponse);
+  rpc CreateRef(CreateRefRequest) returns (CreateRefResponse);
+  rpc DeleteRef(DeleteRefRequest) returns (DeleteRefResponse);
+  rpc GetRefLog(GetRefLogRequest) returns (GetRefLogResponse);
+}
+
+// Auth RPCs (SPEC 7.7).
+service AuthService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
+  rpc CheckAccess(CheckAccessRequest) returns (CheckAccessResponse);
+}
+
+// Admin RPCs (SPEC 7.7).
+service AdminService {
+  rpc Redact(RedactRequest) returns (RedactResponse);
+  rpc Unredact(UnredactRequest) returns (UnredactResponse);
+  rpc PurgeNow(PurgeNowRequest) returns (PurgeNowResponse);
+  rpc ListRedactions(ListRedactionsRequest) returns (ListRedactionsResponse);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Common
+// ---------------------------------------------------------------------------------------------
+
+// A tree entry value: mode 1 File, 2 Executable, 3 Symlink, 4 Tree (SPEC 4.3.2).
+message EntryInfo {
+  uint32 mode = 1;
+  bytes id = 2;  // 34-byte ObjectId
+  uint64 size = 3;
+}
+
+message TreeEntryMsg {
+  bytes name = 1;
+  EntryInfo entry = 2;
+}
+
+// SPEC 4.3.3 Timestamp.
+message Timestamp {
+  int64 seconds = 1;
+  int64 tz_offset_minutes = 2;
+}
+
+// Client-supplied Meta fields. There is no creator field: the server sets it (SPEC 7.5).
+message MetaFields {
+  bytes author = 1;
+  Timestamp author_time = 2;
+  optional bytes committer = 3;
+  Timestamp committer_time = 4;
+  bytes message = 5;
+  repeated Extension extensions = 6;
+}
+
+// One extension (tag, value) pair (SPEC 4.1).
+message Extension {
+  uint64 tag = 1;
+  bytes value = 2;
+}
+
+// SPEC 4.3.4 DeltaEntry. op: 1 Put, 2 Delete. mode/id/size only for Put.
+message DeltaEntryMsg {
+  bytes path = 1;
+  uint32 op = 2;
+  uint32 mode = 3;
+  bytes id = 4;
+  uint64 size = 5;
+}
+
+// SPEC 4.3.7 landed tuple (change_id, source, result).
+message LandedEntry {
+  bytes change_id = 1;  // 16 bytes
+  bytes source = 2;
+  bytes result = 3;
+}
+
+// Per-item status of batch RPCs (SPEC 7.1, 7.3).
+enum ItemStatus {
+  ITEM_STATUS_UNSPECIFIED = 0;
+  OK = 1;
+  NOT_FOUND = 2;
+  DENIED = 3;
+  REDACTED = 4;
+}
+
+// Payload encoding of ObjectChunk.data (SPEC 7.3).
+enum Encoding {
+  ENCODING_UNSPECIFIED = 0;
+  RAW = 1;
+  ZSTD = 2;
+}
+
+// Access class of a served object (SPEC 7.3, 10.4).
+enum AccessClass {
+  ACCESS_CLASS_UNSPECIFIED = 0;
+  ROOT = 1;
+  RESTRICTED = 2;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Errors (SPEC 7.2): carried as google.rpc.Status-style binary details, i.e. the gRPC status
+// details bytes hold the ErrorDetail encoding.
+// ---------------------------------------------------------------------------------------------
+
+message ErrorDetail {
+  string code = 1;  // NOT_FOUND, PERMISSION_DENIED, ... exactly as SPEC 7.2
+  bool retryable = 2;
+  string message = 3;
+  ErrorPayload payload = 4;
+}
+
+message ErrorPayload {
+  oneof kind {
+    string subcode = 1;
+    LimitPayload limit = 2;
+    ConflictReport merge_conflict = 3;
+    RefMismatch ref_mismatch = 4;
+    AlreadyLandedPayload already_landed = 5;
+    Candidates candidates = 6;
+  }
+}
+
+// TOO_LARGE payload: config key name, limit and actual value.
+message LimitPayload {
+  string name = 1;
+  uint64 limit = 2;
+  uint64 actual = 3;
+}
+
+// Conflicting line region (0-based, half-open line ranges).
+message ConflictHunk {
+  uint32 base_start = 1;
+  uint32 base_end = 2;
+  uint32 ours_start = 3;
+  uint32 ours_end = 4;
+  uint32 theirs_start = 5;
+  uint32 theirs_end = 6;
+}
+
+message ConflictMsg {
+  bytes path = 1;
+  // add_add | modify_delete | symlink | binary | redacted | file_directory | content
+  string kind = 2;
+  EntryInfo base = 3;
+  EntryInfo ours = 4;
+  EntryInfo theirs = 5;
+  repeated ConflictHunk hunks = 6;
+}
+
+message CleanEntry {
+  bytes path = 1;
+  EntryInfo entry = 2;  // absent = deleted
+}
+
+// MERGE_CONFLICT payload (SPEC 8.3).
+message ConflictReport {
+  repeated CleanEntry clean_entries = 1;
+  repeated ConflictMsg conflicts = 2;
+}
+
+// REF_VERSION_MISMATCH payload (SPEC 8.5).
+message RefMismatch {
+  uint64 current_version = 1;
+  bytes current_target = 2;
+}
+
+// ALREADY_LANDED payload (SPEC 8.4).
+message AlreadyLandedPayload {
+  bytes source = 1;
+  bytes result = 2;
+  uint64 version = 3;
+}
+
+// Ambiguous prefix candidates (INVALID_ARGUMENT/ambiguous_prefix).
+message Candidates {
+  repeated bytes ids = 1;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Object RPCs (SPEC 7.3)
+// ---------------------------------------------------------------------------------------------
+
+message GetServerInfoRequest {}
+
+message PublicKey {
+  string kid = 1;
+  bytes ed25519 = 2;  // 32-byte public key
+}
+
+message LimitsMsg {
+  uint64 max_blob_bytes = 1;
+  uint64 max_delta_entries = 2;
+  uint64 max_parents = 3;
+  uint64 max_message_bytes = 4;
+  uint64 merge_max_text_bytes = 5;
+}
+
+message ServerInfo {
+  repeated string protocol_versions = 1;
+  string repo = 2;
+  uint64 policy_epoch = 3;
+  uint64 redaction_epoch = 4;
+  repeated PublicKey token_public_keys = 5;
+  LimitsMsg limits = 6;
+  // 7 and 8 are needed by the SPEC 12.2 device flow.
+  string github_client_id = 7;
+  string github_oauth_base_url = 8;
+}
+
+message GetObjectsRequest {
+  repeated bytes ids = 1;
+  optional uint64 offset = 2;
+  optional uint64 length = 3;
+}
+
+// One chunk of one requested object. Range reads use RAW. Multiple chunks per id are allowed;
+// `final` is set on the last chunk of each id.
+message ObjectChunk {
+  bytes id = 1;
+  ItemStatus status = 2;
+  Encoding encoding = 3;
+  bytes data = 4;
+  uint64 total_size = 5;
+  AccessClass access_class = 6;
+  bool final = 7;
+  uint64 offset = 8;
+}
+
+message HasObjectsRequest {
+  repeated bytes ids = 1;
+}
+
+message HasObjectsResponse {
+  repeated bool present = 1;
+}
+
+message ResolveRefRequest {
+  string name = 1;
+  optional uint64 at_version = 2;
+}
+
+message ResolveRefResponse {
+  bytes target = 1;
+  uint64 version = 2;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Query RPCs (SPEC 7.4)
+// ---------------------------------------------------------------------------------------------
+
+message GetChangesetsRequest {
+  repeated bytes ids = 1;
+}
+
+// A changeset with unreadable delta entries removed (SPEC 12.6).
+message FilteredChangeset {
+  repeated bytes parents = 1;
+  bytes root_tree = 2;
+  bytes meta = 3;
+  bytes change_id = 4;
+  repeated DeltaEntryMsg delta = 5;
+  bool filtered = 6;
+}
+
+message ChangesetItem {
+  bytes id = 1;
+  ItemStatus status = 2;
+  oneof view {
+    bytes encoded = 3;  // canonical encoding (SPEC 4.3.4)
+    FilteredChangeset filtered_view = 4;
+  }
+  uint64 generation = 5;
+}
+
+message GetChangesetsResponse {
+  repeated ChangesetItem items = 1;
+}
+
+message ReadPathRequest {
+  bytes changeset = 1;
+  bytes path = 2;
+}
+
+message ReadPathChunk {
+  EntryInfo entry = 1;  // set on the first chunk
+  bytes data = 2;
+  bool final = 3;
+}
+
+message ListTreeRequest {
+  bytes changeset = 1;
+  bytes path = 2;
+}
+
+message ListTreeResponse {
+  repeated TreeEntryMsg entries = 1;
+  bytes tree_id = 2;
+}
+
+message LogRequest {
+  bytes from = 1;
+  optional bytes path = 2;
+  bool first_parent_only = 3;
+  uint32 limit = 4;
+  bytes page_token = 5;
+}
+
+message LogEntry {
+  bytes id = 1;
+  ChangesetItem changeset = 2;
+  MetaView meta = 3;
+}
+
+// Meta as shown to clients. When redacted only meta_id is set; clients render "<redacted>".
+message MetaView {
+  bool redacted = 1;
+  bytes author = 2;
+  Timestamp author_time = 3;
+  optional bytes committer = 4;
+  Timestamp committer_time = 5;
+  bytes creator = 6;
+  bytes message = 7;
+  bytes meta_id = 8;
+}
+
+message LogResponse {
+  repeated LogEntry entries = 1;
+  bytes next_page_token = 2;
+}
+
+message BlameRequest {
+  bytes changeset = 1;
+  bytes path = 2;
+}
+
+message BlameRangeMsg {
+  uint32 start_line = 1;
+  uint32 line_count = 2;
+  bytes origin_changeset = 3;
+  uint32 origin_start_line = 4;
+}
+
+message BlameResponse {
+  repeated BlameRangeMsg ranges = 1;
+}
+
+message DiffRequest {
+  bytes a = 1;
+  bytes b = 2;
+  repeated bytes paths = 3;
+  bool include_content_hunks = 4;
+}
+
+message TextHunkMsg {
+  uint32 old_start = 1;
+  uint32 old_lines = 2;
+  uint32 new_start = 3;
+  uint32 new_lines = 4;
+  repeated bytes lines = 5;  // first byte ' ', '-' or '+'
+}
+
+message DiffItem {
+  bytes path = 1;
+  EntryInfo old_entry = 2;
+  EntryInfo new_entry = 3;
+  repeated TextHunkMsg hunks = 4;
+  bool binary = 5;
+}
+
+message IsAncestorRequest {
+  bytes a = 1;
+  bytes b = 2;
+}
+
+message IsAncestorResponse {
+  bool result = 1;
+}
+
+message MergeBaseRequest {
+  bytes a = 1;
+  bytes b = 2;
+}
+
+message MergeBaseResponse {
+  repeated bytes bases = 1;
+}
+
+message ResolveRequest {
+  string revision = 1;  // SPEC 11.8 grammar
+}
+
+message ResolveResponse {
+  bytes changeset = 1;
+}
+
+message GetDerivedRequest {
+  string type = 1;
+  optional uint32 version = 2;
+  bytes key = 3;
+}
+
+message GetDerivedResponse {
+  bytes value = 1;
+  uint32 version = 2;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Write RPCs (SPEC 7.5)
+// ---------------------------------------------------------------------------------------------
+
+message UploadItem {
+  bytes id = 1;
+  uint32 kind = 2;
+  bytes data = 3;  // raw content (canonical encoding for structured kinds)
+}
+
+message UploadResult {
+  bytes id = 1;
+  ItemStatus status = 2;
+  string error_code = 3;
+  string message = 4;
+}
+
+message UploadObjectsResponse {
+  repeated UploadResult results = 1;
+}
+
+message CreateChangesetRequest {
+  repeated bytes parents = 1;
+  repeated DeltaEntryMsg delta = 2;
+  MetaFields meta_fields = 3;  // required
+  bytes change_id = 4;  // required, 16 bytes
+  optional bytes expected_root_tree = 5;
+  // Implementation-defined: requires admin.refs and write on "/"; allows parentless
+  // changesets; records git_mapping (PLAN 6.4).
+  bool import_mode = 6;
+}
+
+message CreateChangesetResponse {
+  bytes changeset_id = 1;
+  bytes root_tree = 2;
+  bytes meta_id = 3;
+}
+
+message RebaseRequest {
+  bytes changeset = 1;
+  bytes onto = 2;
+}
+
+message RebaseResponse {
+  bytes changeset_id = 1;
+}
+
+message MergeRequest {
+  bytes a = 1;
+  bytes b = 2;
+  MetaFields meta_fields = 3;
+  bytes change_id = 4;
+}
+
+message MergeResponse {
+  bytes changeset_id = 1;
+}
+
+message LandRequest {
+  string ref = 1;
+  bytes head = 2;
+  bool allow_empty = 3;
+}
+
+message LandResponse {
+  bytes target = 1;
+  uint64 version = 2;
+  repeated LandedEntry landed = 3;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ref RPCs (SPEC 7.6)
+// ---------------------------------------------------------------------------------------------
+
+message UpdateRefRequest {
+  string name = 1;
+  uint64 expected_version = 2;
+  bytes new_target = 3;
+  bool allow_non_fast_forward = 4;
+}
+
+message UpdateRefResponse {
+  uint64 version = 1;
+}
+
+message CreateRefRequest {
+  string name = 1;
+  bytes target = 2;
+  string reason = 3;
+}
+
+message CreateRefResponse {
+  uint64 version = 1;
+}
+
+message DeleteRefRequest {
+  string name = 1;
+  uint64 expected_version = 2;
+  string reason = 3;
+}
+
+message DeleteRefResponse {}
+
+message GetRefLogRequest {
+  string name = 1;
+  uint64 from_version = 2;
+  uint32 limit = 3;
+}
+
+message RefLogEntryMsg {
+  uint64 version = 1;
+  bytes old_target = 2;
+  bytes new_target = 3;
+  string principal = 4;
+  int64 at_unix_ms = 5;
+  repeated LandedEntry landed = 6;
+}
+
+message GetRefLogResponse {
+  repeated RefLogEntryMsg entries = 1;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Auth and admin RPCs (SPEC 7.7)
+// ---------------------------------------------------------------------------------------------
+
+message LoginRequest {
+  oneof credential {
+    string github_access_token = 1;
+    ServiceCredential service = 2;
+  }
+}
+
+message ServiceCredential {
+  string service_name = 1;
+  string service_secret = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+  string principal = 2;
+  int64 expires_at_unix = 3;
+}
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  string principal = 1;
+  repeated string groups = 2;
+  int64 expires_at_unix = 3;
+}
+
+message CheckAccessRequest {
+  string subject_token = 1;
+  repeated bytes object_ids = 2;
+}
+
+message CheckAccessResponse {
+  repeated bool allowed = 1;
+  repeated AccessClass access_class = 2;
+}
+
+message RedactRequest {
+  repeated bytes object_ids = 1;
+  string reason = 2;
+  optional uint64 purge_after_seconds = 3;
+}
+
+message RedactResponse {
+  uint64 epoch = 1;
+  int64 effective_by_unix_ms = 2;
+}
+
+message UnredactRequest {
+  repeated bytes object_ids = 1;
+}
+
+message UnredactResponse {
+  uint64 epoch = 1;
+}
+
+message PurgeNowRequest {
+  repeated bytes object_ids = 1;
+  string reason = 2;
+}
+
+message PurgeNowResponse {}
+
+message ListRedactionsRequest {
+  uint64 since_epoch = 1;
+}
+
+message RedactionEntry {
+  bytes object_id = 1;
+  string state = 2;  // "quarantined" | "purged"
+  uint64 epoch = 3;
+  string reason = 4;
+}
+
+message ListRedactionsResponse {
+  repeated RedactionEntry entries = 1;
+  uint64 current_epoch = 2;
+}

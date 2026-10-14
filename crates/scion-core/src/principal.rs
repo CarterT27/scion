@@ -35,17 +35,18 @@ impl Principal {
                 format!("invalid principal {s:?}"),
             )
         };
-        if let Some(login) = s.strip_prefix("github:") {
-            if valid_name(login) {
-                return Ok(Principal::GitHub {
-                    login: login.to_owned(),
-                    id: None,
-                });
-            }
-        } else if let Some(name) = s.strip_prefix("service:") {
-            if valid_name(name) {
-                return Ok(Principal::Service(name.to_owned()));
-            }
+        if let Some(login) = s.strip_prefix("github:")
+            && valid_name(login)
+        {
+            return Ok(Principal::GitHub {
+                login: login.to_owned(),
+                id: None,
+            });
+        }
+        if let Some(name) = s.strip_prefix("service:")
+            && valid_name(name)
+        {
+            return Ok(Principal::Service(name.to_owned()));
         }
         Err(invalid())
     }

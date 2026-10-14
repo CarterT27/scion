@@ -170,10 +170,10 @@ impl ObjectId {
         let mut s = String::with_capacity(68);
         s.push(kind.letter());
         s.push(char::from(b'0' + self.0[0]));
-        if let Kind::Derived(k) = kind {
-            if k != HISTORY_NODE_KIND {
-                s.push_str(&format!("{k:02x}"));
-            }
+        if let Kind::Derived(k) = kind
+            && k != HISTORY_NODE_KIND
+        {
+            s.push_str(&format!("{k:02x}"));
         }
         s.push_str(&self.hex());
         s
