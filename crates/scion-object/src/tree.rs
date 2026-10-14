@@ -95,7 +95,7 @@ impl Canonical for Tree {
     fn decode_from(d: &mut Decoder<'_>) -> Result<Self> {
         d.format_version(TREE_FORMAT_VERSION)?;
         let n = d.list_len()?;
-        let mut entries: Vec<TreeEntry> = Vec::with_capacity(n);
+        let mut entries: Vec<TreeEntry> = Vec::with_capacity(n.min(crate::enc::PREALLOC_CAP));
         for _ in 0..n {
             let name = Name::new(d.bytes()?)?;
             let mode = Mode::from_u8(d.u8()?)?;

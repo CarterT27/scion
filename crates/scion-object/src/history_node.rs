@@ -119,7 +119,7 @@ impl Canonical for HistoryNode {
         let changeset = d.id()?;
         expect_kind(&changeset, Kind::Changeset, "changeset")?;
         let n = d.list_len()?;
-        let mut parents = Vec::with_capacity(n);
+        let mut parents = Vec::with_capacity(n.min(crate::enc::PREALLOC_CAP));
         let mut seen = BTreeSet::new();
         for _ in 0..n {
             let p = d.id()?;
@@ -139,7 +139,8 @@ impl Canonical for HistoryNode {
                 "a File history node has no children",
             ));
         }
-        let mut children: Vec<(Name, ObjectId)> = Vec::with_capacity(n);
+        let mut children: Vec<(Name, ObjectId)> =
+            Vec::with_capacity(n.min(crate::enc::PREALLOC_CAP));
         for _ in 0..n {
             let name = Name::new(d.bytes()?)?;
             let id = d.id()?;

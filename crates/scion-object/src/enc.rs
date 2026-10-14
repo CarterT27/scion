@@ -17,6 +17,10 @@ use scion_core::{ObjectId, Result, ScionError, subcode};
 /// Maximum length of a SPEC 4.1 `uvarint` in bytes.
 pub const MAX_VARINT_LEN: usize = 10;
 
+/// Upper bound on list pre-allocation while decoding, so a forged count cannot force a
+/// large allocation before the elements are actually read.
+pub(crate) const PREALLOC_CAP: usize = 1024;
+
 /// Appends SPEC 4.1 primitives to a byte buffer.
 #[derive(Debug, Default)]
 pub struct Encoder {

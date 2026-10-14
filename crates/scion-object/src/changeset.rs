@@ -157,7 +157,7 @@ impl Canonical for Changeset {
     fn decode_from(d: &mut Decoder<'_>) -> Result<Self> {
         d.format_version(CHANGESET_FORMAT_VERSION)?;
         let n = d.list_len()?;
-        let mut parents: Vec<ObjectId> = Vec::with_capacity(n);
+        let mut parents: Vec<ObjectId> = Vec::with_capacity(n.min(crate::enc::PREALLOC_CAP));
         let mut seen = BTreeSet::new();
         for _ in 0..n {
             let p = d.id()?;
@@ -176,7 +176,7 @@ impl Canonical for Changeset {
         expect_kind(&meta, Kind::Meta, "meta")?;
         let change_id = ChangeId(d.fixed::<16>()?);
         let n = d.list_len()?;
-        let mut delta: Vec<DeltaEntry> = Vec::with_capacity(n);
+        let mut delta: Vec<DeltaEntry> = Vec::with_capacity(n.min(crate::enc::PREALLOC_CAP));
         for _ in 0..n {
             let entry = DeltaEntry::decode_from(d)?;
             if let Some(prev) = delta.last() {

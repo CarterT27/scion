@@ -86,7 +86,7 @@ impl Extensions {
     /// `known_odd` (unknown_critical_extension).
     pub fn decode_with(d: &mut Decoder<'_>, known_odd: &[u64]) -> Result<Self> {
         let n = d.list_len()?;
-        let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(n);
+        let mut out: Vec<(u64, Vec<u8>)> = Vec::with_capacity(n.min(crate::enc::PREALLOC_CAP));
         for _ in 0..n {
             let tag = d.uvarint()?;
             let value = d.bytes()?;
