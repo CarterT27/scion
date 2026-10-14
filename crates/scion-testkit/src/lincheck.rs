@@ -15,7 +15,10 @@
 //!   may or may not have taken effect. A missing completion counts as `Unknown`.
 //!
 //! The initial state of each ref is unknown unless given to
-//! [`check_ref_registers_with_initial`]; it is constrained by what the history observes.
+//! [`check_ref_registers_with_initial`]. An unknown initial version is inferred: every
+//! observed version bounds it (it lies within the number of possible increments below the
+//! smallest observation and above the largest), and each candidate in that range is searched,
+//! most likely (the smallest observation) first. The initial target is unknown until read.
 //!
 //! # Algorithm
 //!
@@ -23,7 +26,9 @@
 //! linearizable iff every per-ref sub-history is). Each sub-history is checked with the
 //! Wing-Gong-Lowe search: repeatedly linearize a minimal pending operation whose effect is
 //! legal in the current model state, backtracking on failure, and memoize visited
-//! `(linearized set, state)` pairs. `Unknown` operations have their return at infinity and are
+//! `(linearized set, state)` pairs. Read-only operations (reads, CAS mismatches) are
+//! linearized greedily as soon as they are legal, which keeps heavily contended CAS
+//! histories tractable. `Unknown` operations have their return at infinity and are
 //! optional: the search succeeds once every operation with a definite outcome is linearized.
 //!
 //! # Cap
@@ -220,17 +225,46 @@ pub fn check_ref_registers_with_initial(
         per_ref.entry(op.r.as_str()).or_default().push(op);
     }
     for (r, ops) in per_ref {
-        let init = match initial.get(r) {
-            Some((v, t)) => State {
-                version: Version::Known(*v),
+        let mut budget = MAX_SEARCH_STEPS;
+        if let Some((v, t)) = initial.get(r) {
+            let init = State {
+                version: *v,
                 target: Some(*t),
-            },
-            None => State {
-                version: Version::Unknown(Vec::new()),
-                target: None,
-            },
+            };
+            check_one(r, &ops, init, &mut budget)?;
+            continue;
+        }
+        let Some(candidates) = initial_candidates(&ops) else {
+            // Only mismatches and unknown operations: trivially linearizable.
+            continue;
         };
-        check_one(r, &ops, init)?;
+        if candidates.is_empty() {
+            return Err(Violation {
+                r: r.to_string(),
+                detail: "not linearizable: the observed versions differ by more than the \
+                         number of operations that could have incremented the version \
+                         (version gap)"
+                    .to_string(),
+            });
+        }
+        let mut last = None;
+        for v0 in candidates {
+            let init = State {
+                version: v0,
+                target: None,
+            };
+            match check_one(r, &ops, init, &mut budget) {
+                Ok(()) => {
+                    last = None;
+                    break;
+                }
+                Err(v) if v.detail.starts_with("inconclusive") => return Err(v),
+                Err(v) => last = Some(v),
+            }
+        }
+        if let Some(v) = last {
+            return Err(v);
+        }
     }
     Ok(())
 }
@@ -348,55 +382,10 @@ fn pair_events(events: &[Event]) -> Result<Vec<Op>, Violation> {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Version {
-    Known(u64),
-    /// Unknown, but known to differ from every listed value (sorted, unique).
-    Unknown(Vec<u64>),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct State {
-    version: Version,
+    version: u64,
     /// `None` until observed (unknown initial target, or after an unknown land).
     target: Option<[u8; 34]>,
-}
-
-impl Version {
-    /// Can the current version be `v`?
-    fn can_be(&self, v: u64) -> bool {
-        match self {
-            Version::Known(k) => *k == v,
-            Version::Unknown(ex) => ex.binary_search(&v).is_err(),
-        }
-    }
-
-    /// Constrain to "not `v`"; `None` if impossible.
-    fn exclude(&self, v: u64) -> Option<Version> {
-        match self {
-            Version::Known(k) => (*k != v).then(|| self.clone()),
-            Version::Unknown(ex) => {
-                let mut ex = ex.clone();
-                if let Err(pos) = ex.binary_search(&v) {
-                    ex.insert(pos, v);
-                }
-                Some(Version::Unknown(ex))
-            }
-        }
-    }
-
-    /// The version after one increment.
-    fn bumped(&self) -> Version {
-        match self {
-            Version::Known(k) => Version::Known(k.saturating_add(1)),
-            // v != x  <=>  v + 1 != x + 1; and a bumped version is never 0.
-            Version::Unknown(ex) => {
-                let mut next: Vec<u64> = ex.iter().map(|x| x.saturating_add(1)).collect();
-                next.insert(0, 0);
-                next.dedup();
-                Version::Unknown(next)
-            }
-        }
-    }
 }
 
 /// The successor state of linearizing `op` in `s` (`None` = illegal here). Unknown outcomes
@@ -405,61 +394,82 @@ fn step(s: &State, op: &Op) -> Option<State> {
     match (&op.call, &op.ret) {
         (RefOp::Read, Some(RefRet::Value { version, target })) => {
             let target_ok = s.target.is_none_or(|t| t == *target);
-            if s.version.can_be(*version) && target_ok {
-                Some(State {
-                    version: Version::Known(*version),
-                    target: Some(*target),
-                })
-            } else {
-                None
-            }
+            (s.version == *version && target_ok).then_some(State {
+                version: *version,
+                target: Some(*target),
+            })
         }
         (RefOp::Cas { expect, target }, Some(RefRet::Ok { version, target: t })) => {
-            if s.version.can_be(*expect) && *version == expect.saturating_add(1) && t == target {
-                Some(State {
-                    version: Version::Known(*version),
+            (s.version == *expect && *version == expect.saturating_add(1) && t == target).then_some(
+                State {
+                    version: *version,
                     target: Some(*target),
-                })
-            } else {
-                None
-            }
+                },
+            )
         }
         (RefOp::Cas { expect, .. }, Some(RefRet::Mismatch)) => {
-            s.version.exclude(*expect).map(|v| State {
-                version: v,
-                target: s.target,
-            })
+            (s.version != *expect).then(|| s.clone())
         }
-        (RefOp::Cas { expect, target }, None) => {
-            // Unknown CAS that took effect.
-            if s.version.can_be(*expect) {
-                Some(State {
-                    version: Version::Known(expect.saturating_add(1)),
-                    target: Some(*target),
-                })
-            } else {
-                None
-            }
-        }
+        // Unknown CAS that took effect.
+        (RefOp::Cas { expect, target }, None) => (s.version == *expect).then_some(State {
+            version: expect.saturating_add(1),
+            target: Some(*target),
+        }),
         (RefOp::Land { .. }, Some(RefRet::Ok { version, target })) => {
-            if *version >= 1 && s.version.can_be(version - 1) {
-                Some(State {
-                    version: Version::Known(*version),
-                    target: Some(*target),
-                })
-            } else {
-                None
-            }
-        }
-        (RefOp::Land { .. }, None) => {
-            // Unknown land that took effect: version + 1, unpredictable target.
-            Some(State {
-                version: s.version.bumped(),
-                target: None,
+            (*version >= 1 && s.version == version - 1).then_some(State {
+                version: *version,
+                target: Some(*target),
             })
         }
+        // Unknown land that took effect: version + 1, unpredictable target.
+        (RefOp::Land { .. }, None) => Some(State {
+            version: s.version.saturating_add(1),
+            target: None,
+        }),
         _ => None,
     }
+}
+
+/// Candidate initial versions for a ref whose initial state is unknown, most likely first.
+///
+/// Every definite observation pins the version at its linearization point to a value `w`
+/// (a read's version, a successful CAS's `expect`, a successful land's `version - 1`), and at
+/// most `n` increments (successful or unknown CAS/land) precede it, so the initial version
+/// lies in `[max(w) - n, min(w)]`. `None` means there is no observation at all, in which case
+/// any initial version distinct from every CAS `expect` works (mismatches hold and unknown
+/// operations are left out).
+fn initial_candidates(ops: &[&Op]) -> Option<Vec<u64>> {
+    let mut lo_obs: Option<u64> = None;
+    let mut hi_obs: Option<u64> = None;
+    let mut increments: u64 = 0;
+    for op in ops {
+        let obs = match (&op.call, &op.ret) {
+            (RefOp::Read, Some(RefRet::Value { version, .. })) => Some(*version),
+            (RefOp::Cas { expect, .. }, Some(RefRet::Ok { .. })) => {
+                increments += 1;
+                Some(*expect)
+            }
+            (RefOp::Land { .. }, Some(RefRet::Ok { version, .. })) => {
+                increments += 1;
+                Some(version.saturating_sub(1))
+            }
+            (RefOp::Cas { .. } | RefOp::Land { .. }, None) => {
+                increments += 1;
+                None
+            }
+            _ => None,
+        };
+        if let Some(w) = obs {
+            lo_obs = Some(lo_obs.map_or(w, |x| x.min(w)));
+            hi_obs = Some(hi_obs.map_or(w, |x| x.max(w)));
+        }
+    }
+    let (min_w, max_w) = (lo_obs?, hi_obs?);
+    let low = max_w.saturating_sub(increments);
+    if low > min_w {
+        return Some(Vec::new());
+    }
+    Some((low..=min_w).rev().collect())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -579,9 +589,30 @@ impl List {
 struct Frame {
     call: usize,
     prev_state: State,
+    /// A read-only op linearized greedily: skipping it instead can never help, so
+    /// backtracking passes through this frame (see [`check_one`]).
+    forced: bool,
 }
 
-fn check_one(r: &str, ops: &[&Op], init: State) -> Result<(), Violation> {
+/// Reads and CAS mismatches never change the version; they only observe it.
+fn is_read_only(op: &Op) -> bool {
+    matches!(
+        (&op.call, &op.ret),
+        (RefOp::Read, Some(RefRet::Value { .. })) | (RefOp::Cas { .. }, Some(RefRet::Mismatch))
+    )
+}
+
+/// WGL search over one ref's operations.
+///
+/// Optimization: after every state change, all *read-only* operations (reads, CAS mismatches)
+/// that are minimal (their call is reachable before any pending return) and legal in the
+/// current state are linearized first, greedily, and are never "skipped" on backtrack. This
+/// is sound: in any linearization of the remaining operations, such an operation can be moved
+/// to the current point. Every operation that must precede it is already linearized, every
+/// state change increments the version, so a read that matches the current version would see
+/// the same target later in the same version window, and moving a read-only operation does
+/// not alter the state any other operation observes.
+fn check_one(r: &str, ops: &[&Op], init: State, budget: &mut u64) -> Result<(), Violation> {
     if ops.len() > MAX_OPS_PER_REF {
         return Err(Violation {
             r: r.to_string(),
@@ -592,6 +623,13 @@ fn check_one(r: &str, ops: &[&Op], init: State) -> Result<(), Violation> {
             ),
         });
     }
+    let inconclusive = || Violation {
+        r: r.to_string(),
+        detail: format!(
+            "inconclusive: search budget of {MAX_SEARCH_STEPS} steps exhausted ({} operations)",
+            ops.len()
+        ),
+    };
     let mut list = List::build(ops);
     let words = ops.len().div_ceil(64).max(1);
     let mut linearized = vec![0u64; words];
@@ -599,68 +637,124 @@ fn check_one(r: &str, ops: &[&Op], init: State) -> Result<(), Violation> {
     let mut stack: Vec<Frame> = Vec::new();
     let mut state = init;
     let mut entry = list.next(list.head);
-    let mut steps: u64 = 0;
     let mut deepest: usize = 0;
+    let mut scan = true;
 
     loop {
-        steps += 1;
-        if steps > MAX_SEARCH_STEPS {
-            return Err(Violation {
-                r: r.to_string(),
-                detail: format!(
-                    "inconclusive: search budget of {MAX_SEARCH_STEPS} steps exhausted \
-                     ({} operations)",
-                    ops.len()
-                ),
-            });
+        if *budget == 0 {
+            return Err(inconclusive());
         }
-        let Some(e) = list.entries.get(entry).copied() else {
-            // End of list: every entry was lifted, so everything is linearized.
-            return Ok(());
-        };
-        let op = ops.get(e.op).copied();
-        let unknown = op.is_some_and(|o| o.ret.is_none());
-        if e.is_call {
-            let Some(op) = op else {
+        *budget -= 1;
+
+        let mut backtrack = false;
+        if scan {
+            // Phase 1: linearize one legal, minimal, read-only operation if there is one.
+            scan = false;
+            let mut cur = list.next(list.head);
+            let mut found: Option<(usize, usize, State)> = None;
+            while let Some(e) = list.entries.get(cur).copied() {
+                if !e.is_call {
+                    break;
+                }
+                if let Some(op) = ops.get(e.op).copied()
+                    && is_read_only(op)
+                    && let Some(next_state) = step(&state, op)
+                {
+                    found = Some((cur, e.op, next_state));
+                    break;
+                }
+                if *budget == 0 {
+                    return Err(inconclusive());
+                }
+                *budget -= 1;
+                cur = e.next;
+            }
+            match found {
+                Some((call, op_idx, next_state)) => {
+                    let mut lin = linearized.clone();
+                    set_bit(&mut lin, op_idx);
+                    if cache.insert((lin.clone(), next_state.clone())) {
+                        stack.push(Frame {
+                            call,
+                            prev_state: std::mem::replace(&mut state, next_state),
+                            forced: true,
+                        });
+                        linearized = lin;
+                        list.lift(call);
+                        deepest = deepest.max(stack.len());
+                        scan = true;
+                        continue;
+                    }
+                    // The greedy successor was already explored and failed.
+                    backtrack = true;
+                }
+                None => entry = list.next(list.head),
+            }
+        }
+
+        if !backtrack {
+            // Phase 2: the classic WGL step over state-changing operations.
+            let Some(e) = list.entries.get(entry).copied() else {
+                // End of list: every entry was lifted, so everything is linearized.
                 return Ok(());
             };
-            let mut advanced = false;
-            if let Some(next_state) = step(&state, op) {
-                let mut lin = linearized.clone();
-                set_bit(&mut lin, e.op);
-                if cache.insert((lin.clone(), next_state.clone())) {
-                    stack.push(Frame {
-                        call: entry,
-                        prev_state: std::mem::replace(&mut state, next_state),
+            let op = ops.get(e.op).copied();
+            if e.is_call {
+                let Some(op) = op else {
+                    return Ok(());
+                };
+                let mut advanced = false;
+                if !is_read_only(op)
+                    && let Some(next_state) = step(&state, op)
+                {
+                    let mut lin = linearized.clone();
+                    set_bit(&mut lin, e.op);
+                    if cache.insert((lin.clone(), next_state.clone())) {
+                        stack.push(Frame {
+                            call: entry,
+                            prev_state: std::mem::replace(&mut state, next_state),
+                            forced: false,
+                        });
+                        linearized = lin;
+                        list.lift(entry);
+                        deepest = deepest.max(stack.len());
+                        scan = true;
+                        advanced = true;
+                    }
+                }
+                if !advanced {
+                    entry = list.next(entry);
+                }
+            } else if op.is_some_and(|o| o.ret.is_none()) {
+                // A return at infinity: every operation with a definite outcome has been
+                // linearized (their returns all precede this entry), so the history is
+                // linearizable; the remaining unknown operations simply never took effect.
+                return Ok(());
+            } else {
+                // A definite return reached before its call was linearized.
+                backtrack = true;
+            }
+        }
+
+        if backtrack {
+            loop {
+                let Some(frame) = stack.pop() else {
+                    return Err(Violation {
+                        r: r.to_string(),
+                        detail: describe_failure(ops, deepest),
                     });
-                    linearized = lin;
-                    list.lift(entry);
-                    deepest = deepest.max(stack.len());
-                    entry = list.next(list.head);
-                    advanced = true;
+                };
+                let op_idx = list.entries.get(frame.call).map_or(NIL, |c| c.op);
+                state = frame.prev_state;
+                clear_bit(&mut linearized, op_idx);
+                list.unlift(frame.call);
+                if !frame.forced {
+                    // Continue the walk after the undone op; this configuration's read-only
+                    // operations were already exhausted when it was first reached.
+                    entry = list.next(frame.call);
+                    break;
                 }
             }
-            if !advanced {
-                entry = list.next(entry);
-            }
-        } else if unknown {
-            // A return at infinity: every operation with a definite outcome has been
-            // linearized (their returns all precede this entry), so the history is
-            // linearizable; the remaining unknown operations simply never took effect.
-            return Ok(());
-        } else {
-            // A definite return reached before its call was linearized: backtrack.
-            let Some(frame) = stack.pop() else {
-                return Err(Violation {
-                    r: r.to_string(),
-                    detail: describe_failure(ops, deepest),
-                });
-            };
-            let op_idx = list.entries.get(frame.call).map_or(NIL, |c| c.op);
-            state = frame.prev_state;
-            clear_bit(&mut linearized, op_idx);
-            list.unlift(frame.call);
-            entry = list.next(frame.call);
         }
     }
 }
@@ -737,14 +831,6 @@ mod tests {
 
     fn t(n: u8) -> [u8; 34] {
         [n; 34]
-    }
-
-    #[test]
-    fn version_unknown_bump_excludes_zero() {
-        let v = Version::Unknown(vec![3]).bumped();
-        assert!(!v.can_be(0));
-        assert!(!v.can_be(4));
-        assert!(v.can_be(3));
     }
 
     #[test]
