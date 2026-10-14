@@ -1,0 +1,10 @@
+{
+  "name": "far_apart",
+  "kind": "merge",
+  "description": "far apart edits on a longer file",
+  "base_hex": "310a320a330a340a350a360a370a380a390a31300a",
+  "ours_hex": "310a580a330a340a350a360a370a380a390a31300a",
+  "theirs_hex": "310a320a330a340a350a360a370a380a590a31300a",
+  "result_hex": "310a580a330a340a350a360a370a380a590a31300a",
+  "markers_hex": "310a580a330a340a350a360a370a380a590a31300a"
+}

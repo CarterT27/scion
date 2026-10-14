@@ -1,0 +1,47 @@
+{
+  "name": "reverse4",
+  "kind": "diff",
+  "description": "reverse four distinct lines (tie-breaks)",
+  "a_hex": "610a620a630a640a",
+  "b_hex": "640a630a620a610a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 3
+    },
+    {
+      "op": "equal",
+      "a": 3,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 1,
+      "len": 3
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        3
+      ],
+      "new": [
+        0,
+        0
+      ]
+    },
+    {
+      "base": [
+        4,
+        4
+      ],
+      "new": [
+        1,
+        4
+      ]
+    }
+  ]
+}

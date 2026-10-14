@@ -1,0 +1,26 @@
+{
+  "name": "empty_to_crlf",
+  "kind": "diff",
+  "description": "empty to CRLF content",
+  "a_hex": "",
+  "b_hex": "610d0a620d0a",
+  "edits": [
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        0
+      ],
+      "new": [
+        0,
+        2
+      ]
+    }
+  ]
+}

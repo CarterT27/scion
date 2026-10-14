@@ -1,0 +1,10 @@
+{
+  "name": "crlf_disjoint",
+  "kind": "merge",
+  "description": "disjoint edits in a CRLF file stay CRLF",
+  "base_hex": "610d0a620d0a630d0a640d0a650d0a",
+  "ours_hex": "410d0a620d0a630d0a640d0a650d0a",
+  "theirs_hex": "610d0a620d0a630d0a640d0a450d0a",
+  "result_hex": "410d0a620d0a630d0a640d0a450d0a",
+  "markers_hex": "410d0a620d0a630d0a640d0a450d0a"
+}

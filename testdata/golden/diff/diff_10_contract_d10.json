@@ -1,0 +1,37 @@
+{
+  "name": "contract_D10",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D10: CRLF lines differ from LF lines",
+  "a_hex": "6c310d0a6c320d0a",
+  "b_hex": "6c310a6c320d0a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 1,
+      "b": 1,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        1
+      ]
+    }
+  ]
+}

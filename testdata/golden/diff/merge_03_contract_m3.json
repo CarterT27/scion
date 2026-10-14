@@ -1,0 +1,10 @@
+{
+  "name": "contract_M3",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M3: identical change on both sides: applied once",
+  "base_hex": "610a620a630a",
+  "ours_hex": "610a580a630a",
+  "theirs_hex": "610a580a630a",
+  "result_hex": "610a580a630a",
+  "markers_hex": "610a580a630a"
+}

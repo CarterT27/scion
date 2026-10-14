@@ -1,0 +1,10 @@
+{
+  "name": "contract_M5",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M5: separated by one unchanged line: clean",
+  "base_hex": "310a320a330a340a350a",
+  "ours_hex": "310a580a330a340a350a",
+  "theirs_hex": "310a320a330a590a350a",
+  "result_hex": "310a580a330a590a350a",
+  "markers_hex": "310a580a330a590a350a"
+}

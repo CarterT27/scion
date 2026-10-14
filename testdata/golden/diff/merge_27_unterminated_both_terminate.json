@@ -1,0 +1,10 @@
+{
+  "name": "unterminated_both_terminate",
+  "kind": "merge",
+  "description": "both terminate the final line",
+  "base_hex": "610a62",
+  "ours_hex": "610a620a",
+  "theirs_hex": "610a620a",
+  "result_hex": "610a620a",
+  "markers_hex": "610a620a"
+}

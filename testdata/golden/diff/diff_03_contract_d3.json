@@ -1,0 +1,26 @@
+{
+  "name": "contract_D3",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D3: delete everything",
+  "a_hex": "780a",
+  "b_hex": "",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        0
+      ]
+    }
+  ]
+}

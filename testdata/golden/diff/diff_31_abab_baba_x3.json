@@ -1,0 +1,47 @@
+{
+  "name": "abab_baba_x3",
+  "kind": "diff",
+  "description": "three rotated pairs",
+  "a_hex": "610a620a610a620a610a620a",
+  "b_hex": "620a610a620a610a620a610a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 1,
+      "b": 0,
+      "len": 5
+    },
+    {
+      "op": "insert",
+      "b": 5,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        0
+      ]
+    },
+    {
+      "base": [
+        6,
+        6
+      ],
+      "new": [
+        5,
+        6
+      ]
+    }
+  ]
+}

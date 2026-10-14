@@ -1,0 +1,25 @@
+{
+  "name": "insert_same_point_diff",
+  "kind": "merge",
+  "description": "different insertions at the same point",
+  "base_hex": "610a620a",
+  "ours_hex": "610a580a620a",
+  "theirs_hex": "610a590a620a",
+  "conflicts": [
+    {
+      "base": [
+        1,
+        1
+      ],
+      "ours": [
+        1,
+        2
+      ],
+      "theirs": [
+        1,
+        2
+      ]
+    }
+  ],
+  "markers_hex": "610a3c3c3c3c3c3c3c206f7572730a580a7c7c7c7c7c7c7c20626173650a3d3d3d3d3d3d3d0a590a3e3e3e3e3e3e3e207468656972730a620a"
+}

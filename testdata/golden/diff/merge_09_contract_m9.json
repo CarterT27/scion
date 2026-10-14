@@ -1,0 +1,10 @@
+{
+  "name": "contract_M9",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M9: both sides add identical content to an empty base",
+  "base_hex": "",
+  "ours_hex": "780a",
+  "theirs_hex": "780a",
+  "result_hex": "780a",
+  "markers_hex": "780a"
+}

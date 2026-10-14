@@ -1,0 +1,32 @@
+{
+  "name": "prepend",
+  "kind": "diff",
+  "description": "prepend a line at the start",
+  "a_hex": "610a620a",
+  "b_hex": "7a0a610a620a",
+  "edits": [
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 1,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        0
+      ],
+      "new": [
+        0,
+        1
+      ]
+    }
+  ]
+}

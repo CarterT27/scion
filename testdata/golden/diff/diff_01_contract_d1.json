@@ -1,0 +1,9 @@
+{
+  "name": "contract_D1",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D1: empty inputs",
+  "a_hex": "",
+  "b_hex": "",
+  "edits": [],
+  "hunks": []
+}

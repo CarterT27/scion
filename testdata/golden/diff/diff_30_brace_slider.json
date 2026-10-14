@@ -1,0 +1,38 @@
+{
+  "name": "brace_slider",
+  "kind": "diff",
+  "description": "insert a block ending with a duplicated closing brace (slider ambiguity)",
+  "a_hex": "666e20612829207b0a7d0a0a666e20632829207b0a7d0a",
+  "b_hex": "666e20612829207b0a7d0a0a666e20622829207b0a7d0a0a666e20632829207b0a7d0a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 3
+    },
+    {
+      "op": "insert",
+      "b": 3,
+      "len": 3
+    },
+    {
+      "op": "equal",
+      "a": 3,
+      "b": 6,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        3,
+        3
+      ],
+      "new": [
+        3,
+        6
+      ]
+    }
+  ]
+}

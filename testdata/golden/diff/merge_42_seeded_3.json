@@ -1,0 +1,10 @@
+{
+  "name": "seeded_3",
+  "kind": "merge",
+  "description": "seeded SplitMix64 small-alphabet merge",
+  "base_hex": "",
+  "ours_hex": "",
+  "theirs_hex": "",
+  "result_hex": "",
+  "markers_hex": ""
+}

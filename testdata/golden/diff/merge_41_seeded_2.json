@@ -1,0 +1,25 @@
+{
+  "name": "seeded_2",
+  "kind": "merge",
+  "description": "seeded SplitMix64 small-alphabet merge",
+  "base_hex": "630a620a620a620a620a",
+  "ours_hex": "65630a640a620a620a620a620a",
+  "theirs_hex": "630a630a620a610a65",
+  "conflicts": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "ours": [
+        0,
+        2
+      ],
+      "theirs": [
+        0,
+        2
+      ]
+    }
+  ],
+  "markers_hex": "3c3c3c3c3c3c3c206f7572730a65630a640a7c7c7c7c7c7c7c20626173650a630a3d3d3d3d3d3d3d0a630a630a3e3e3e3e3e3e3e207468656972730a620a610a65"
+}

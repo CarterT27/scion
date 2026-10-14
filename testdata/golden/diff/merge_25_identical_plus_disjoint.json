@@ -1,0 +1,10 @@
+{
+  "name": "identical_plus_disjoint",
+  "kind": "merge",
+  "description": "an identical change plus disjoint one-sided changes",
+  "base_hex": "310a320a330a340a350a360a370a",
+  "ours_hex": "4f0a320a330a530a350a360a370a",
+  "theirs_hex": "310a320a330a530a350a360a540a",
+  "result_hex": "4f0a320a330a530a350a360a540a",
+  "markers_hex": "4f0a320a330a530a350a360a540a"
+}

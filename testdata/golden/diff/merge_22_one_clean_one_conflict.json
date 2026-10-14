@@ -1,0 +1,25 @@
+{
+  "name": "one_clean_one_conflict",
+  "kind": "merge",
+  "description": "a clean region and a conflicting region",
+  "base_hex": "310a320a330a340a350a360a",
+  "ours_hex": "580a320a330a340a4f0a360a",
+  "theirs_hex": "310a320a330a340a540a360a",
+  "conflicts": [
+    {
+      "base": [
+        4,
+        5
+      ],
+      "ours": [
+        4,
+        5
+      ],
+      "theirs": [
+        4,
+        5
+      ]
+    }
+  ],
+  "markers_hex": "580a320a330a340a3c3c3c3c3c3c3c206f7572730a4f0a7c7c7c7c7c7c7c20626173650a350a3d3d3d3d3d3d3d0a540a3e3e3e3e3e3e3e207468656972730a360a"
+}

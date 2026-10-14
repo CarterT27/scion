@@ -1,0 +1,25 @@
+{
+  "name": "unterminated_conflict",
+  "kind": "merge",
+  "description": "both change an unterminated final line differently",
+  "base_hex": "610a62",
+  "ours_hex": "610a42",
+  "theirs_hex": "610a620a",
+  "conflicts": [
+    {
+      "base": [
+        1,
+        2
+      ],
+      "ours": [
+        1,
+        2
+      ],
+      "theirs": [
+        1,
+        2
+      ]
+    }
+  ],
+  "markers_hex": "610a3c3c3c3c3c3c3c206f7572730a420a7c7c7c7c7c7c7c20626173650a620a3d3d3d3d3d3d3d0a620a3e3e3e3e3e3e3e207468656972730a"
+}

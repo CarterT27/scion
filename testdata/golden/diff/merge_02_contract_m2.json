@@ -1,0 +1,25 @@
+{
+  "name": "contract_M2",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M2: same line changed differently: conflict",
+  "base_hex": "610a620a630a",
+  "ours_hex": "610a580a630a",
+  "theirs_hex": "610a590a630a",
+  "conflicts": [
+    {
+      "base": [
+        1,
+        2
+      ],
+      "ours": [
+        1,
+        2
+      ],
+      "theirs": [
+        1,
+        2
+      ]
+    }
+  ],
+  "markers_hex": "610a3c3c3c3c3c3c3c206f7572730a580a7c7c7c7c7c7c7c20626173650a620a3d3d3d3d3d3d3d0a590a3e3e3e3e3e3e3e207468656972730a630a"
+}

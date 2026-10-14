@@ -1,0 +1,31 @@
+{
+  "name": "contract_D11",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D11: replacement: deletions listed before insertions",
+  "a_hex": "610a620a",
+  "b_hex": "630a640a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 2
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        2
+      ],
+      "new": [
+        0,
+        2
+      ]
+    }
+  ]
+}

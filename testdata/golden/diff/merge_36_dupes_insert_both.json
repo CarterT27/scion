@@ -1,0 +1,10 @@
+{
+  "name": "dupes_insert_both",
+  "kind": "merge",
+  "description": "repeated lines inserted on both sides",
+  "base_hex": "780a790a",
+  "ours_hex": "780a780a790a",
+  "theirs_hex": "780a790a790a",
+  "result_hex": "780a780a790a790a",
+  "markers_hex": "780a780a790a790a"
+}

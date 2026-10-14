@@ -1,0 +1,10 @@
+{
+  "name": "contract_M11",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M11: unterminated last line gains a terminator on one side",
+  "base_hex": "610a62",
+  "ours_hex": "610a620a",
+  "theirs_hex": "610a62",
+  "result_hex": "610a620a",
+  "markers_hex": "610a620a"
+}

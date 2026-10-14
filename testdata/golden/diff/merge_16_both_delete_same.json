@@ -1,0 +1,10 @@
+{
+  "name": "both_delete_same",
+  "kind": "merge",
+  "description": "both delete the same line: applied once",
+  "base_hex": "610a620a630a",
+  "ours_hex": "610a630a",
+  "theirs_hex": "610a630a",
+  "result_hex": "610a630a",
+  "markers_hex": "610a630a"
+}

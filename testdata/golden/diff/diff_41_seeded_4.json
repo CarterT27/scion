@@ -1,0 +1,59 @@
+{
+  "name": "seeded_4",
+  "kind": "diff",
+  "description": "seeded SplitMix64 small-alphabet case (tie-breaks)",
+  "a_hex": "620a630a620a610a630a630a620a620a",
+  "b_hex": "620a630a620a620a610a620a630a630a620a620a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 3
+    },
+    {
+      "op": "insert",
+      "b": 3,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 3,
+      "b": 4,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 5,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 4,
+      "b": 6,
+      "len": 4
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        3,
+        3
+      ],
+      "new": [
+        3,
+        4
+      ]
+    },
+    {
+      "base": [
+        4,
+        4
+      ],
+      "new": [
+        5,
+        6
+      ]
+    }
+  ]
+}

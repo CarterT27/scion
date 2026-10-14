@@ -1,0 +1,31 @@
+{
+  "name": "unterminated_both",
+  "kind": "diff",
+  "description": "two unterminated single lines",
+  "a_hex": "78",
+  "b_hex": "79",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        1
+      ],
+      "new": [
+        0,
+        1
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "disjoint_long",
+  "kind": "diff",
+  "description": "completely different texts of different lengths",
+  "a_hex": "610a620a630a640a",
+  "b_hex": "770a780a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 4
+    },
+    {
+      "op": "insert",
+      "b": 0,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        4
+      ],
+      "new": [
+        0,
+        2
+      ]
+    }
+  ]
+}

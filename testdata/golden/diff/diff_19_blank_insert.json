@@ -1,0 +1,38 @@
+{
+  "name": "blank_insert",
+  "kind": "diff",
+  "description": "insert a blank line among blank lines: goes at the end of the run",
+  "a_hex": "780a0a0a790a",
+  "b_hex": "780a0a0a0a790a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 3
+    },
+    {
+      "op": "insert",
+      "b": 3,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 3,
+      "b": 4,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        3,
+        3
+      ],
+      "new": [
+        3,
+        4
+      ]
+    }
+  ]
+}

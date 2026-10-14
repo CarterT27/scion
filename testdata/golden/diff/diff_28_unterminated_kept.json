@@ -1,0 +1,38 @@
+{
+  "name": "unterminated_kept",
+  "kind": "diff",
+  "description": "delete a middle line, unterminated last line kept",
+  "a_hex": "610a620a63",
+  "b_hex": "610a63",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "delete",
+      "a": 1,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 2,
+      "b": 1,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        1,
+        2
+      ],
+      "new": [
+        1,
+        1
+      ]
+    }
+  ]
+}

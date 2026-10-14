@@ -1,0 +1,32 @@
+{
+  "name": "contract_D6",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D6: repeated lines: the LAST copy is deleted",
+  "a_hex": "610a610a610a",
+  "b_hex": "610a610a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 2
+    },
+    {
+      "op": "delete",
+      "a": 2,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        2,
+        3
+      ],
+      "new": [
+        2,
+        2
+      ]
+    }
+  ]
+}

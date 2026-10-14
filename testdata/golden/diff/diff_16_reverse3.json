@@ -1,0 +1,47 @@
+{
+  "name": "reverse3",
+  "kind": "diff",
+  "description": "reverse three distinct lines (tie-breaks)",
+  "a_hex": "610a620a630a",
+  "b_hex": "630a620a610a",
+  "edits": [
+    {
+      "op": "delete",
+      "a": 0,
+      "len": 2
+    },
+    {
+      "op": "equal",
+      "a": 2,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "insert",
+      "b": 1,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        0,
+        2
+      ],
+      "new": [
+        0,
+        0
+      ]
+    },
+    {
+      "base": [
+        3,
+        3
+      ],
+      "new": [
+        1,
+        3
+      ]
+    }
+  ]
+}

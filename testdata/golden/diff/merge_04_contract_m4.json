@@ -1,0 +1,25 @@
+{
+  "name": "contract_M4",
+  "kind": "merge",
+  "description": "line-diff3-v1 10.3 M4: adjacent changed lines (zero unchanged lines between): conflict",
+  "base_hex": "610a620a630a640a",
+  "ours_hex": "610a420a630a640a",
+  "theirs_hex": "610a620a430a640a",
+  "conflicts": [
+    {
+      "base": [
+        1,
+        3
+      ],
+      "ours": [
+        1,
+        3
+      ],
+      "theirs": [
+        1,
+        3
+      ]
+    }
+  ],
+  "markers_hex": "610a3c3c3c3c3c3c3c206f7572730a420a630a7c7c7c7c7c7c7c20626173650a620a630a3d3d3d3d3d3d3d0a620a430a3e3e3e3e3e3e3e207468656972730a640a"
+}

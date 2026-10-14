@@ -1,0 +1,32 @@
+{
+  "name": "ababa_aba",
+  "kind": "diff",
+  "description": "repeated pair: which copies are deleted",
+  "a_hex": "610a620a610a620a610a",
+  "b_hex": "610a620a610a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 3
+    },
+    {
+      "op": "delete",
+      "a": 3,
+      "len": 2
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        3,
+        5
+      ],
+      "new": [
+        3,
+        3
+      ]
+    }
+  ]
+}

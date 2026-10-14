@@ -1,0 +1,38 @@
+{
+  "name": "contract_D5",
+  "kind": "diff",
+  "description": "line-diff3-v1 10.2 D5: delete a middle line",
+  "a_hex": "410a420a430a",
+  "b_hex": "410a430a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "delete",
+      "a": 1,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 2,
+      "b": 1,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        1,
+        2
+      ],
+      "new": [
+        1,
+        1
+      ]
+    }
+  ]
+}

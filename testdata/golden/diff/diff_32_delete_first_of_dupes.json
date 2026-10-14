@@ -1,0 +1,38 @@
+{
+  "name": "delete_first_of_dupes",
+  "kind": "diff",
+  "description": "delete the first line of a duplicated head",
+  "a_hex": "610a610a620a",
+  "b_hex": "610a620a",
+  "edits": [
+    {
+      "op": "equal",
+      "a": 0,
+      "b": 0,
+      "len": 1
+    },
+    {
+      "op": "delete",
+      "a": 1,
+      "len": 1
+    },
+    {
+      "op": "equal",
+      "a": 2,
+      "b": 1,
+      "len": 1
+    }
+  ],
+  "hunks": [
+    {
+      "base": [
+        1,
+        2
+      ],
+      "new": [
+        1,
+        1
+      ]
+    }
+  ]
+}

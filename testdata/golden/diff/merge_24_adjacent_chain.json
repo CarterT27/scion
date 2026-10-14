@@ -1,0 +1,25 @@
+{
+  "name": "adjacent_chain",
+  "kind": "merge",
+  "description": "o, t, o change consecutive lines: one region",
+  "base_hex": "310a320a330a340a350a",
+  "ours_hex": "310a410a330a430a350a",
+  "theirs_hex": "310a320a420a340a350a",
+  "conflicts": [
+    {
+      "base": [
+        1,
+        4
+      ],
+      "ours": [
+        1,
+        4
+      ],
+      "theirs": [
+        1,
+        4
+      ]
+    }
+  ],
+  "markers_hex": "310a3c3c3c3c3c3c3c206f7572730a410a330a430a7c7c7c7c7c7c7c20626173650a320a330a340a3d3d3d3d3d3d3d0a320a420a340a3e3e3e3e3e3e3e207468656972730a350a"
+}
