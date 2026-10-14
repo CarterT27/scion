@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use parking_lot::Mutex;
 use scion_core::{
-    ChangeId, ConflictReport, ErrorCode, ErrorPayload, FaultRegistry, ManualClock, Mode, ObjectId,
-    Principal, Result, ScionError, subcode,
+    ChangeId, ErrorCode, ErrorPayload, FaultRegistry, ManualClock, Mode, ObjectId, Principal,
+    Result, ScionError, subcode,
 };
 use scion_history::{
     AllowAll, CreateRequest, History, HistoryConfig, LandAttemptOutcome, LandAuthorizer,
@@ -403,9 +403,8 @@ pub async fn assert_fsck_clean(h: &History) {
 // ---------------------------------------------------------------------------------------------
 
 pub fn merge_conflict(msg: String) -> ScionError {
-    ScionError::new(ErrorCode::MergeConflict, msg).with_payload(ErrorPayload::MergeConflict(
-        Box::new(ConflictReport::default()),
-    ))
+    ScionError::new(ErrorCode::MergeConflict, msg)
+        .with_payload(ErrorPayload::MergeConflict(Box::default()))
 }
 
 /// Re-applies `C.delta` onto `onto` via `create_internal` (see the module docs).

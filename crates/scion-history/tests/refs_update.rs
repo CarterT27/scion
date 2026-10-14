@@ -1,5 +1,6 @@
 //! SPEC 19.5 (library level): refs, UpdateRef, the ref log and ref administration
 //! (SPEC 4.3.6, 4.3.7, 5.3 step 3, 8.5; PLAN 6.7, 6.8).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod land_support;
 

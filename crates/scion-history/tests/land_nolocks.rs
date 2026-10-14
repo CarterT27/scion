@@ -1,6 +1,7 @@
 //! SPEC 19.5 "No locks": the land path (concurrent lands, retries, idempotent retries, update_ref)
 //! performs no lease call (`Counters::lease_calls` delta 0) and records no span with target
 //! `scion::lock`. A positive control proves the span detector sees lease acquisitions.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod land_support;
 

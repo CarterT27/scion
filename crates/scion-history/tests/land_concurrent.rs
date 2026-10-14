@@ -2,6 +2,7 @@
 //! changes all land, every delta appears exactly once, each change id is landed exactly once,
 //! and the land path takes no lease (N = 50 by default; N = 100 and 1000 in the ignored
 //! `full_` variant, SCION_FULL).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod land_support;
 

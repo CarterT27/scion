@@ -1,4 +1,5 @@
 //! SPEC 19.5 (library level, fake Rebaser): the SPEC 8.4 / 18.4 Land state machine.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod land_support;
 
