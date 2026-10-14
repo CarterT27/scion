@@ -33,6 +33,7 @@ humantime = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
+scion-auth = { path = ".", features = ["test-hooks"] }
 scion-testkit = { workspace = true }
 wiremock = { workspace = true }
 tempfile = { workspace = true }

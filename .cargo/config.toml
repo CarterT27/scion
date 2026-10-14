@@ -6,3 +6,8 @@ retry = 5
 
 [term]
 color = "auto"
+
+[build]
+# Orchestration (amendment O-4): parallel worktrees share one target dir.
+target-dir = "/Users/cartertran/Development/scion/target"
+incremental = false

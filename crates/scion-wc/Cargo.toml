@@ -43,6 +43,7 @@ hex = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
+scion-wc = { path = ".", features = ["testing"] }
 scion-testkit = { workspace = true }
 scion-server = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
