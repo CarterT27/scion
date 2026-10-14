@@ -68,7 +68,7 @@ fn missing_parent(i: usize) -> ScionError {
     )
 }
 
-/// SPEC 8.1 step 8: one Meta field against `max_message_bytes`.
+/// SPEC 8.1 step 8: the Meta message against `max_message_bytes` (TOO_LARGE).
 fn check_meta_len(limit: u64, len: usize) -> Result<()> {
     let actual = len as u64;
     if actual > limit {
@@ -287,8 +287,6 @@ impl History {
             MetaSource::New(fields) => {
                 let limit = limits.max_message_bytes;
                 check_meta_len(limit, fields.message.len())?;
-                check_meta_len(limit, fields.author.len())?;
-                check_meta_len(limit, fields.committer.as_ref().map_or(0, Vec::len))?;
                 let m = build_meta(fields, who);
                 let bytes = m.encode();
                 // Rejects e.g. unknown critical (odd) extension tags before anything is stored.
