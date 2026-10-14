@@ -470,3 +470,98 @@ async fn fixture_file_directory_transitions_modes_and_nested_gitlinks() {
     assert!(files.keys().all(|p| !p.starts_with(b"only")));
     assert!(files.keys().all(|p| !p.starts_with(b"bin")));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn target_already_containing_the_tip_is_left_unchanged() {
+    // Importing an older git ref into a Scion ref that already descends from it is not a
+    // rewind: nothing is imported and the ref keeps its target and version.
+    let s = server().await;
+    let c = importer_client(&s).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = unpack("synthetic-edge", tmp.path());
+    let r1 = scion_import::import(&c, &options(&repo, "main", "imp/ahead", true))
+        .await
+        .unwrap();
+    let older = git_commits(&repo, "main~3").unwrap();
+    let r2 = scion_import::import(&c, &options(&repo, "main~3", "imp/ahead", true))
+        .await
+        .unwrap();
+    assert_eq!(r2.imported, 0);
+    assert_eq!(r2.skipped_existing, older.len() as u64);
+    assert_eq!(
+        r2.final_target,
+        Some(mapped(&c, &older.last().unwrap().id).await)
+    );
+    assert_eq!(r2.ref_version, r1.ref_version);
+    let (target, version) = resolve_ref(&c, "imp/ahead").await.unwrap();
+    assert_eq!(Some(target), r1.final_target);
+    assert_eq!(version, r1.ref_version);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repeated_git_parent_imports_once() {
+    // Old git histories contain commits listing the same parent twice; changeset parents
+    // are unique (SPEC 4.3.4), so the repeat is dropped and the import still succeeds.
+    if !git_available() {
+        println!("SKIP: git CLI absent");
+        return;
+    }
+    let fx = GitFixture::build(&[GitOp::Commit {
+        branch: "main".into(),
+        files: vec![("a.txt".into(), 0o100644, b"a\n".to_vec())],
+        deletes: vec![],
+        gitlinks: vec![],
+        message: "base".into(),
+    }])
+    .unwrap();
+    let gd = fx.path().join(".git");
+    let out = |args: &[&str]| String::from_utf8(git_out(&gd, args)).unwrap();
+    let base = out(&["rev-parse", "main"]).trim().to_owned();
+    let tree = out(&["rev-parse", "main^{tree}"]).trim().to_owned();
+    let raw = format!(
+        "tree {tree}\nparent {base}\nparent {base}\n\
+         author A U Thor <a@example.com> 1700000000 +0130\n\
+         committer C O Mitter <c@example.com> 1700000100 -0800\n\ndup parents\n"
+    );
+    let mut child = git(&gd)
+        .args([
+            "hash-object",
+            "-t",
+            "commit",
+            "-w",
+            "--literally",
+            "--stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(raw.as_bytes())
+            .unwrap();
+    }
+    let o = child.wait_with_output().unwrap();
+    assert!(o.status.success());
+    let dup = String::from_utf8(o.stdout).unwrap().trim().to_owned();
+    git_out(&gd, &["update-ref", "refs/heads/dup", &dup]);
+
+    let s = server().await;
+    let c = importer_client(&s).await;
+    let rep = scion_import::import(&c, &options(&gd, "dup", "imp/dup", false))
+        .await
+        .unwrap();
+    assert_eq!(rep.imported, 2);
+    let reader = ScionReader::new(&c);
+    let cs = reader.changeset(&mapped(&c, &dup).await).await.unwrap();
+    assert_eq!(cs.parents, vec![mapped(&c, &base).await]);
+    assert!(cs.delta.is_empty());
+    let commits = git_commits(&gd, "dup").unwrap();
+    assert_eq!(commits.last().unwrap().parents, vec![base.clone(), base]);
+    let f = check_fidelity(&c, &gd, "dup").await.unwrap();
+    assert!(f.mismatches.is_empty(), "{:?}", f.mismatches);
+}

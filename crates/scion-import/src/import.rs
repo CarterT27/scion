@@ -81,8 +81,10 @@ pub struct ImportReport {
 /// After the walk the target ref is created (CreateRef) when absent, or fast-forwarded
 /// (UpdateRef with `expected_version`). A ref still at the repository's bootstrap root
 /// changeset (implementation-defined 6.5) is replaced by a forced update, because imported
-/// histories start at their own parentless changesets; this needs `force` on the ref. Any
-/// other non-fast-forward is NOT_FAST_FORWARD. RESOURCE_EXHAUSTED answers (rate limiting)
+/// histories start at their own parentless changesets; this needs `force` on the ref. A ref
+/// that already descends from the imported tip is left unchanged. Any other
+/// non-fast-forward is NOT_FAST_FORWARD. A git commit listing the same parent twice imports
+/// with that parent once (changeset parents are unique, SPEC 4.3.4). RESOURCE_EXHAUSTED answers (rate limiting)
 /// are retried with back-off.
 pub async fn import(client: &ScionClient, opts: &ImportOptions) -> Result<ImportReport> {
     let git = GitRepo::open(&opts.git_dir)?;
@@ -268,16 +270,7 @@ impl Importer<'_> {
         if !links.is_empty() {
             extensions.insert(META_EXT_SKIPPED_GITLINKS, encode_skipped_gitlinks(&links))?;
         }
-        let parents = c
-            .parents
-            .iter()
-            .map(|p| {
-                self.mapped
-                    .get(p)
-                    .copied()
-                    .ok_or_else(|| internal(format!("parent {p} is not imported")))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let parents = self.mapped_parents(c)?;
         let parts = CreateChangesetParts {
             parents,
             delta,
@@ -296,6 +289,27 @@ impl Importer<'_> {
         self.rpc
             .create_changeset(v1::CreateChangesetRequest::from(&parts))
             .await
+    }
+
+    /// The mapped Scion parents of `c`, in git order. Git tolerates a commit listing the same
+    /// parent twice (old histories contain such commits, e.g. written by early `git
+    /// commit-tree`), but changeset parents are unique (SPEC 4.3.4): repeats are dropped,
+    /// keeping the first occurrence, and the commit graph is otherwise unchanged.
+    fn mapped_parents(&self, c: &CommitInfo) -> Result<Vec<ObjectId>> {
+        let mut parents: Vec<ObjectId> = Vec::with_capacity(c.parents.len());
+        for p in &c.parents {
+            let id = self
+                .mapped
+                .get(p)
+                .copied()
+                .ok_or_else(|| internal(format!("parent {p} is not imported")))?;
+            if parents.contains(&id) {
+                tracing::warn!(commit = %c.id, parent = %p, "scion-import: duplicate git parent dropped");
+            } else {
+                parents.push(id);
+            }
+        }
+        Ok(parents)
     }
 
     /// The Scion id and size of git blob `oid`; content of blobs not known to be on the
@@ -401,6 +415,14 @@ impl Importer<'_> {
         }
         let force = if self.rpc.is_ancestor(&cur, &tip).await? {
             false
+        } else if self.rpc.is_ancestor(&tip, &cur).await? {
+            // The ref already contains the imported tip (native work landed on top of an
+            // earlier import): there is nothing to fast-forward, and rewinding is refused.
+            tracing::info!(
+                target_ref = name,
+                "scion-import: target already contains the imported tip; ref unchanged"
+            );
+            return Ok(version);
         } else if self.is_bootstrap_root(&cur).await? {
             true
         } else {

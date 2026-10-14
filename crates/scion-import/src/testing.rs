@@ -543,8 +543,14 @@ pub async fn check_fidelity_commits(
             other => errs.push(format!("git_mapping c: key gives {other:?}")),
         }
         let cs = reader.changeset(&cs_id).await?;
-        let want_parents: Vec<Option<ObjectId>> =
-            c.parents.iter().map(|p| mapped.get(p).copied()).collect();
+        // Repeated git parents import once (changeset parents are unique, SPEC 4.3.4).
+        let mut want_parents: Vec<Option<ObjectId>> = Vec::with_capacity(c.parents.len());
+        for p in &c.parents {
+            let m = mapped.get(p).copied();
+            if m.is_none() || !want_parents.contains(&m) {
+                want_parents.push(m);
+            }
+        }
         let got_parents: Vec<Option<ObjectId>> = cs.parents.iter().map(|p| Some(*p)).collect();
         if want_parents != got_parents {
             errs.push(format!(
