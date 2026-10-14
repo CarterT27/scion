@@ -1,0 +1,7 @@
+{
+  "name": "changeset_two_parents_mixed",
+  "kind": "changeset",
+  "description": "Merge changeset: parents [changeset_single_parent id, changeset_root id], root_tree = tree_all_modes id, meta = meta_with_committer id, change_id bytes a0 a1 .. af, delta = FileDiff(tree_single_file, tree_all_modes) = [Put \"README\" mode 1 blob(\"hello\\n\") 6, Put \"bin/inner.txt\" mode 1 blob(\"inner\\n\") 6, Delete \"hello.txt\", Put \"link\" mode 3 blob(\"../target\") 9, Put \"run.sh\" mode 2 blob(\"#!/bin/sh\\necho hi\\n\") 18], no extensions.",
+  "hex": "01020103bd8a110e9e5b4fa0d3ba1e19742df87d7f576d7ec55555b5bbfbb83dab14107c01032597b62a1634a5e5c5bd505e47cf5fb15939cde2a52c3d692c7bdf1c92391c330102d35dda3d49d9689215ce3226d7374d9aee693461fcc9cdcd84962e5b7b5cdeed0104efb363c31827b2bc85039f93fdca1e4dc49b3d54b67889e31c0e818b56ef6ca2a0a1a2a3a4a5a6a7a8a9aaabacadaeaf0506524541444d45010101018e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a99060d62696e2f696e6e65722e747874010101015bbc85533a78b537b21a51204a0fc3c8c1b0743953b42a883b06ad7a4da24b8d060968656c6c6f2e74787402046c696e6b01030101cf0ca311c491eb27b524863b6bf62a5e736a4f98ffec6ab8934bf6d272e4a882090672756e2e7368010201014b694fa6468140836e2f43625aca1150ec72032dc23a12e13416ca026c647ef31200",
+  "id_text": "c1318ae9ff33392239f2ab33e84207a59358f7712eca88ae153119e6381b3906ee"
+}

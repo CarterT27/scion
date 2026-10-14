@@ -1,0 +1,7 @@
+{
+  "name": "tree_subdir",
+  "kind": "tree",
+  "description": "Tree with one entry: \"inner.txt\" mode 1 (File), id = blob id of \"inner\\n\", size 6. Used as the \"bin\" subtree of tree_all_modes.",
+  "hex": "010109696e6e65722e7478740101015bbc85533a78b537b21a51204a0fc3c8c1b0743953b42a883b06ad7a4da24b8d0600",
+  "id_text": "t1c0db7c40176f940b10973f1eadbabaca8fb6e94c38712797b6fa5d0222cc685d"
+}

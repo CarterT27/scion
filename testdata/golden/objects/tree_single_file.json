@@ -1,0 +1,7 @@
+{
+  "name": "tree_single_file",
+  "kind": "tree",
+  "description": "Tree with one entry: \"hello.txt\" mode 1 (File), id = blob id of \"hello\\n\", size 6. No extensions.",
+  "hex": "01010968656c6c6f2e7478740101018e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a990600",
+  "id_text": "t1f6995eab0ccb0c1071bc26572ecff6646f144e57f4eebe89acf76b840db9d424"
+}

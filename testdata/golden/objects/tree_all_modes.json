@@ -1,0 +1,7 @@
+{
+  "name": "tree_all_modes",
+  "kind": "tree",
+  "description": "Tree with all four modes, bytewise sorted: \"README\" mode 1 blob(\"hello\\n\") size 6; \"bin\" mode 4 id = tree_subdir id size 0; \"link\" mode 3 blob(\"../target\") size 9; \"run.sh\" mode 2 blob(\"#!/bin/sh\\necho hi\\n\") size 18.",
+  "hex": "010406524541444d450101018e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a99060362696e040102c0db7c40176f940b10973f1eadbabaca8fb6e94c38712797b6fa5d0222cc685d00046c696e6b030101cf0ca311c491eb27b524863b6bf62a5e736a4f98ffec6ab8934bf6d272e4a882090672756e2e73680201014b694fa6468140836e2f43625aca1150ec72032dc23a12e13416ca026c647ef31200",
+  "id_text": "t1d35dda3d49d9689215ce3226d7374d9aee693461fcc9cdcd84962e5b7b5cdeed"
+}

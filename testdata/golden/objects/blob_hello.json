@@ -1,0 +1,7 @@
+{
+  "name": "blob_hello",
+  "kind": "blob",
+  "description": "Blob with content \"hello\\n\" (6 bytes); hex is the raw content, id is BLAKE3(raw) with kind Blob.",
+  "hex": "68656c6c6f0a",
+  "id_text": "b18e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a99"
+}

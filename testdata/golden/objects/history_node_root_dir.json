@@ -1,0 +1,7 @@
+{
+  "name": "history_node_root_dir",
+  "kind": "history_node",
+  "description": "HistoryNode Dir for the root path of changeset_root: kind 2, content = tree_empty id, changeset = changeset_root id, no parents, no children, no extensions.",
+  "hex": "01020102396eab8ebe8b2247fed631cee54835e0c8678ab1cc0d5b8a73f9f86e813187d501032597b62a1634a5e5c5bd505e47cf5fb15939cde2a52c3d692c7bdf1c92391c33000000",
+  "id_text": "x19bc2245e987eaa67f553d9dfba514a9e342bc376523a8946d7808e4ac1a850dc"
+}
