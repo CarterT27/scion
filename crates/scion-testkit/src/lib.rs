@@ -18,6 +18,8 @@ pub use corpus::{CorpusSpec, GenCommit, GenRepo, generate};
 pub use edge::edge_cases;
 pub use encode::encode_tree;
 pub use fake_github::FakeGitHub;
-pub use fake_upstream::{FakeUpstream, FakeUpstreamOpts, RecordedRequest};
+pub use fake_upstream::{
+    FakeUpstream, FakeUpstreamOpts, RecordedRequest, methods as upstream_methods,
+};
 pub use shared::{SharedSubtreeRepo, shared_subtree_repo};
 pub use tls::TestTls;

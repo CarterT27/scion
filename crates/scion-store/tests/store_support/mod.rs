@@ -196,6 +196,10 @@ impl tracing::Subscriber for Capture {
 /// Run `fut` on a current-thread runtime with `cap` as the default subscriber.
 pub fn with_capture<F: std::future::Future>(cap: &Capture, fut: F) -> F::Output {
     tracing::subscriber::with_default(cap.clone(), || {
+        // Callsites first hit by a parallel test while no dispatcher was registered may have a
+        // cached `Interest::never()`; force a rebuild now that `cap` is registered so every event
+        // emitted on this thread reaches it.
+        tracing::callsite::rebuild_interest_cache();
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

@@ -171,7 +171,9 @@ when `ours == theirs` the result is `ours`; merging is symmetric up to swapping 
 `NeedContent`, and after the caller ruled out `redacted` (any needed side's content redacted) and
 `binary` (any side contains `0x00` within its first 8000 bytes, or is larger than
 `limits.merge_max_text_bytes`). The merged mode uses the first three rows applied to modes
-(`merge_mode`). A `Conflict` result becomes a `content` conflict carrying the hunks. Conflict
+(`merge_mode`). Row 6 ("any side is a symlink and sides differ") counts all three of `base`,
+`ours` and `theirs` as sides: a symlink `base` with two different regular-file sides is a
+`Conflict(Symlink)`, never a content merge (amendment W1-1). A `Conflict` result becomes a `content` conflict carrying the hunks. Conflict
 markers are NEVER written into server-side objects.
 
 ## 8. Client-side marker rendering (SPEC 11.7)

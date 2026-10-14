@@ -34,12 +34,14 @@ pub mod raw;
 mod status;
 mod trailers;
 
-pub use client::{BearerInterceptor, EpochCapture, ScionClient, Transport};
+pub use client::{
+    BearerInterceptor, CaptureBody, CaptureFuture, EpochCapture, ScionClient, Transport,
+};
 pub use endpoint::{Endpoint, TlsOptions};
 pub use status::{error_from_status, status_from_error, tonic_code};
 pub use trailers::{
-    EpochSource, EpochTrailerLayer, Epochs, TRAILER_POLICY_EPOCH, TRAILER_REDACTION_EPOCH,
-    TRAILER_TIER, read_epochs, write_epochs,
+    EpochBody, EpochFuture, EpochSource, EpochTrailerLayer, EpochTrailerService, Epochs,
+    TRAILER_POLICY_EPOCH, TRAILER_REDACTION_EPOCH, TRAILER_TIER, read_epochs, write_epochs,
 };
 
 #[cfg(test)]
