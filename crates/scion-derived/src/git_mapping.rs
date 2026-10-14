@@ -14,7 +14,7 @@ use crate::engine::DerivedEngine;
 use crate::types::{DeriveCtx, DeriveMode, DerivedType, EagerType};
 use async_trait::async_trait;
 use bytes::Bytes;
-use scion_core::{ErrorCode, ObjectId, Result, ScionError, subcode};
+use scion_core::{ErrorCode, Kind, ObjectId, Result, ScionError, subcode};
 use scion_history::EagerInput;
 use scion_object::META_EXT_GIT_COMMIT;
 use scion_store::{DerivedKey, DerivedRow};
@@ -122,27 +122,44 @@ fn normalize_sha(sha_hex: &str) -> Result<String> {
 }
 
 /// The changeset imported from git commit `sha_hex` (40 hex, case-insensitive; SPEC 14, 11.8
-/// `git:<sha>` revisions). `None` when no mapping is stored.
+/// `git:<sha>` revisions). `None` when no mapping is stored; INTEGRITY when the stored value is
+/// not a changeset id.
 pub async fn changeset_for_git(e: &DerivedEngine, sha_hex: &str) -> Result<Option<ObjectId>> {
     let sha = normalize_sha(sha_hex)?;
     match e.get_stored(NAME, Some(VERSION), &git_key(&sha)).await? {
-        Some(v) => Ok(Some(ObjectId::from_bytes(&v)?)),
+        Some(v) => {
+            let id = ObjectId::from_bytes(&v)?;
+            if id.kind() != Kind::Changeset {
+                return Err(ScionError::new(
+                    ErrorCode::Integrity,
+                    format!("git_mapping value for {sha} is not a changeset id"),
+                ));
+            }
+            Ok(Some(id))
+        }
         None => Ok(None),
     }
 }
 
 /// The git commit (40 lowercase hex) a changeset was imported from (SPEC 14). `None` when no
-/// mapping is stored.
+/// mapping is stored; INTEGRITY when the stored value is not 40 lowercase hex digits.
 pub async fn git_for_changeset(e: &DerivedEngine, cs: &ObjectId) -> Result<Option<String>> {
     match e
         .get_stored(NAME, Some(VERSION), &changeset_key(cs))
         .await?
     {
         Some(v) => {
-            let s = String::from_utf8(v.to_vec()).map_err(|_| {
-                ScionError::new(ErrorCode::Integrity, "git_mapping value is not ASCII hex")
-            })?;
-            Ok(Some(s))
+            if v.len() != 2 * GIT_ID_LEN
+                || !v
+                    .iter()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+            {
+                return Err(ScionError::new(
+                    ErrorCode::Integrity,
+                    format!("git_mapping value for {cs} is not 40 lowercase hex digits"),
+                ));
+            }
+            Ok(Some(v.iter().map(|&b| char::from(b)).collect()))
         }
         None => Ok(None),
     }

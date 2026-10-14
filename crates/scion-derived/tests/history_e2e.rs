@@ -247,3 +247,221 @@ async fn fsck_reports_a_missing_history_row() {
         "{v:?}"
     );
 }
+
+/// The node set of `path` at `cs` walked through node parents, as changeset indices of `ids`,
+/// compared with the reference model built from the same trees.
+async fn assert_matches_model(s: &Stack, ids: &[ObjectId], trees: &[(Vec<usize>, MTree)]) {
+    let mut m = scion_refmodel::MRepo::new();
+    for (parents, t) in trees {
+        m.commit(parents, t.clone());
+    }
+    let mut cache = NodeCache::default();
+    for (c, (_, t)) in trees.iter().enumerate() {
+        let mut paths = all_paths(t);
+        for (_, other) in trees {
+            paths.extend(all_paths(other));
+        }
+        for path in paths {
+            let rp = scion_object::RepoPath::parse(&path).unwrap();
+            let node = history::node_for_path(s.engine.ctx(), &ids[c], &rp)
+                .await
+                .unwrap();
+            for fp in [false, true] {
+                let want: std::collections::BTreeSet<usize> =
+                    m.log_path(c, &path, fp).into_iter().collect();
+                let got: std::collections::BTreeSet<usize> = match &node {
+                    Some((id, _)) => cache
+                        .reachable_changesets(s.engine.ctx(), *id, fp)
+                        .await
+                        .into_iter()
+                        .map(|cs| ids.iter().position(|x| *x == cs).unwrap())
+                        .collect(),
+                    None => Default::default(),
+                };
+                assert_eq!(
+                    got,
+                    want,
+                    "commit {c}, path {:?}, first_parent_only {fp}",
+                    String::from_utf8_lossy(&path)
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn emptying_the_tree_and_re_adding_a_path() {
+    // c2 deletes every file: its root tree is the empty tree, which History passes in
+    // `new_trees` at the root path. c3 re-adds c1's content: the path is absent in c3's only
+    // parent, so the new node has no parents (the deleted interval breaks the chain).
+    let s = stack();
+    let root = s.h.bootstrap().await.unwrap();
+    let t0 = MTree::new();
+    let t1 = tree(&[("a/b/f", "one\n"), ("g", "two\n")]);
+    let c1 = s
+        .commit_tree(vec![root], &t0, &t1, 1, false, Extensions::new())
+        .await
+        .unwrap();
+    let c2 = s
+        .commit_tree(vec![c1], &t1, &t0, 2, false, Extensions::new())
+        .await
+        .unwrap();
+    let r2 = history::root_node(s.engine.ctx(), &c2).await.unwrap();
+    let n2 = history::get_node(s.engine.ctx(), &r2).await.unwrap();
+    assert_eq!(n2.kind, NodeKind::Dir);
+    assert_eq!(n2.content, empty_tree());
+    assert_eq!(n2.changeset, c2);
+    assert!(n2.children.is_empty());
+    assert_eq!(n2.parents, vec![node_id(&s, &c1, "").await]);
+    for gone in ["a", "a/b", "a/b/f", "g"] {
+        assert!(
+            history::node_for_path(s.engine.ctx(), &c2, &p(gone))
+                .await
+                .unwrap()
+                .is_none(),
+            "{gone}"
+        );
+    }
+    let t3 = tree(&[("a/b/f", "one\n")]);
+    let c3 = s
+        .commit_tree(vec![c2], &t0, &t3, 3, false, Extensions::new())
+        .await
+        .unwrap();
+    let (_, f3) = history::node_for_path(s.engine.ctx(), &c3, &p("a/b/f"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(f3.changeset, c3);
+    assert!(f3.parents.is_empty());
+    assert_ne!(
+        node_id(&s, &c3, "a/b/f").await,
+        node_id(&s, &c1, "a/b/f").await
+    );
+    // Same content as c1's tree at "a": a different node (created by c3), not c1's node.
+    let (_, a3) = history::node_for_path(s.engine.ctx(), &c3, &p("a"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(a3.changeset, c3);
+    assert_matches_model(
+        &s,
+        &[root, c1, c2, c3],
+        &[
+            (vec![], t0.clone()),
+            (vec![0], t1.clone()),
+            (vec![1], t0.clone()),
+            (vec![2], t3.clone()),
+        ],
+    )
+    .await;
+    assert!(s.fsck().await.is_empty());
+}
+
+#[tokio::test]
+async fn reverting_to_an_older_version_creates_a_new_node() {
+    // Reuse compares with parents[0] only: restoring a grandparent's content is a change.
+    let s = stack();
+    let root = s.h.bootstrap().await.unwrap();
+    let t0 = MTree::new();
+    let t1 = tree(&[("d/f", "v1\n"), ("d/g", "same\n")]);
+    let t2 = tree(&[("d/f", "v2\n"), ("d/g", "same\n")]);
+    let c1 = s
+        .commit_tree(vec![root], &t0, &t1, 1, false, Extensions::new())
+        .await
+        .unwrap();
+    let c2 = s
+        .commit_tree(vec![c1], &t1, &t2, 2, false, Extensions::new())
+        .await
+        .unwrap();
+    let c3 = s
+        .commit_tree(vec![c2], &t2, &t1, 3, false, Extensions::new())
+        .await
+        .unwrap();
+    for path in ["", "d", "d/f"] {
+        let (_, n) = history::node_for_path(s.engine.ctx(), &c3, &p(path))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(n.changeset, c3, "{path}");
+        assert_eq!(n.parents, vec![node_id(&s, &c2, path).await], "{path}");
+        assert_ne!(node_id(&s, &c3, path).await, node_id(&s, &c1, path).await);
+    }
+    // Untouched sibling: c1's node all along.
+    assert_eq!(node_id(&s, &c3, "d/g").await, node_id(&s, &c1, "d/g").await);
+    assert_matches_model(
+        &s,
+        &[root, c1, c2, c3],
+        &[
+            (vec![], t0.clone()),
+            (vec![0], t1.clone()),
+            (vec![1], t2.clone()),
+            (vec![2], t1.clone()),
+        ],
+    )
+    .await;
+    assert!(s.fsck().await.is_empty());
+}
+
+#[tokio::test]
+async fn octopus_merge_adding_paths_from_later_parents() {
+    // A 3-parent merge: a path only in the third parent gets a node whose only parent is the
+    // third parent's node; a path equal in all parents is the first parent's node.
+    let s = stack();
+    let root = s.h.bootstrap().await.unwrap();
+    let t0 = MTree::new();
+    let tb = tree(&[("common", "c\n")]);
+    let b = s
+        .commit_tree(vec![root], &t0, &tb, 1, false, Extensions::new())
+        .await
+        .unwrap();
+    let tx = tree(&[("common", "c\n"), ("x", "x\n")]);
+    let ty = tree(&[("common", "c\n"), ("y", "y\n")]);
+    let x = s
+        .commit_tree(vec![b], &tb, &tx, 2, false, Extensions::new())
+        .await
+        .unwrap();
+    let y = s
+        .commit_tree(vec![b], &tb, &ty, 3, false, Extensions::new())
+        .await
+        .unwrap();
+    let tm = tree(&[("common", "c\n"), ("x", "x\n"), ("y", "y\n")]);
+    let m = s
+        .commit_tree(vec![b, x, y], &tb, &tm, 4, false, Extensions::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        node_id(&s, &m, "common").await,
+        node_id(&s, &b, "common").await
+    );
+    let (_, ny) = history::node_for_path(s.engine.ctx(), &m, &p("y"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ny.changeset, m);
+    assert_eq!(ny.parents, vec![node_id(&s, &y, "y").await]);
+    let (_, nr) = history::node_for_path(s.engine.ctx(), &m, &p(""))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        nr.parents,
+        vec![
+            node_id(&s, &b, "").await,
+            node_id(&s, &x, "").await,
+            node_id(&s, &y, "").await
+        ]
+    );
+    assert_matches_model(
+        &s,
+        &[root, b, x, y, m],
+        &[
+            (vec![], t0.clone()),
+            (vec![0], tb.clone()),
+            (vec![1], tx.clone()),
+            (vec![1], ty.clone()),
+            (vec![1, 2, 3], tm.clone()),
+        ],
+    )
+    .await;
+    assert!(s.fsck().await.is_empty());
+}

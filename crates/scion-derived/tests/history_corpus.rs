@@ -99,6 +99,10 @@ async fn end_to_end_and_mock_derive_identical_root_nodes() {
 #[tokio::test]
 #[ignore = "spec-sized (SCION_FULL): default corpora over many seeds"]
 async fn full_matches_refmodel_on_default_corpora() {
+    if !scion_core::test_support::full_mode() {
+        eprintln!("SKIP: SCION_FULL unset");
+        return;
+    }
     for seed in 0..20 {
         let spec = CorpusSpec {
             seed,

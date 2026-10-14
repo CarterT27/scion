@@ -230,6 +230,10 @@ async fn gate_1e3_and_1e5_are_size_independent() {
 #[tokio::test]
 #[ignore = "spec-sized (SCION_FULL): 10^7 files"]
 async fn full_gate_1e7() {
+    if !scion_core::test_support::full_mode() {
+        eprintln!("SKIP: SCION_FULL unset");
+        return;
+    }
     let small = gate(1_000).await;
     let huge = gate(10_000_000).await;
     assert_eq!(small.new_nodes, huge.new_nodes);

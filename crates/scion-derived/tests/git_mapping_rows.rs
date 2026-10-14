@@ -255,3 +255,40 @@ async fn re_commit_in_import_mode_fills_in_missing_mapping_rows() {
     assert_eq!(v, Bytes::copy_from_slice(first.changeset_id.as_bytes()));
     assert_eq!(first.changeset_id.kind(), Kind::Changeset);
 }
+
+#[tokio::test]
+async fn corrupt_stored_values_are_integrity_errors() {
+    let st = stack();
+    let root = st.h.bootstrap().await.unwrap();
+    let hex = hex::encode(sha(6));
+    let row = |key: Bytes, value: &[u8]| scion_store::DerivedRow {
+        key: scion_store::DerivedKey {
+            ty: git_mapping::NAME.to_owned(),
+            version: git_mapping::VERSION,
+            key,
+        },
+        value: Some(Bytes::copy_from_slice(value)),
+        storage_key: None,
+        source_object: None,
+        at: std::time::SystemTime::UNIX_EPOCH,
+    };
+    // g: -> a tree id instead of a changeset id; c: -> uppercase hex.
+    st.h.meta()
+        .put_derived(vec![
+            row(git_mapping::git_key(&hex), empty_tree().as_bytes()),
+            row(
+                git_mapping::changeset_key(&root),
+                hex.to_ascii_uppercase().as_bytes(),
+            ),
+        ])
+        .await
+        .unwrap();
+    let e = git_mapping::changeset_for_git(&st.engine, &hex)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Integrity);
+    let e = git_mapping::git_for_changeset(&st.engine, &root)
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Integrity);
+}
