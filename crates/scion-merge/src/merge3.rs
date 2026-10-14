@@ -103,10 +103,10 @@ impl<'a> Analysis<'a> {
     pub(crate) fn assemble<'r>(&'r self, mut f: impl FnMut(Piece<'r, 'a>)) {
         let mut pos = 0usize;
         for r in &self.regions {
-            if let Some(pre) = self.base.get(pos..r.base.start) {
-                if !pre.is_empty() {
-                    f(Piece::Lines(pre));
-                }
+            if let Some(pre) = self.base.get(pos..r.base.start)
+                && !pre.is_empty()
+            {
+                f(Piece::Lines(pre));
             }
             match &r.outcome {
                 Outcome::Resolved(lines) => f(Piece::Lines(lines)),
@@ -118,10 +118,10 @@ impl<'a> Analysis<'a> {
             }
             pos = r.base.end;
         }
-        if let Some(rest) = self.base.get(pos..) {
-            if !rest.is_empty() {
-                f(Piece::Lines(rest));
-            }
+        if let Some(rest) = self.base.get(pos..)
+            && !rest.is_empty()
+        {
+            f(Piece::Lines(rest));
         }
     }
 }

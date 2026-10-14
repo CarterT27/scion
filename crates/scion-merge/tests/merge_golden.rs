@@ -11,6 +11,7 @@
 //!
 //! Regenerate (only through an amendment) with `SCION_REGEN_GOLDEN=1 cargo test -p scion-merge
 //! --test merge_golden`, then update `GOLDEN_DIGEST`.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers outside #[test] fns
 
 mod merge_support;
 
