@@ -407,3 +407,61 @@ async fn store_ctx_trees_changesets_and_stored_values() {
     );
     assert_eq!(ctx.stored(&k(b"absent")).await.unwrap(), None);
 }
+
+/// An eager type that always fails.
+struct FailingEager;
+
+impl DerivedType for FailingEager {
+    fn name(&self) -> &'static str {
+        "test_fail"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn mode(&self) -> DeriveMode {
+        DeriveMode::Eager
+    }
+    fn content_bearing(&self) -> bool {
+        false
+    }
+}
+
+#[async_trait]
+impl scion_derived::EagerType for FailingEager {
+    async fn derive(
+        &self,
+        _cx: &dyn DeriveCtx,
+        _input: &EagerInput<'_>,
+    ) -> Result<Vec<DerivedRow>> {
+        Err(scion_core::ScionError::new(
+            ErrorCode::Unavailable,
+            "eager failure",
+        ))
+    }
+}
+
+#[tokio::test]
+async fn eager_failure_fails_the_hook() {
+    // SPEC 5.3: eager values are computed before the changeset row is inserted, so one failing
+    // eager type must fail the whole hook (never a partial row set).
+    let (storage, _h) = storage();
+    let mut reg = Registry::empty();
+    reg.register_eager(Arc::new(TagEager {
+        name: "test_e1",
+        version: 1,
+        extra: 0,
+        content_bearing: false,
+    }));
+    reg.register_eager(Arc::new(FailingEager));
+    let eng = engine(&storage, reg, "w");
+    let (id, cs, meta) = sample_changeset();
+    let input = EagerInput {
+        id: &id,
+        changeset: &cs,
+        meta: &meta,
+        new_trees: &[],
+        import_mode: false,
+    };
+    let err = eng.derive_eager(&input).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Unavailable);
+}

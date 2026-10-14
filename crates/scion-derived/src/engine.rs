@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::sync::Semaphore;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Runs eager types at changeset creation and lazy types on query (SPEC 9.1).
 pub struct DerivedEngine {
@@ -81,7 +81,8 @@ fn engine_bug(m: impl Into<String>) -> ScionError {
 }
 
 impl DerivedEngine {
-    /// Assemble the engine (no IO).
+    /// Assemble the engine (no IO). `cfg.lazy_workers` bounds concurrent lazy derivations
+    /// (minimum 1; SPEC 6.1 `[derive]`, 9.1).
     pub fn new(
         objects: ObjectRepo,
         registry: Registry,
@@ -102,17 +103,18 @@ impl DerivedEngine {
         })
     }
 
-    /// The registry.
+    /// The registry of derived types (SPEC 9.1).
     pub fn registry(&self) -> &Registry {
         &self.registry
     }
 
-    /// The derivation context.
+    /// The derivation context over the object store (SPEC 9.1).
     pub fn ctx(&self) -> &dyn DeriveCtx {
         &self.ctx
     }
 
-    /// Install the metrics hook.
+    /// Install the metrics hook (SPEC 15.2 `scion_derive_duration_seconds`,
+    /// `scion_derive_backlog`).
     pub fn set_metrics(&self, m: Arc<dyn DeriveMetrics>) {
         *self.metrics.write() = Some(m);
     }
@@ -345,7 +347,14 @@ impl DerivedEngine {
         // Content-bearing records are keyed by their source object id (SPEC 9.1, 13.5): a
         // content-bearing lazy type whose key is an object id records it as the source.
         let source_object = if t.content_bearing() {
-            ObjectId::from_bytes(&dk.key).ok()
+            let id = ObjectId::from_bytes(&dk.key).ok();
+            if id.is_none() {
+                warn!(
+                    ty = t.name(),
+                    "content-bearing lazy key is not an object id; record cannot be purged by source"
+                );
+            }
+            id
         } else {
             None
         };
@@ -372,6 +381,13 @@ impl EagerHook for DerivedEngine {
             let out = t.derive(&self.ctx, input).await?;
             if let Some(m) = &metrics {
                 m.derive_duration(t.name(), DeriveMode::Eager, start.elapsed());
+            }
+            if t.content_bearing() && out.iter().any(|r| r.source_object.is_none()) {
+                // SPEC 9.1: content-bearing records MUST be keyed by their source object id.
+                warn!(
+                    ty = t.name(),
+                    "content-bearing eager rows without source_object cannot be purged (SPEC 13.5)"
+                );
             }
             rows.extend(out);
         }

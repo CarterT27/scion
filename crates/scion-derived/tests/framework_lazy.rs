@@ -266,3 +266,55 @@ async fn metrics_report_durations_and_balanced_backlog() {
     assert!(eng.get("test_cycle", None, &ck(1)).await.is_err());
     assert_eq!(m.backlog_sum("test_cycle"), 0);
 }
+
+#[tokio::test]
+async fn stale_miss_is_retried_strongly_before_deriving() {
+    // SPEC 5.4: a miss under a stale read is retried with a consistent read.
+    let (storage, handles) = storage();
+    let ty = Arc::new(ChainType::new("test_chain", 1));
+    let mut reg = Registry::empty();
+    reg.register_lazy(ty.clone());
+    let eng = engine(&storage, reg, "w");
+    let expected = expected_chain(1, 20);
+    handles.meta.set_stale_lag(1_000_000);
+    assert_eq!(
+        eng.get("test_chain", None, &ck(20)).await.unwrap(),
+        expected[20]
+    );
+    assert_eq!(ty.derives(), 21);
+    // The stale view still misses every row; the strong retry finds them.
+    assert_eq!(
+        eng.get_stored("test_chain", None, &ck(7)).await.unwrap(),
+        Some(expected[7].clone())
+    );
+    assert_eq!(
+        eng.get("test_chain", None, &ck(20)).await.unwrap(),
+        expected[20]
+    );
+    assert_eq!(ty.derives(), 21, "no re-derivation of stored values");
+}
+
+#[tokio::test]
+async fn failed_write_back_fails_the_query_and_a_retry_succeeds() {
+    // put_derived is the write-back; an unavailable store surfaces as the query error and the
+    // next query derives normally.
+    let (storage, handles) = storage();
+    let ty = Arc::new(ChainType::new("test_chain", 1));
+    let mut reg = Registry::empty();
+    reg.register_lazy(ty.clone());
+    let eng = engine(&storage, reg, "w");
+    storage.faults.arm(
+        &scion_core::points::meta_before("put_derived"),
+        scion_core::FaultAction::Error(ErrorCode::Unavailable),
+        Some(1),
+    );
+    let err = eng.get("test_chain", None, &ck(10)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Unavailable);
+    assert_eq!(handles.meta.table_counts().derived, 0);
+    let expected = expected_chain(1, 10);
+    assert_eq!(
+        eng.get("test_chain", None, &ck(10)).await.unwrap(),
+        expected[10]
+    );
+    assert_eq!(handles.meta.table_counts().derived, 11);
+}

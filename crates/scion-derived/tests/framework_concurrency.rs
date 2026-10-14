@@ -192,3 +192,68 @@ async fn single_lazy_worker_serializes_without_deadlock() {
     }
     assert_eq!(handles.meta.table_counts().derived, 41);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lease_holder_value_is_picked_up_without_deriving() {
+    // Another worker holds the lease on the key and writes the value while we wait: the
+    // wait-and-recheck returns that value and this worker derives nothing (dedup).
+    let (storage, _h) = storage();
+    let clock = clock();
+    let ty = Arc::new(ChainType::new("test_chain", 1));
+    let mut reg = Registry::empty();
+    reg.register_lazy(ty.clone());
+    let eng = engine_with(&storage, reg, "w", clock.clone());
+    let k = dk("test_chain", 1, ck(0));
+    assert!(
+        storage
+            .meta
+            .try_lease(&k, "other", Duration::from_secs(3600), clock.now())
+            .await
+            .unwrap()
+    );
+    let q = tokio::spawn({
+        let eng = eng.clone();
+        async move { eng.get("test_chain", None, &ck(0)).await }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let other_value = expected_chain(1, 0)[0].clone();
+    storage
+        .meta
+        .put_derived(vec![scion_store::DerivedRow {
+            key: k.clone(),
+            value: Some(other_value.clone()),
+            storage_key: None,
+            source_object: None,
+            at: clock.now(),
+        }])
+        .await
+        .unwrap();
+    assert_eq!(q.await.unwrap().unwrap(), other_value);
+    assert_eq!(ty.derives(), 0, "the lease holder's value was reused");
+}
+
+#[tokio::test]
+async fn leases_are_released_after_derivation() {
+    let (storage, _h) = storage();
+    let clock = clock();
+    let mut reg = Registry::empty();
+    reg.register_lazy(Arc::new(ChainType::new("test_chain", 1)));
+    let eng = engine_with(&storage, reg, "w", clock.clone());
+    eng.get("test_chain", None, &ck(5)).await.unwrap();
+    // Every key's lease was released: another holder takes each one at the same instant.
+    for i in 0..=5 {
+        assert!(
+            storage
+                .meta
+                .try_lease(
+                    &dk("test_chain", 1, ck(i)),
+                    "next",
+                    Duration::from_secs(30),
+                    clock.now()
+                )
+                .await
+                .unwrap(),
+            "lease {i} still held"
+        );
+    }
+}
