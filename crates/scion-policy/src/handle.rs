@@ -176,11 +176,9 @@ async fn watch_loop(weak: Weak<PolicyHandle>, path: PathBuf) {
         }
     };
 
-    // The file content at load time is what the handle already holds.
-    let mut seen = match tokio::fs::read(&path).await {
-        Ok(b) => Some(Seen::Content(*blake3::hash(&b).as_bytes())),
-        Err(_) => None,
-    };
+    // Nothing seen yet: the first check (immediately) re-applies the file, which also covers a
+    // change made between `load` and the watcher starting.
+    let mut seen: Option<Seen> = None;
     let mut tick = tokio::time::interval(POLL_INTERVAL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {

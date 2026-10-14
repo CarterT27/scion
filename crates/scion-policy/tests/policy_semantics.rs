@@ -1,6 +1,7 @@
 //! SPEC 19.12 policy semantics (P05): longest prefix, component-wise matching, independent
 //! read/write resolution, nested groups, cycles, `github-id:`, case-insensitive logins, ref
 //! pattern precedence, default deny, admin permissions, validation errors and the epoch.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
 use scion_core::{ErrorCode, Principal, ScionError};
 use scion_object::{RefName, RepoPath};
