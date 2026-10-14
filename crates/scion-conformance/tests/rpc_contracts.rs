@@ -1502,6 +1502,22 @@ async fn case_merge(env: &Env, via: Via) {
         t,
         "Merge missing meta",
     );
+    // TOO_LARGE: the merge's Meta message exceeds limits.max_message_bytes (SPEC 8.1 step 8).
+    let limit = env.c.servers[0].config().limits.max_message_bytes;
+    let mut long = req(&x, &y, 44);
+    long.meta_fields.as_mut().unwrap().message = vec![b'm'; limit as usize + 1];
+    let e = err(
+        alice.write().merge(long).await,
+        ErrorCode::TooLarge,
+        None,
+        t,
+        "Merge message too long",
+    );
+    assert!(
+        matches!(&e.payload, ErrorPayload::Limit { name, .. } if name == "max_message_bytes"),
+        "TOO_LARGE names the limit: {:?}",
+        e.payload
+    );
     // A merge whose result touches /secrets needs write there.
     let sec = put(
         env,

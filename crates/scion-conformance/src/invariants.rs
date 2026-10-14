@@ -97,25 +97,42 @@ async fn check_ref_logs(c: &TestCluster, problems: &mut Vec<String>) -> Result<(
     Ok(())
 }
 
-/// The ref log of one ref must be a gap-free chain of committed updates.
+/// The ref log of one ref must be a gap-free chain of committed updates: versions start at 1
+/// and increase by exactly 1 (SPEC 4.3.6; re-creating a deleted ref continues the numbering,
+/// docs/contracts/storage-semantics.md), the first entry creates the ref, and each entry starts
+/// from the target the previous one ended at.
 fn check_chain(name: &str, log: &[RefLogRow], problems: &mut Vec<String>) {
     let mut prev: Option<&RefLogRow> = None;
     for e in log {
-        if let Some(p) = prev {
-            if e.version <= p.version {
-                problems.push(format!(
-                    "ref {name} log versions not increasing ({} after {})",
-                    e.version, p.version
-                ));
+        match prev {
+            Some(p) => {
+                if e.version != p.version.saturating_add(1) {
+                    problems.push(format!(
+                        "ref {name} log has a gap or reordering (version {} after {})",
+                        e.version, p.version
+                    ));
+                }
+                if e.old_target != p.new_target {
+                    problems.push(format!(
+                        "ref {name} version {} starts from {:?} but version {} ended at {:?}",
+                        e.version, e.old_target, p.version, p.new_target
+                    ));
+                }
             }
-            if e.old_target != p.new_target {
-                problems.push(format!(
-                    "ref {name} version {} starts from {:?} but version {} ended at {:?}",
-                    e.version, e.old_target, p.version, p.new_target
-                ));
+            None => {
+                if e.version != 1 {
+                    problems.push(format!(
+                        "ref {name} log starts at version {} instead of 1",
+                        e.version
+                    ));
+                }
+                if e.old_target.is_some() {
+                    problems.push(format!(
+                        "ref {name} version {} (first) has an old target",
+                        e.version
+                    ));
+                }
             }
-        } else if e.old_target.is_some() && e.version == 1 {
-            problems.push(format!("ref {name} version 1 has an old target"));
         }
         prev = Some(e);
     }
@@ -181,4 +198,73 @@ fn cached_ids(root: &Path) -> Vec<ObjectId> {
     }
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scion_object::RefName;
+    use std::time::SystemTime;
+
+    fn row(version: u64, old: Option<u8>, new: Option<u8>) -> RefLogRow {
+        let id = |b: u8| ObjectId::hash_blob(&[b]);
+        RefLogRow {
+            name: RefName::parse("main").unwrap(),
+            version,
+            old_target: old.map(id),
+            new_target: new.map(id),
+            principal: "github:admin".into(),
+            at: SystemTime::UNIX_EPOCH,
+            landed: Vec::new(),
+        }
+    }
+
+    fn problems(log: &[RefLogRow]) -> Vec<String> {
+        let mut p = Vec::new();
+        check_chain("main", log, &mut p);
+        p
+    }
+
+    #[test]
+    fn a_gap_free_chain_passes() {
+        // Create, update, delete, re-create (numbering continues).
+        let log = [
+            row(1, None, Some(1)),
+            row(2, Some(1), Some(2)),
+            row(3, Some(2), None),
+            row(4, None, Some(3)),
+        ];
+        assert_eq!(problems(&log), Vec::<String>::new());
+    }
+
+    #[test]
+    fn gaps_wrong_start_and_broken_links_are_violations() {
+        assert_eq!(
+            problems(&[row(1, None, Some(1)), row(3, Some(1), Some(2))]).len(),
+            1
+        );
+        assert_eq!(problems(&[row(2, None, Some(1))]).len(), 1);
+        assert_eq!(problems(&[row(1, Some(9), Some(1))]).len(), 1);
+        assert_eq!(
+            problems(&[row(1, None, Some(1)), row(2, Some(7), Some(2))]).len(),
+            1
+        );
+        assert_eq!(
+            problems(&[row(1, None, Some(1)), row(1, Some(1), Some(2))]).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn cached_ids_parse_the_spec_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = ObjectId::hash_blob(b"layout");
+        let hex = id.hex();
+        let fan = dir.path().join("b").join(&hex[..2]);
+        std::fs::create_dir_all(&fan).unwrap();
+        std::fs::write(fan.join(&hex), b"x").unwrap();
+        std::fs::write(fan.join("tmp-123"), b"x").unwrap();
+        assert_eq!(cached_ids(dir.path()), vec![id]);
+        assert!(cached_ids(&dir.path().join("missing")).is_empty());
+    }
 }

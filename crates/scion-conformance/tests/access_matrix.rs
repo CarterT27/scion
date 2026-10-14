@@ -567,7 +567,11 @@ async fn external_read_and_query_access_matrix() {
 /// only on that principal's own positive decision, and a policy epoch change drops cached
 /// decisions.
 async fn run_daemon_decisions(backend: Backend) {
-    let c = TestCluster::start(ClusterOpts::new(backend)).await;
+    // Decisions never expire during the test, so only the SPEC 10.4 epoch rule (drop every
+    // decision when a response carries a different policy epoch) can change the outcome.
+    let mut o = ClusterOpts::new(backend);
+    o.daemon_tweak = Some(std::sync::Arc::new(|d| d.access_cache_ttl_ms = 3_600_000));
+    let c = TestCluster::start(o).await;
     let f = setup(&c).await;
     let carol = c.client(Via::Daemon, &TestCluster::gh("carol")).await;
     let alice = c.client(Via::Daemon, &TestCluster::gh("alice")).await;

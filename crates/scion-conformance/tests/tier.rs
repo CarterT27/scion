@@ -1357,3 +1357,70 @@ async fn external_cluster_servers_share_storage_keys_and_policy() {
     }
     run_multi_server(Backend::External).await;
 }
+
+// ---------------------------------------------------------------------------------------
+// Harness self-test: the SPEC 16.2 oracle detects what it claims to detect.
+// ---------------------------------------------------------------------------------------
+
+async fn run_invariants_detect_violations(backend: Backend) {
+    let mut o = opts(backend);
+    // Without verify_on_read the daemon would serve a corrupted cache file, so the oracle
+    // must report it (with verification on, such an entry is discarded, never served).
+    o.daemon_tweak = Some(Arc::new(|d| {
+        d.redaction_poll_interval_ms = 100;
+        d.verify_on_read = false;
+    }));
+    let c = TestCluster::start(o).await;
+    let admin = c.client(Via::Server, &gh("admin")).await;
+    let (root, _) = c.ref_head("main").await;
+    let content = b"oracle self-test content\n".to_vec();
+    TestCluster::commit(&admin, &root, &[("oracle/a.txt", &content)], &[], 1).await;
+    let id = ObjectId::hash_blob(&content);
+    let alice = c.client(Via::Daemon, &gh("alice")).await;
+    let f = TestCluster::fetch(&alice, &[id], None, None).await.unwrap();
+    assert!(f.items[0].verified, "served through the daemon");
+    invariants::check_16_2(&c).await.unwrap();
+
+    // (3) A daemon cache entry whose bytes do not match its id.
+    let d = c.daemon.as_ref().unwrap();
+    let path = d.handle.cache().entry_path_of(&id);
+    assert!(path.exists(), "the daemon cached the object at {path:?}");
+    let original = std::fs::read(&path).unwrap();
+    let mut tampered = vec![0u8];
+    tampered.extend_from_slice(b"oracle self-test CONTENT\n");
+    std::fs::write(&path, &tampered).unwrap();
+    let e = invariants::check_16_2(&c).await.unwrap_err();
+    assert_eq!(e.code, scion_core::ErrorCode::Integrity);
+    assert!(e.message.contains("daemon cache entry"), "{e:?}");
+    std::fs::write(&path, &original).unwrap();
+    invariants::check_16_2(&c).await.unwrap();
+
+    // (1) The server's stored copy no longer matches its id (fsck with verify_bytes).
+    let key = c.servers[0].ctx().objects.key(&id, scion_store::Area::Live);
+    let good = c.storage.blobs.get(&key).await.unwrap().unwrap();
+    c.storage
+        .blobs
+        .put(
+            &key,
+            bytes::Bytes::from(zstd::encode_all(&b"not the content"[..], 3).unwrap()),
+        )
+        .await
+        .unwrap();
+    let e = invariants::check_16_2(&c).await.unwrap_err();
+    assert!(e.message.contains("fsck"), "{e:?}");
+    c.storage.blobs.put(&key, good).await.unwrap();
+    invariants::check_16_2(&c).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invariants_detect_violations() {
+    run_invariants_detect_violations(Backend::Memory).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn external_invariants_detect_violations() {
+    if skip_external() {
+        return;
+    }
+    run_invariants_detect_violations(Backend::External).await;
+}

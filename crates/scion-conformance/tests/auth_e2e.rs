@@ -151,6 +151,13 @@ async fn run_github_login(backend: Backend) {
         .await
         .unwrap_err();
     assert_eq!(e.code(), tonic::Code::Unauthenticated);
+    let d = TestCluster::error_detail(&e).expect("ErrorDetail on a failed login");
+    assert_eq!((d.code.as_str(), d.retryable), ("UNAUTHENTICATED", false));
+    assert_eq!(
+        TestCluster::epochs(e.metadata()).map(|t| t.tier),
+        Some(Tier::Server),
+        "a forwarded Login error keeps the server's trailers"
+    );
 
     // SPEC 16.1 class 10: GitHub down -> new logins UNAVAILABLE, existing tokens still work.
     c.github.set_down(true);
@@ -299,10 +306,11 @@ async fn run_token_rejection(backend: Backend) {
         }
     }
     // A token that expires while in use is rejected afterwards by both tiers.
-    let short = keyring
-        .issue(&alice, Duration::from_secs(1), now)
-        .unwrap()
-        .0;
+    // Issued now (not at the test's start: the probes above take time on a loaded machine),
+    // with a TTL comfortably longer than the probes below.
+    let short_ttl = Duration::from_secs(4);
+    let issued = SystemTime::now();
+    let short = keyring.issue(&alice, short_ttl, issued).unwrap().0;
     for via in Via::ALL {
         probe(
             &c.client_with_token(via, Some(short.clone())).await,
@@ -312,7 +320,10 @@ async fn run_token_rejection(backend: Backend) {
         )
         .await;
     }
-    tokio::time::sleep(Duration::from_millis(2100)).await;
+    let expiry = issued + short_ttl + Duration::from_millis(1100);
+    if let Ok(wait) = expiry.duration_since(SystemTime::now()) {
+        tokio::time::sleep(wait).await;
+    }
     for via in Via::ALL {
         probe(
             &c.client_with_token(via, Some(short.clone())).await,
