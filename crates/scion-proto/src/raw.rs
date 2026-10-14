@@ -1,7 +1,5 @@
 //! Byte-level codec for verbatim forwarding (SPEC 7.8, PLAN 6.13; P08).
-#![allow(unused_variables)] // P00 stub: remove when implemented.
-
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes};
 use tonic::Status;
 use tonic::codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder};
 
@@ -38,7 +36,8 @@ impl Encoder for RawEncoder {
     type Error = Status;
 
     fn encode(&mut self, item: Bytes, dst: &mut EncodeBuf<'_>) -> Result<(), Status> {
-        todo!("P08")
+        dst.put(item);
+        Ok(())
     }
 }
 
@@ -47,6 +46,7 @@ impl Decoder for RawDecoder {
     type Error = Status;
 
     fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Bytes>, Status> {
-        todo!("P08")
+        // `src` holds exactly one length-delimited gRPC message (already decompressed).
+        Ok(Some(src.copy_to_bytes(src.remaining())))
     }
 }
