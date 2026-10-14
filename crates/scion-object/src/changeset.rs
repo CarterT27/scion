@@ -236,20 +236,22 @@ fn validate_parents_shape(parents: &[ObjectId], limits: &Limits) -> Result<()> {
 /// at most `limits.max_delta_entries` (TOO_LARGE `max_delta_entries`), then per entry the
 /// path rules (invalid_path) and Put mode 1..=3 / Blob id (invalid_mode / invalid_kind).
 fn validate_delta_shape(delta: &[DeltaEntry], limits: &Limits) -> Result<()> {
-    for pair in delta.windows(2) {
+    // Messages name the entry index, never the raw path: error text may reach logs, and
+    // raw repository paths are never logged (implementation-defined 6.9).
+    for (i, pair) in delta.windows(2).enumerate() {
         if let [a, b] = pair {
             match a.path.cmp(&b.path) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
                     return Err(ScionError::invalid(
                         subcode::DELTA_DUPLICATE,
-                        format!("duplicate delta path {}", b.path),
+                        format!("delta entry {} repeats the path of entry {i}", i + 1),
                     ));
                 }
                 std::cmp::Ordering::Greater => {
                     return Err(ScionError::invalid(
                         subcode::DELTA_UNSORTED,
-                        format!("delta path {} after {}", b.path, a.path),
+                        format!("delta entry {} sorts before entry {i}", i + 1),
                     ));
                 }
             }

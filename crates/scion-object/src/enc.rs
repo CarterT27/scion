@@ -39,7 +39,8 @@ impl Encoder {
     }
 
     /// `uvarint`: minimal unsigned LEB128 (at most 10 bytes).
-    pub fn uvarint(&mut self, mut v: u64) {
+    pub fn uvarint(&mut self, v: u64) {
+        let mut v = v;
         loop {
             let low = (v & 0x7f) as u8;
             v >>= 7;

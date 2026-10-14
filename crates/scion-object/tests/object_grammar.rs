@@ -96,6 +96,38 @@ fn path_rule_violations() {
 }
 
 #[test]
+fn delta_order_errors_do_not_echo_raw_paths() {
+    // Implementation-defined 6.9: raw repository paths never reach logs, so error text
+    // carries entry indices instead.
+    let del = |p: &str| DeltaEntry {
+        path: RepoPath::parse(p.as_bytes()).unwrap(),
+        op: DeltaOp::Delete,
+    };
+    for (delta, want) in [
+        (
+            vec![del("secret/zz"), del("secret/aa")],
+            subcode::DELTA_UNSORTED,
+        ),
+        (
+            vec![del("secret/aa"), del("secret/aa")],
+            subcode::DELTA_DUPLICATE,
+        ),
+    ] {
+        let cs = Changeset {
+            parents: vec![],
+            root_tree: scion_core::empty_tree_id(),
+            meta: ObjectId::new(Kind::Meta, [0; 32]),
+            change_id: scion_core::ChangeId([0; 16]),
+            delta,
+            extensions: Extensions::new(),
+        };
+        let e = cs.validate_shape(&Limits::default()).unwrap_err();
+        assert_eq!(e.subcode(), Some(want));
+        assert!(!e.message.contains("secret"), "{}", e.message);
+    }
+}
+
+#[test]
 fn delta_path_violations_fail_validate_shape() {
     // Valid RepoPaths are guaranteed by construction; the root is the only bad delta path.
     let cs = Changeset {
@@ -311,6 +343,11 @@ fn revision_grammar_table() {
         "main branch".into(),
         "-x".into(),
         "main ~1".into(),
+        // Non-ASCII after a suffix or as the whole token: rejected without panicking.
+        "main~1\u{e9}".into(),
+        "main^\u{e9}".into(),
+        "\u{e9}".into(),
+        "c1abcdef01\u{e9}".into(),
     ];
     for s in &invalid {
         let e = parse_revision(s).expect_err(&format!("{s:?} should be invalid"));
