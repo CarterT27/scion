@@ -44,6 +44,8 @@ pub fn unified_hunks(a: &[u8], b: &[u8], context: usize) -> Vec<TextHunk> {
     let al = split_lines(a);
     let bl = split_lines(b);
     let hunks = diff_lines(&al, &bl);
+    // `context` may be arbitrarily large (e.g. "whole file"); never overflow.
+    let join_gap = context.saturating_mul(2);
 
     // Group consecutive changed runs.
     let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
@@ -52,7 +54,7 @@ pub fn unified_hunks(a: &[u8], b: &[u8], context: usize) -> Vec<TextHunk> {
             Some(g)
                 if hunks
                     .get(g.end - 1)
-                    .is_some_and(|prev| h.base.start - prev.base.end <= 2 * context) =>
+                    .is_some_and(|prev| h.base.start - prev.base.end <= join_gap) =>
             {
                 g.end = i + 1;
             }
@@ -160,5 +162,18 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!((merged[0].old_start, merged[0].old_lines), (1, 8));
         assert!(unified_hunks(a, a, 3).is_empty());
+    }
+
+    /// A "whole file" context (`usize::MAX`) must not overflow `2 * context`: everything is one
+    /// hunk covering both texts entirely.
+    #[test]
+    fn huge_context_does_not_overflow() {
+        let a = b"1\n2\n3\n4\n5\n6\n7\n8\n9\n";
+        let b = b"1\nX\n3\n4\n5\n6\n7\nY\n9\n";
+        let h = unified_hunks(a, b, usize::MAX);
+        assert_eq!(h.len(), 1);
+        assert_eq!((h[0].old_start, h[0].old_lines), (1, 9));
+        assert_eq!((h[0].new_start, h[0].new_lines), (1, 9));
+        assert_eq!(h[0].lines.len(), 11);
     }
 }

@@ -101,3 +101,38 @@ fn markers_mixed_clean_and_conflict_regions() {
             .to_vec()
     );
 }
+
+/// Contract 6.3/6.4: a region chaining several hunks of one side (touching ranges are joined
+/// transitively) and the `range_S` formula with more than one hunk. Expected values were
+/// computed by an independent transcription of sections 1-6.
+#[test]
+fn multi_hunk_region_ranges_and_markers() {
+    let base = b"L0\nL1\nL2\nL3\nL4\nL5\n";
+    // ours: [1,2) -> 2 lines, [3,4) deleted; theirs: [2,3) -> 2 lines. Sorted starts 1, 2, 3
+    // each touch the running end, so all three hunks form the region [1, 4).
+    let ours = b"L0\nA\nA2\nL2\nL4\nL5\n";
+    let theirs = b"L0\nL1\nY\nY2\nL3\nL4\nL5\n";
+    assert_eq!(
+        merge3(base, ours, theirs),
+        Merge3::Conflict(vec![ch(1..4, 1..4, 1..5)])
+    );
+    assert_eq!(
+        merge3(base, theirs, ours),
+        Merge3::Conflict(vec![ch(1..4, 1..5, 1..4)])
+    );
+    assert_eq!(
+        render_markers(base, ours, theirs),
+        b"L0\n<<<<<<< ours\nA\nA2\nL2\n||||||| base\nL1\nL2\nL3\n=======\nL1\nY\nY2\nL3\n>>>>>>> theirs\nL4\nL5\n"
+            .to_vec()
+    );
+    // A later one-sided region is applied in the marker rendering but not reported as a
+    // conflict.
+    let base2 = [&base[..], b"L6\nL7\n"].concat();
+    let ours2 = [&ours[..], b"L6\nZ\n"].concat();
+    let theirs2 = [&theirs[..], b"L6\nL7\n"].concat();
+    assert_eq!(
+        merge3(&base2, &ours2, &theirs2),
+        Merge3::Conflict(vec![ch(1..4, 1..4, 1..5)])
+    );
+    assert!(render_markers(&base2, &ours2, &theirs2).ends_with(b">>>>>>> theirs\nL4\nL5\nL6\nZ\n"));
+}
