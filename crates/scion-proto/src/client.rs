@@ -28,6 +28,10 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 const MAX_DECODING_MESSAGE_BYTES: usize = 256 * 1024 * 1024;
 /// Connection establishment timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// HTTP/2 header list size the client advertises. Error details (SPEC 7.2) travel in the
+/// `grpc-status-details-bin` header (trailers-only responses put them in the headers), and a
+/// MERGE_CONFLICT report can be far larger than hyper's 16 KiB default.
+const MAX_HEADER_LIST_BYTES: u32 = 16 * 1024 * 1024;
 
 /// Adds `authorization: Bearer <token>` to every request when a token is set (SPEC 7.1).
 #[derive(Clone, Debug, Default)]
@@ -259,6 +263,7 @@ impl ScionClient {
                 });
                 tonic::transport::Endpoint::from_static("http://localhost")
                     .connect_timeout(CONNECT_TIMEOUT)
+                    .http2_max_header_list_size(MAX_HEADER_LIST_BYTES)
                     .connect_with_connector(connector)
                     .await
                     .map_err(|e| unavailable(ep, &e))?
@@ -281,6 +286,7 @@ impl ScionClient {
                         )
                     })?
                     .connect_timeout(CONNECT_TIMEOUT)
+                    .http2_max_header_list_size(MAX_HEADER_LIST_BYTES)
                     .tls_config(cfg)
                     .map_err(|e| unavailable(ep, &e))?;
                 endpoint.connect().await.map_err(|e| unavailable(ep, &e))?
