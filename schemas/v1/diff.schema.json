@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "DiffData": {
+      "additionalProperties": false,
+      "description": "`scion diff` (SPEC 11.5): working-copy changes against the base.",
+      "properties": {
+        "base": {
+          "description": "Base changeset.",
+          "type": "string"
+        },
+        "changes": {
+          "description": "Changed files, sorted by path.",
+          "items": {
+            "$ref": "#/$defs/FileChangeView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "base",
+        "changes"
+      ],
+      "type": "object"
+    },
+    "FileChangeView": {
+      "description": "One changed file (`--json` schema `scion.cli.diff.v1`).",
+      "properties": {
+        "new_id": {
+          "description": "New blob id text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new_mode": {
+          "description": "New mode (1-3).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "old_id": {
+          "description": "Old blob id text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "old_mode": {
+          "description": "Old mode (1-3).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Path (lossy UTF-8 for display).",
+          "type": "string"
+        },
+        "status": {
+          "description": "`modified`, `added`, `deleted` or `mode_changed`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion diff --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/DiffData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.diff.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.diff.v1",
+  "type": "object"
+}

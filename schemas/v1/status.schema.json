@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "StatusData": {
+      "additionalProperties": false,
+      "description": "`scion status` (SPEC 11.5).",
+      "properties": {
+        "added": {
+          "description": "Untracked, not ignored, in-scope files.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base": {
+          "description": "Base changeset.",
+          "type": "string"
+        },
+        "clean": {
+          "description": "No changes at all.",
+          "type": "boolean"
+        },
+        "conflicts": {
+          "description": "Unresolved conflict paths of a paused rebase.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deleted": {
+          "description": "Deleted files.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hashed": {
+          "description": "Files re-hashed by this status.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode_changed": {
+          "description": "Files whose mode changed.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "modified": {
+          "description": "Modified files.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "description": "Kind of the pending operation, if any (`rebase`, `commit`, ...).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "redacted_dirty": {
+          "description": "Dirty files whose base content is redacted (SPEC 13.7).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tracking_ref": {
+          "description": "Tracked ref.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "base",
+        "modified",
+        "added",
+        "deleted",
+        "mode_changed",
+        "redacted_dirty",
+        "hashed",
+        "conflicts",
+        "clean"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion status --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/StatusData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.status.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.status.v1",
+  "type": "object"
+}

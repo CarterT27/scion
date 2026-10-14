@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "CheckoutData": {
+      "additionalProperties": false,
+      "description": "`scion checkout` (SPEC 11.3).",
+      "properties": {
+        "base": {
+          "description": "The checked-out changeset.",
+          "type": "string"
+        },
+        "collisions": {
+          "description": "Case collisions that were reported instead of written.",
+          "items": {
+            "$ref": "#/$defs/CollisionView"
+          },
+          "type": "array"
+        },
+        "inaccessible": {
+          "description": "Inaccessible subtrees recorded at checkout.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "root": {
+          "description": "Working-copy root (absolute).",
+          "type": "string"
+        },
+        "sparse": {
+          "description": "Sparse profile (`\"\"` is the whole tree).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tracking_ref": {
+          "description": "Tracked ref, when the revision was a ref name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "root",
+        "base",
+        "sparse",
+        "inaccessible",
+        "collisions"
+      ],
+      "type": "object"
+    },
+    "CollisionView": {
+      "additionalProperties": false,
+      "description": "One case collision: the second path was not written (SPEC 4.4; PLAN 6.17).",
+      "properties": {
+        "skipped": {
+          "description": "Path skipped.",
+          "type": "string"
+        },
+        "written": {
+          "description": "Path written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "written",
+        "skipped"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion checkout --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/CheckoutData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.checkout.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.checkout.v1",
+  "type": "object"
+}

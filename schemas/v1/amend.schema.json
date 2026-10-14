@@ -1,0 +1,128 @@
+{
+  "$defs": {
+    "CommitData": {
+      "additionalProperties": false,
+      "description": "`scion commit` and `scion amend` (SPEC 11.6, 11.7).",
+      "properties": {
+        "base": {
+          "description": "The base after the command (differs from `changeset` when a rebase continued).",
+          "type": "string"
+        },
+        "change_id": {
+          "description": "Its change id (32 hex).",
+          "type": "string"
+        },
+        "changeset": {
+          "description": "The created changeset (the new base).",
+          "type": "string"
+        },
+        "delta": {
+          "description": "The delta sent in CreateChangeset.",
+          "items": {
+            "$ref": "#/$defs/DeltaView"
+          },
+          "type": "array"
+        },
+        "parents": {
+          "description": "Its parents.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "description": "Pending operation left after the command (a continued rebase may pause again).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root_tree": {
+          "description": "Its root tree.",
+          "type": "string"
+        },
+        "uploaded": {
+          "description": "Blobs uploaded (only those the server was missing).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "changeset",
+        "root_tree",
+        "change_id",
+        "parents",
+        "delta",
+        "uploaded",
+        "base"
+      ],
+      "type": "object"
+    },
+    "DeltaView": {
+      "additionalProperties": false,
+      "description": "One delta entry (SPEC 4.3.4).",
+      "properties": {
+        "id": {
+          "description": "Blob of a put.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "description": "Mode of a put (1 file, 2 executable, 3 symlink).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "op": {
+          "description": "`put` or `delete`.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path.",
+          "type": "string"
+        },
+        "size": {
+          "description": "Size of a put.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "op"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion amend --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/CommitData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.amend.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.amend.v1",
+  "type": "object"
+}

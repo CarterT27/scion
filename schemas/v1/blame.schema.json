@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "BlameData": {
+      "additionalProperties": false,
+      "description": "`scion blame` (SPEC 9.2).",
+      "properties": {
+        "changeset": {
+          "description": "Blamed changeset.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path.",
+          "type": "string"
+        },
+        "ranges": {
+          "description": "Ranges in line order.",
+          "items": {
+            "$ref": "#/$defs/BlameRangeView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "changeset",
+        "path",
+        "ranges"
+      ],
+      "type": "object"
+    },
+    "BlameRangeView": {
+      "additionalProperties": false,
+      "description": "One blame range (SPEC 9.2); lines are 0-based.",
+      "properties": {
+        "line_count": {
+          "description": "Number of lines.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin_changeset": {
+          "description": "Changeset that introduced the lines.",
+          "type": "string"
+        },
+        "origin_start_line": {
+          "description": "First line (0-based) in the origin's version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_line": {
+          "description": "First line (0-based) in the blamed file.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_line",
+        "line_count",
+        "origin_changeset",
+        "origin_start_line"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion blame --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/BlameData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.blame.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.blame.v1",
+  "type": "object"
+}

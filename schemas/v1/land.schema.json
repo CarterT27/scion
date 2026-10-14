@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "LandReport": {
+      "description": "Result of a land (`--json` schema `scion.cli.land.v1`).",
+      "properties": {
+        "head": {
+          "description": "The base after the land (id text): the landed result of the old base.",
+          "type": "string"
+        },
+        "landed": {
+          "description": "Landed results (id text).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "moved": {
+          "description": "Whether the materialization moved to `head` (false when dirty files were in the way;\nthe base then stays where it was).",
+          "type": "boolean"
+        },
+        "ref_name": {
+          "description": "Ref name.",
+          "type": "string"
+        },
+        "target": {
+          "description": "New ref target (id text).",
+          "type": "string"
+        },
+        "version": {
+          "description": "New ref version.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ref_name",
+        "target",
+        "version",
+        "landed",
+        "head",
+        "moved"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion land --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/LandReport",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.land.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.land.v1",
+  "type": "object"
+}

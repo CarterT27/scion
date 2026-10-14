@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "RedactData": {
+      "additionalProperties": false,
+      "description": "`scion redact` (SPEC 13.2).",
+      "properties": {
+        "effective_by_unix_ms": {
+          "description": "No server serves the objects after this time (Unix ms).",
+          "format": "int64",
+          "type": "integer"
+        },
+        "epoch": {
+          "description": "Redaction epoch after the command.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "purged": {
+          "description": "`--purge-now` purged the objects irreversibly.",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Audit reason.",
+          "type": "string"
+        },
+        "targets": {
+          "description": "Redacted objects (for `--all-versions`, every distinct blob the path ever held).",
+          "items": {
+            "$ref": "#/$defs/RedactTarget"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "targets",
+        "reason",
+        "epoch",
+        "effective_by_unix_ms",
+        "purged"
+      ],
+      "type": "object"
+    },
+    "RedactTarget": {
+      "additionalProperties": false,
+      "description": "One object targeted by `scion redact` (SPEC 13.2 tooling).",
+      "properties": {
+        "id": {
+          "description": "Object id.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`blob` or `meta`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion redact --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/RedactData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.redact.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.redact.v1",
+  "type": "object"
+}

@@ -1,0 +1,195 @@
+{
+  "$defs": {
+    "LogData": {
+      "additionalProperties": false,
+      "description": "`scion log` (SPEC 7.4).",
+      "properties": {
+        "entries": {
+          "description": "Entries, newest first.",
+          "items": {
+            "$ref": "#/$defs/LogEntryView"
+          },
+          "type": "array"
+        },
+        "first_parent": {
+          "description": "First-parent only.",
+          "type": "boolean"
+        },
+        "from": {
+          "description": "Starting changeset.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path filter.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "description": "More entries exist beyond `--limit`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "from",
+        "first_parent",
+        "entries",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "LogEntryView": {
+      "additionalProperties": false,
+      "description": "One `scion log` entry (SPEC 7.4, 12.6).",
+      "properties": {
+        "change_id": {
+          "description": "Change id (32 hex).",
+          "type": "string"
+        },
+        "filtered": {
+          "description": "Delta entries outside the caller's read scope were removed (SPEC 12.6).",
+          "type": "boolean"
+        },
+        "id": {
+          "description": "Changeset id.",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/MetaJson",
+          "description": "Meta."
+        },
+        "parents": {
+          "description": "Parents.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "root_tree": {
+          "description": "Root tree.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "parents",
+        "root_tree",
+        "change_id",
+        "filtered",
+        "meta"
+      ],
+      "type": "object"
+    },
+    "MetaJson": {
+      "additionalProperties": false,
+      "description": "A Meta as shown to clients (SPEC 4.3.3, 13.4): when `redacted`, only `meta_id` is set and\nhumans see `<redacted>`.",
+      "properties": {
+        "author": {
+          "description": "Author.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "author_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Author time."
+        },
+        "committer": {
+          "description": "Committer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "committer_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Committer time."
+        },
+        "creator": {
+          "description": "Creator principal.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "Message.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "meta_id": {
+          "description": "Meta object id.",
+          "type": "string"
+        },
+        "redacted": {
+          "description": "The Meta is redacted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "redacted",
+        "meta_id"
+      ],
+      "type": "object"
+    },
+    "TimeView": {
+      "additionalProperties": false,
+      "description": "A timestamp (SPEC 4.3.3).",
+      "properties": {
+        "seconds": {
+          "description": "Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "tz_offset_minutes": {
+          "description": "Time-zone offset in minutes.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds",
+        "tz_offset_minutes"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`scion log --json` output envelope (SPEC 11.8; PLAN 6.15).",
+  "properties": {
+    "data": {
+      "$ref": "#/$defs/LogData",
+      "description": "Command-specific payload."
+    },
+    "schema": {
+      "const": "scion.cli.log.v1",
+      "description": "Schema identifier.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "data"
+  ],
+  "title": "scion.cli.log.v1",
+  "type": "object"
+}
