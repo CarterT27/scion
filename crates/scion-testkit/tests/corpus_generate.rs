@@ -338,3 +338,52 @@ fn multiple_roots_shape() {
         }
     }
 }
+
+#[test]
+fn files_spread_over_directories_within_fanout() {
+    let s = CorpusSpec {
+        files: 2_000,
+        depth: 4,
+        fanout: 5,
+        history_len: 1,
+        ..spec(21)
+    };
+    let r = generate(&s);
+    let t = &r.commits[0].tree;
+    assert_eq!(t.len(), 2_000);
+    // dir -> (files directly inside, distinct subdirectories)
+    let mut dirs: std::collections::BTreeMap<Vec<u8>, (usize, BTreeSet<Vec<u8>>)> =
+        Default::default();
+    for p in t.keys() {
+        let comps: Vec<&[u8]> = p.split(|b| *b == b'/').collect();
+        let mut dir: Vec<u8> = Vec::new();
+        for (i, c) in comps.iter().enumerate() {
+            let e = dirs.entry(dir.clone()).or_default();
+            if i + 1 == comps.len() {
+                e.0 += 1;
+            } else {
+                e.1.insert(c.to_vec());
+                if !dir.is_empty() {
+                    dir.push(b'/');
+                }
+                dir.extend_from_slice(c);
+            }
+        }
+    }
+    for (d, (_, subs)) in &dirs {
+        assert!(
+            subs.len() <= s.fanout as usize,
+            "{:?} has {} subdirectories",
+            String::from_utf8_lossy(d),
+            subs.len()
+        );
+    }
+    // 1 + 5 + 25 + 125 = 156 directories: about 13 files each, so the root is not a pile.
+    let root_files = dirs.get(&Vec::new()).map_or(0, |e| e.0);
+    assert!(root_files < 60, "root holds {root_files} files");
+    let deepest = t
+        .keys()
+        .filter(|p| p.split(|b| *b == b'/').count() == s.depth as usize)
+        .count();
+    assert!(deepest > 1_200, "only {deepest} files at full depth");
+}

@@ -26,9 +26,11 @@ use std::collections::BTreeSet;
 pub struct CorpusSpec {
     /// Files in the final tree (approximate).
     pub files: u64,
-    /// Maximum directory depth.
+    /// Maximum path depth in components (files sit in directories of at most `depth - 1`
+    /// components).
     pub depth: u32,
-    /// Entries per directory.
+    /// Entries per directory: every directory has at most `fanout` subdirectories; files are
+    /// spread uniformly over all directories.
     pub fanout: u32,
     /// Number of commits.
     pub history_len: u32,
@@ -85,8 +87,9 @@ pub struct GenRepo {
 
 /// Generate a repository from `spec` (SPEC 19.0 Corpus; rand_chacha, deterministic).
 ///
-/// - Commit 0 is the only root; it holds about `spec.files` files in directories of at most
-///   `spec.depth` path components chosen among `spec.fanout` names per level.
+/// - Commit 0 is the only root; it holds exactly `spec.files` files. Every path has at most
+///   `spec.depth` components; each directory has at most `spec.fanout` subdirectories, and a
+///   new file lands in a directory chosen uniformly among all of them.
 /// - The history has `max(spec.history_len, 1)` commits in topological order.
 /// - Each later commit is an octopus merge (probability `octopus_ratio`, 3 to 5 parents), a
 ///   two-parent merge (`merge_ratio`; about a quarter of these are emitted as a criss-cross
@@ -136,8 +139,10 @@ impl GenRepo {
 
     /// A history with `roots` independent root commits (at least 2), each followed by a few
     /// edits, joined by one merge whose parents are the branch tips (an octopus when `roots`
-    /// is 3 or more). Models imported unrelated histories (SPEC 14, 19.14). Root `i` holds
-    /// its files under the top-level directory `rootN` so the joined trees do not collide.
+    /// is 3 or more). Models imported unrelated histories (SPEC 14, 19.14). Root `N` starts
+    /// with its files under the top-level directory `rootN`; later edits may add files
+    /// elsewhere, but file names are unique across the whole history, so the joined trees
+    /// never collide.
     pub fn multi_root(spec: &CorpusSpec, roots: usize) -> GenRepo {
         let roots = roots.max(2);
         let mut g = Gen::new(spec);
@@ -311,8 +316,26 @@ impl Gen {
         out
     }
 
+    /// A directory chosen uniformly among the `sum(fanout^l)` possible directories of at most
+    /// `depth - 1` components, so files spread evenly over directories instead of piling up
+    /// near the root (a uniform choice of level would put `1/depth` of all files in the root).
     fn random_dir(&mut self) -> Vec<u8> {
-        let levels = self.rng.random_range(0..self.depth);
+        let mut weights: Vec<u64> = Vec::with_capacity(self.depth as usize);
+        let mut w: u64 = 1;
+        for _ in 0..self.depth {
+            weights.push(w);
+            w = w.saturating_mul(u64::from(self.fanout));
+        }
+        let total = weights.iter().fold(0u64, |a, b| a.saturating_add(*b));
+        let mut pick = self.rng.random_range(0..total.max(1));
+        let mut levels = 0u32;
+        for (l, w) in weights.iter().enumerate() {
+            if pick < *w {
+                levels = u32::try_from(l).unwrap_or(0);
+                break;
+            }
+            pick -= *w;
+        }
         let mut dir = Vec::new();
         for _ in 0..levels {
             let d = self.rng.random_range(0..self.fanout);

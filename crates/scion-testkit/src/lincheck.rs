@@ -298,6 +298,8 @@ fn pair_events(events: &[Event]) -> Result<Vec<Op>, Violation> {
     let mut sorted: Vec<&Event> = events.iter().collect();
     sorted.sort_by_key(|e| (e.at, e.ret.is_some()));
     let mut ops: BTreeMap<u64, Op> = BTreeMap::new();
+    // Ops that already saw a completion (including `Unknown`, which leaves `ret` empty).
+    let mut completed: HashSet<u64> = HashSet::new();
     for e in sorted {
         match (&e.call, &e.ret) {
             (Some(call), None) => {
@@ -324,7 +326,7 @@ fn pair_events(events: &[Event]) -> Result<Vec<Op>, Violation> {
                         format!("op {} completed but never invoked", e.op),
                     ));
                 };
-                if op.return_at != u64::MAX || op.ret.is_some() {
+                if !completed.insert(e.op) {
                     return Err(malformed(&e.r, format!("op {} completed twice", e.op)));
                 }
                 if e.at <= op.invoke_at {
@@ -352,10 +354,7 @@ fn pair_events(events: &[Event]) -> Result<Vec<Op>, Violation> {
                     op.ret = Some(ret.clone());
                     op.return_at = e.at;
                 }
-                if let RefRet::Unknown = ret {
-                    // Keep return at infinity; mark completion seen via a sentinel result.
-                    op.ret = None;
-                }
+                // `Unknown` keeps `ret = None` and the return at infinity.
             }
             _ => {
                 return Err(malformed(
@@ -814,8 +813,9 @@ fn short_call(c: &RefOp) -> String {
 }
 
 fn short_ret(r: &str) -> String {
-    if r.len() > 80 {
-        format!("{}...", &r[..80])
+    if r.chars().count() > 80 {
+        let head: String = r.chars().take(80).collect();
+        format!("{head}...")
     } else {
         r.to_string()
     }

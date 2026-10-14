@@ -430,6 +430,41 @@ fn rejects_malformed_histories() {
 }
 
 #[test]
+fn rejects_a_second_completion_after_unknown() {
+    // An Unknown completion closes the operation: a later definite result for the same op is
+    // malformed rather than silently replacing the Unknown.
+    let mut h = H::default();
+    h.cas_unknown(1, 1, 2, 1, 2);
+    h.events.push(Event {
+        op: 0,
+        client: 1,
+        r: "main".into(),
+        call: None,
+        ret: Some(RefRet::Ok {
+            version: 2,
+            target: t(2),
+        }),
+        at: 3,
+    });
+    let v = h.check().unwrap_err();
+    assert!(v.detail.contains("completed twice"), "{}", v.detail);
+
+    // The recorder ignores a second completion of the same token.
+    let rec = HistoryRecorder::new();
+    let tok = rec.invoke(1, "main", RefOp::Read);
+    rec.complete(tok, RefRet::Unknown);
+    rec.complete(
+        tok,
+        RefRet::Value {
+            version: 1,
+            target: t(1),
+        },
+    );
+    assert_eq!(rec.events().len(), 2);
+    check_ref_registers(&rec.events()).unwrap();
+}
+
+#[test]
 fn rejects_histories_above_the_cap_as_inconclusive() {
     let mut h = H::default();
     let mut at = 1;
