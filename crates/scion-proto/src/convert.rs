@@ -270,8 +270,9 @@ impl From<&DeltaEntry> for v1::DeltaEntryMsg {
 
 impl TryFrom<&v1::DeltaEntryMsg> for DeltaEntry {
     type Error = ScionError;
-    /// SPEC 4.3.4 delta entry. `op` 0 is INVALID_ARGUMENT/missing_field; a Put requires a mode
-    /// 1-3 and an id; the path is validated per SPEC 4.4 (INVALID_ARGUMENT/invalid_path).
+    /// SPEC 4.3.4 delta entry. `op` 0 is INVALID_ARGUMENT/missing_field and any other value but
+    /// 1/2 is INVALID_ARGUMENT; a Put requires a mode 1-3 and an id; the path is validated per
+    /// SPEC 4.4 (INVALID_ARGUMENT/invalid_path).
     fn try_from(m: &v1::DeltaEntryMsg) -> Result<Self> {
         let op = match m.op {
             DELTA_OP_PUT => {
@@ -294,9 +295,9 @@ impl TryFrom<&v1::DeltaEntryMsg> for DeltaEntry {
             DELTA_OP_DELETE => DeltaOp::Delete,
             0 => return Err(missing_field("delta.op")),
             other => {
-                return Err(ScionError::invalid(
-                    subcode::MISSING_FIELD,
-                    format!("delta.op must be 1 (Put) or 2 (Delete), got {other}"),
+                return Err(invalid_value(
+                    "delta.op",
+                    format!("must be 1 (Put) or 2 (Delete), got {other}"),
                 ));
             }
         };
@@ -882,6 +883,15 @@ mod tests {
             DeltaEntry::try_from(&m).unwrap_err().subcode(),
             Some(subcode::MISSING_FIELD)
         );
+        // An unknown op is a plain INVALID_ARGUMENT, not a missing field.
+        let m = v1::DeltaEntryMsg {
+            path: b"a".to_vec(),
+            op: 3,
+            ..Default::default()
+        };
+        let e = DeltaEntry::try_from(&m).unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArgument);
+        assert_eq!(e.subcode(), None);
         let m = v1::DeltaEntryMsg {
             path: b"a".to_vec(),
             op: DELTA_OP_PUT,

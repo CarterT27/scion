@@ -5,6 +5,12 @@
 //! For a trailers-only response (tonic puts `grpc-status` in the headers and sends no body) it
 //! adds the keys to those headers. Values are read from the [`EpochSource`] when the trailers
 //! are produced, so they reflect the state at the end of the call.
+//!
+//! A response whose trailers (or trailers-only headers) already carry a complete, valid set of
+//! epoch keys keeps them unchanged. That is the verbatim-forwarding case: a daemon that wraps
+//! its whole router in this layer still returns the server's `scion-tier: server` on responses
+//! it forwarded byte for byte (SPEC 7.8, implementation-defined 6.13). Partial or malformed
+//! keys are overwritten.
 
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue};
@@ -59,7 +65,7 @@ fn parse_u64(h: &HeaderMap, key: &str) -> Option<u64> {
 }
 
 /// Parse the three epoch keys from a header or trailer map; `None` unless all are valid.
-pub fn read_epochs(h: &HeaderMap) -> Option<Epochs> {
+pub fn read_epochs(h: &http::HeaderMap) -> Option<Epochs> {
     let policy = parse_u64(h, TRAILER_POLICY_EPOCH)?;
     let redaction = parse_u64(h, TRAILER_REDACTION_EPOCH)?;
     let tier = Tier::parse(h.get(TRAILER_TIER)?.to_str().ok()?)?;
@@ -71,7 +77,7 @@ pub fn read_epochs(h: &HeaderMap) -> Option<Epochs> {
 }
 
 /// Write the three epoch keys into a header or trailer map.
-pub fn write_epochs(h: &mut HeaderMap, e: &Epochs) {
+pub fn write_epochs(h: &mut http::HeaderMap, e: &Epochs) {
     h.insert(
         HeaderName::from_static(TRAILER_POLICY_EPOCH),
         HeaderValue::from(e.policy),
@@ -84,6 +90,14 @@ pub fn write_epochs(h: &mut HeaderMap, e: &Epochs) {
         HeaderName::from_static(TRAILER_TIER),
         HeaderValue::from_static(e.tier.as_str()),
     );
+}
+
+/// Stamp `e` unless `h` already carries a complete, valid set of epoch keys (forwarded
+/// responses keep the upstream's values; SPEC 7.8, implementation-defined 6.13).
+fn stamp_if_absent(h: &mut http::HeaderMap, src: &dyn EpochSource) {
+    if read_epochs(h).is_none() {
+        write_epochs(h, &src.epochs());
+    }
 }
 
 /// A tower `Layer` over HTTP bodies that appends the three trailers to the gRPC trailers frame of
@@ -180,7 +194,7 @@ where
             let (mut parts, body) = resp.into_parts();
             let trailers_only = parts.headers.contains_key(GRPC_STATUS);
             if trailers_only {
-                write_epochs(&mut parts.headers, &src.epochs());
+                stamp_if_absent(&mut parts.headers, &*src);
             }
             let body = EpochBody {
                 inner: body,
@@ -238,7 +252,7 @@ where
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(frame))) => match frame.into_trailers() {
                 Ok(mut trailers) => {
-                    write_epochs(&mut trailers, &this.src.epochs());
+                    stamp_if_absent(&mut trailers, &**this.src);
                     *this.state = BodyState::Done;
                     Poll::Ready(Some(Ok(Frame::trailers(trailers))))
                 }
@@ -380,6 +394,72 @@ mod tests {
         let (data, trailers) = collect_trailers(resp.into_body()).await;
         assert_eq!(&data[..], b"x");
         assert_eq!(read_epochs(&trailers.unwrap()).unwrap().redaction, 2);
+    }
+
+    #[tokio::test]
+    async fn forwarded_epochs_are_preserved_and_partial_ones_replaced() {
+        let upstream = Epochs {
+            policy: 70,
+            redaction: 71,
+            tier: Tier::Server,
+        };
+        // Full trailers frame already carrying the upstream's keys (verbatim forwarding).
+        let svc = service_fn(move |_req: http::Request<()>| async move {
+            let mut t = HeaderMap::new();
+            t.insert("grpc-status", HeaderValue::from_static("0"));
+            write_epochs(&mut t, &upstream);
+            let frames: Vec<Result<Frame<Bytes>, Infallible>> = vec![
+                Ok(Frame::data(Bytes::from_static(b"m"))),
+                Ok(Frame::trailers(t)),
+            ];
+            Ok::<_, Infallible>(http::Response::new(StreamBody::new(futures::stream::iter(
+                frames,
+            ))))
+        });
+        let daemon = Arc::new(Epochs {
+            policy: 1,
+            redaction: 2,
+            tier: Tier::Daemon,
+        });
+        let svc = tower_layer::Layer::layer(&EpochTrailerLayer::new(daemon.clone()), svc);
+        let resp = svc.oneshot(http::Request::new(())).await.unwrap();
+        let (_, trailers) = collect_trailers(resp.into_body()).await;
+        assert_eq!(read_epochs(&trailers.unwrap()), Some(upstream));
+
+        // Trailers-only headers already carrying the keys.
+        let svc = service_fn(move |_req: http::Request<()>| async move {
+            let mut r = http::Response::new(Empty::<Bytes>::new());
+            r.headers_mut()
+                .insert("grpc-status", HeaderValue::from_static("5"));
+            write_epochs(r.headers_mut(), &upstream);
+            Ok::<_, Infallible>(r)
+        });
+        let svc = tower_layer::Layer::layer(&EpochTrailerLayer::new(daemon.clone()), svc);
+        let resp = svc.oneshot(http::Request::new(())).await.unwrap();
+        assert_eq!(read_epochs(resp.headers()), Some(upstream));
+
+        // A partial or malformed set is replaced by the layer's values.
+        let svc = service_fn(move |_req: http::Request<()>| async move {
+            let mut t = HeaderMap::new();
+            t.insert("grpc-status", HeaderValue::from_static("0"));
+            t.insert(TRAILER_TIER, HeaderValue::from_static("server"));
+            t.insert(TRAILER_POLICY_EPOCH, HeaderValue::from_static("-3"));
+            let frames: Vec<Result<Frame<Bytes>, Infallible>> = vec![Ok(Frame::trailers(t))];
+            Ok::<_, Infallible>(http::Response::new(StreamBody::new(futures::stream::iter(
+                frames,
+            ))))
+        });
+        let svc = tower_layer::Layer::layer(&EpochTrailerLayer::new(daemon), svc);
+        let resp = svc.oneshot(http::Request::new(())).await.unwrap();
+        let (_, trailers) = collect_trailers(resp.into_body()).await;
+        assert_eq!(
+            read_epochs(&trailers.unwrap()),
+            Some(Epochs {
+                policy: 1,
+                redaction: 2,
+                tier: Tier::Daemon
+            })
+        );
     }
 
     #[tokio::test]

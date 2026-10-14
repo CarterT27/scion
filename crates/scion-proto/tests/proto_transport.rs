@@ -1,12 +1,14 @@
 //! SPEC 7.1 / 19.7: every response carries the three epoch trailers, over TLS and over a Unix
 //! socket: unary success, unary error (trailers-only), server streaming, server streaming that
-//! fails mid-stream, a trailers-only streaming error, and client streaming. `ScionClient` captures
-//! them into `last_epochs` and counts calls.
+//! fails mid-stream, a trailers-only streaming error, client streaming (success and error).
+//! `ScionClient` captures them into `last_epochs` and counts calls.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod proto_support;
 
-use proto_support::{FAIL_MID_STREAM, TestServer, blob_id, start_tls, start_unix};
+use proto_support::{
+    FAIL_MID_STREAM, TestServer, UPLOAD_FAIL_KIND, blob_id, start_tls, start_unix,
+};
 use scion_core::{ErrorCode, Tier};
 use scion_proto::{
     Epochs, ScionClient, TRAILER_POLICY_EPOCH, TRAILER_REDACTION_EPOCH, TRAILER_TIER,
@@ -131,6 +133,26 @@ async fn suite(srv: &TestServer) {
     assert_three(resp.metadata(), ep(15, 25));
     assert_eq!(client.last_epochs(), Some(ep(15, 25)));
 
+    // Client streaming that fails after reading part of the request stream.
+    srv.epochs.set(17, 27);
+    let items: Vec<v1::UploadItem> = (0..3)
+        .map(|i| v1::UploadItem {
+            id: blob_id(i),
+            kind: if i == 1 { UPLOAD_FAIL_KIND } else { 0 },
+            data: vec![i; 10],
+        })
+        .collect();
+    let st = client
+        .write()
+        .upload_objects(tokio_stream::iter(items))
+        .await
+        .unwrap_err();
+    let e = error_from_status(&st);
+    assert_eq!(e.code, ErrorCode::InvalidArgument);
+    assert_eq!(e.subcode(), Some("missing_field"));
+    assert_three(st.metadata(), ep(17, 27));
+    assert_eq!(client.last_epochs(), Some(ep(17, 27)));
+
     // An unknown method on a served-by-nobody service still carries the trailers (UNIMPLEMENTED
     // is produced by the router inside the layer).
     srv.epochs.set(16, 26);
@@ -149,8 +171,8 @@ async fn suite(srv: &TestServer) {
     assert_eq!(st.code(), tonic::Code::Unimplemented);
     assert_three(st.metadata(), ep(16, 26));
 
-    // Call counter: 8 calls so far; shared by clones and with_token; reset works.
-    assert_eq!(client.calls(), 8);
+    // Call counter: 9 calls so far; shared by clones and with_token; reset works.
+    assert_eq!(client.calls(), 9);
     let other = client.with_token(None);
     other
         .objects()
@@ -160,8 +182,8 @@ async fn suite(srv: &TestServer) {
         })
         .await
         .unwrap();
-    assert_eq!(client.calls(), 9);
-    assert_eq!(other.calls(), 9);
+    assert_eq!(client.calls(), 10);
+    assert_eq!(other.calls(), 10);
     client.reset_calls();
     assert_eq!(other.calls(), 0);
     let cloned = client.clone();

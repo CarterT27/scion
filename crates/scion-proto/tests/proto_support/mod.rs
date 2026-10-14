@@ -164,8 +164,11 @@ impl ObjectService for MiniObjects {
     }
 }
 
-/// Minimal WriteService: UploadObjects (client streaming) acknowledges each item; everything else
-/// is UNIMPLEMENTED.
+/// Marker kind: UploadObjects fails with INVALID_ARGUMENT when it reads an item of this kind.
+pub const UPLOAD_FAIL_KIND: u32 = 99;
+
+/// Minimal WriteService: UploadObjects (client streaming) acknowledges each item (or fails on
+/// [`UPLOAD_FAIL_KIND`]); everything else is UNIMPLEMENTED.
 #[derive(Clone, Default)]
 pub struct MiniWrite;
 
@@ -178,6 +181,12 @@ impl WriteService for MiniWrite {
         let mut s = r.into_inner();
         let mut results = Vec::new();
         while let Some(item) = s.message().await? {
+            if item.kind == UPLOAD_FAIL_KIND {
+                return Err(status_from_error(&ScionError::invalid(
+                    "missing_field",
+                    "upload rejected",
+                )));
+            }
             results.push(v1::UploadResult {
                 id: item.id,
                 status: v1::ItemStatus::Ok as i32,
