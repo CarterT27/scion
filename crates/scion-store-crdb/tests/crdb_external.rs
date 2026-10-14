@@ -179,6 +179,7 @@ fn migrations_cover_every_table_and_index() {
         "derived_by_source",
         "redactions_by_epoch",
         "redactions_by_purge_after",
+        "changesets_roots",
     ] {
         assert!(
             all.contains(&format!("CREATE INDEX IF NOT EXISTS {index} ")),
@@ -302,6 +303,7 @@ async fn external_crdb_migrate_is_idempotent() {
         "derived_by_source",
         "redactions_by_epoch",
         "redactions_by_purge_after",
+        "changesets_roots",
     ] {
         assert!(
             indexes.iter().any(|i| i == want),
@@ -368,8 +370,30 @@ async fn external_crdb_retries_serialization_failures() {
         })
         .await
     });
-    // Let the store read `objects` and block on T1's intent.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Wait until the store has read `objects` and is blocked on T1's intent: its redactions
+    // upsert (which runs after the objects read) is visible as an active cluster query.
+    let observer = raw(&url, None).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let blocked: i64 = observer
+            .query_one(
+                "SELECT count(*) FROM crdb_internal.cluster_queries \
+                 WHERE query LIKE 'INSERT INTO redactions%' AND query LIKE '%ON CONFLICT%'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        if blocked > 0 {
+            break;
+        }
+        assert!(!redact.is_finished(), "redact must block on T1's intent");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the store's redact never reached the redactions upsert"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     assert!(!redact.is_finished(), "redact must be blocked on T1");
     t1.execute(
         "UPDATE objects SET stored_size = stored_size WHERE repo_id = $1 AND object_id = $2",
@@ -477,6 +501,25 @@ async fn external_crdb_stale_reads_may_miss_recent_rows() {
         store.get_derived(&k, Consistency::Stale).await.unwrap(),
         None,
         "stale derived read misses the recent row"
+    );
+
+    // SPEC 5.4 / 19.3: ObjectRepo retries a stale miss strongly before reporting NOT_FOUND,
+    // so the just-committed row is found although the follower read above misses it.
+    let shared: Arc<dyn MetaStore> = Arc::new(store.clone());
+    let (repo, _blobs) = repo_over(shared);
+    assert_eq!(repo.stat(&row.id).await.unwrap(), Some(row.clone()));
+    let absent = ObjectId::hash_blob(b"never inserted");
+    assert_eq!(
+        repo.stat_many(&[row.id, absent, probe.id]).await.unwrap(),
+        vec![Some(row.clone()), None, Some(probe.clone())]
+    );
+    assert_eq!(
+        store
+            .get_objects(&[row.id], Consistency::Stale)
+            .await
+            .unwrap(),
+        vec![None],
+        "the follower read still misses the row (the strong retry found it)"
     );
 
     // Eventually the follower read catches up and returns the identical row.
@@ -628,4 +671,134 @@ async fn external_crdb_object_repo_fail_after_insert_leaves_row_and_bytes() {
     assert_eq!(repo.get(&id).await.unwrap(), content);
     let (got, outcome) = repo.put_blob(content.clone()).await.unwrap();
     assert_eq!((got, outcome), (id, InsertOutcome::AlreadyExists));
+}
+
+fn audit(n: u64) -> scion_store::AuditRow {
+    scion_store::AuditRow {
+        at: t(n),
+        actor: "github:admin".to_owned(),
+        action: format!("action-{n}"),
+        target: format!("target-{n}"),
+        reason: "r".to_owned(),
+        detail: String::new(),
+    }
+}
+
+/// storage-semantics 4.6: every audit row gets a new monotonically increasing `seq` from the
+/// in-transaction counter (dense and in commit order), including the rows written by `redact`
+/// and by `cas_ref`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn external_crdb_audit_seq_is_monotonic() {
+    let Some(url) = gate("external_crdb_audit_seq_is_monotonic") else {
+        return;
+    };
+    let store = fresh(&url).await;
+    store.append_audit(audit(1)).await.unwrap();
+    let a = blob_row(b"audited a");
+    let b = blob_row(b"audited b");
+    store.insert_object(a.clone()).await.unwrap();
+    store.insert_object(b.clone()).await.unwrap();
+    store
+        .redact(RedactTxn {
+            ids: vec![a.id, b.id],
+            reason: "leak".to_owned(),
+            actor: "github:admin".to_owned(),
+            at: t(2),
+            purge_after: t(1000),
+        })
+        .await
+        .unwrap();
+    let mut c = cas(&RefName::main(), RefExpect::Absent, cs_id(1));
+    c.audit = Some(audit(3));
+    assert!(matches!(
+        store.cas_ref(c).await.unwrap(),
+        CasOutcome::Committed(Some(_))
+    ));
+    // Concurrent appends all get distinct sequence numbers.
+    let handles: Vec<_> = (10..30u64)
+        .map(|n| {
+            let s = store.clone();
+            tokio::spawn(async move { s.append_audit(audit(n)).await })
+        })
+        .collect();
+    for h in handles {
+        h.await.unwrap().unwrap();
+    }
+    let db = current_db(&store);
+    let seqs: Vec<i64> = raw(&url, Some(&db))
+        .await
+        .query("SELECT seq FROM audit_log ORDER BY seq", &[])
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get(0))
+        .collect();
+    assert_eq!(seqs, (1..=24).collect::<Vec<i64>>(), "dense, monotonic seq");
+    let log = store.audit_log(4).await.unwrap();
+    assert_eq!(log.len(), 4);
+    let head = store.audit_log(100).await.unwrap();
+    assert_eq!(head.len(), 24);
+    assert_eq!(head[0].action, "action-1");
+    assert_eq!(head[1].action, "redact");
+    assert_eq!(head[2].action, "redact");
+    assert_eq!(head[3].action, "action-3");
+    assert_eq!(
+        &head[20..],
+        &log[..],
+        "audit_log(limit) is the newest rows, oldest first"
+    );
+}
+
+/// cas_ref checks the expected version before validating the landed list, like the in-memory
+/// store: a mismatch wins over a duplicate change id, which is otherwise INVALID_ARGUMENT.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn external_crdb_cas_ref_duplicate_landed_after_version_check() {
+    let Some(url) = gate("external_crdb_cas_ref_duplicate_landed_after_version_check") else {
+        return;
+    };
+    let store = fresh(&url).await;
+    let main = RefName::main();
+    let entry = scion_store::LandedEntry {
+        change_id: scion_core::ChangeId([5; 16]),
+        source: cs_id(10),
+        result: cs_id(11),
+    };
+    let mut dup = cas(&main, RefExpect::Version(7), cs_id(1));
+    dup.landed = vec![entry.clone(), entry.clone()];
+    assert_eq!(
+        store.cas_ref(dup.clone()).await.unwrap(),
+        CasOutcome::VersionMismatch { current: None }
+    );
+    dup.expect = RefExpect::Absent;
+    let e = store.cas_ref(dup).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidArgument, "{e}");
+    assert_eq!(store.get_ref(&main).await.unwrap(), None, "no effects");
+    assert!(store.ref_log(&main, 0, 10).await.unwrap().is_empty());
+}
+
+/// `has_root_changeset` is served by the `changesets_roots` partial index instead of a scan
+/// of every changeset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn external_crdb_has_root_changeset_uses_the_roots_index() {
+    let Some(url) = gate("external_crdb_has_root_changeset_uses_the_roots_index") else {
+        return;
+    };
+    let store = fresh(&url).await;
+    assert!(!store.has_root_changeset().await.unwrap());
+    let db = current_db(&store);
+    let plan: Vec<String> = raw(&url, Some(&db))
+        .await
+        .query(
+            "EXPLAIN SELECT EXISTS (SELECT 1 FROM changesets WHERE repo_id = 1 AND generation = 1)",
+            &[],
+        )
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.get(0))
+        .collect();
+    assert!(
+        plan.iter().any(|l| l.contains("changesets_roots")),
+        "{plan:#?}"
+    );
 }

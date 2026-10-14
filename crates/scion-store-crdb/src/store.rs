@@ -76,8 +76,17 @@ const SELECT_EPOCH_FOR_UPDATE: &str =
     "SELECT value FROM counters WHERE repo_id = $1 AND name = 'redaction_epoch' FOR UPDATE";
 const UPSERT_EPOCH: &str =
     "UPSERT INTO counters (repo_id, name, value) VALUES ($1, 'redaction_epoch', $2)";
-const INSERT_AUDIT: &str = "INSERT INTO audit_log (repo_id, at, actor, action, target, reason, \
-     detail) VALUES ($1, $2, $3, $4, $5, $6, $7)";
+/// The audit sequence counter row, locked for update.
+const SELECT_AUDIT_SEQ_FOR_UPDATE: &str =
+    "SELECT value FROM counters WHERE repo_id = $1 AND name = 'audit_seq' FOR UPDATE";
+/// Seeds the audit sequence from existing rows (only when the counter row is absent).
+const MAX_AUDIT_SEQ: &str = "SELECT max(seq) FROM audit_log WHERE repo_id = $1";
+const UPSERT_AUDIT_SEQ: &str =
+    "UPSERT INTO counters (repo_id, name, value) VALUES ($1, 'audit_seq', $2)";
+const INSERT_AUDIT: &str = "INSERT INTO audit_log (repo_id, seq, at, actor, action, target, \
+     reason, detail) SELECT $1, u.s, u.a, u.ac, u.an, u.t, u.r, u.d FROM UNNEST($2::INT8[], \
+     $3::TIMESTAMPTZ[], $4::STRING[], $5::STRING[], $6::STRING[], $7::STRING[], $8::STRING[]) \
+     AS u(s, a, ac, an, t, r, d)";
 
 /// Shared state behind the store handle.
 struct Inner {
@@ -196,20 +205,60 @@ async fn insert_derived(
     Ok(())
 }
 
+/// Append `rows` to `audit_log` in order, numbering them from the `audit_seq` counter row
+/// (storage-semantics 4.6: "a new monotonically increasing `seq`"). The counter is read and
+/// written inside the caller's SERIALIZABLE transaction, so sequence numbers increase in commit
+/// order on every node (a `unique_rowid()` default is only roughly ordered across nodes).
+async fn insert_audits(
+    tx: &deadpool_postgres::Transaction<'_>,
+    rid: i64,
+    rows: &[AuditRow],
+) -> std::result::Result<(), TxErr> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let cur = query(tx, SELECT_AUDIT_SEQ_FOR_UPDATE, &[&rid]).await?;
+    let last: i64 = match cur.first() {
+        Some(r) => col(r, 0)?,
+        None => {
+            let m = query(tx, MAX_AUDIT_SEQ, &[&rid]).await?;
+            match m.first() {
+                Some(r) => col::<Option<i64>>(r, 0)?.unwrap_or(0),
+                None => 0,
+            }
+        }
+    };
+    let n = i64::try_from(rows.len())
+        .map_err(|_| ScionError::new(ErrorCode::InvalidArgument, "too many audit rows"))?;
+    let next = last
+        .checked_add(n)
+        .ok_or_else(|| unavailable(format!("audit sequence exhausted at {last}")))?;
+    execute(tx, UPSERT_AUDIT_SEQ, &[&rid, &next]).await?;
+    let seqs: Vec<i64> = (last + 1..=next).collect();
+    let ats: Vec<SystemTime> = rows.iter().map(|a| a.at).collect();
+    let actors: Vec<&str> = rows.iter().map(|a| a.actor.as_str()).collect();
+    let actions: Vec<&str> = rows.iter().map(|a| a.action.as_str()).collect();
+    let targets: Vec<&str> = rows.iter().map(|a| a.target.as_str()).collect();
+    let reasons: Vec<&str> = rows.iter().map(|a| a.reason.as_str()).collect();
+    let details: Vec<&str> = rows.iter().map(|a| a.detail.as_str()).collect();
+    execute(
+        tx,
+        INSERT_AUDIT,
+        &[
+            &rid, &seqs, &ats, &actors, &actions, &targets, &reasons, &details,
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// [`insert_audits`] for one row.
 async fn insert_audit(
     tx: &deadpool_postgres::Transaction<'_>,
     rid: i64,
     a: &AuditRow,
 ) -> std::result::Result<(), TxErr> {
-    execute(
-        tx,
-        INSERT_AUDIT,
-        &[
-            &rid, &a.at, &a.actor, &a.action, &a.target, &a.reason, &a.detail,
-        ],
-    )
-    .await?;
-    Ok(())
+    insert_audits(tx, rid, std::slice::from_ref(a)).await
 }
 
 /// The current redaction epoch, locked for update (0 when the counter row is absent).
@@ -791,18 +840,14 @@ impl MetaStore for CrdbMetaStore {
                 "cas_ref: cannot delete a ref expected to be absent",
             ));
         }
+        // A duplicate landed change id is INVALID_ARGUMENT, reported after the version check
+        // exactly like the in-memory store (a version mismatch wins).
         let mut seen = BTreeSet::new();
-        for e in &cas.landed {
-            if !seen.insert(e.change_id) {
-                return Err(ScionError::new(
-                    ErrorCode::InvalidArgument,
-                    format!(
-                        "cas_ref: duplicate landed change id {}",
-                        e.change_id.to_hex()
-                    ),
-                ));
-            }
-        }
+        let duplicate = cas
+            .landed
+            .iter()
+            .find(|e| !seen.insert(e.change_id))
+            .map(|e| e.change_id);
         let rid = self.rid();
         let name = cas.name.as_str();
         let landed_bytes = encode_landed(&cas.landed);
@@ -837,6 +882,12 @@ impl MetaStore for CrdbMetaStore {
                 if !matches {
                     tx.commit().await?;
                     return Ok(CasOutcome::VersionMismatch { current });
+                }
+                if let Some(d) = duplicate {
+                    return Err(TxErr::Scion(ScionError::new(
+                        ErrorCode::InvalidArgument,
+                        format!("cas_ref: duplicate landed change id {}", d.to_hex()),
+                    )));
                 }
                 let new_version = match &cas.expect {
                     RefExpect::Version(v) => v.checked_add(1),
@@ -1172,17 +1223,19 @@ impl MetaStore for CrdbMetaStore {
                 )
                 .await?;
             }
-            for id in &t.ids {
-                let a = AuditRow {
+            let audits: Vec<AuditRow> = t
+                .ids
+                .iter()
+                .map(|id| AuditRow {
                     at: t.at,
                     actor: t.actor.clone(),
                     action: "redact".to_owned(),
                     target: id.to_text(),
                     reason: t.reason.clone(),
                     detail: String::new(),
-                };
-                insert_audit(&tx, rid, &a).await?;
-            }
+                })
+                .collect();
+            insert_audits(&tx, rid, &audits).await?;
             tx.commit().await?;
             Ok(epoch)
         })

@@ -142,4 +142,13 @@ CREATE INDEX IF NOT EXISTS redactions_by_epoch ON redactions (repo_id, epoch);
 CREATE INDEX IF NOT EXISTS redactions_by_purge_after ON redactions (repo_id, purge_after) WHERE state = 'quarantined';
 "#,
     ),
+    (
+        // `has_root_changeset` (storage-semantics 4.2) without scanning every changeset: a
+        // partial index holding only the parentless (generation 1) changesets (SPEC 5.2 allows
+        // extra secondary indexes).
+        "0003_changeset_roots_index",
+        r#"
+CREATE INDEX IF NOT EXISTS changesets_roots ON changesets (repo_id) WHERE generation = 1;
+"#,
+    ),
 ];

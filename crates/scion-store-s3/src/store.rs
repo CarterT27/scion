@@ -54,8 +54,10 @@ fn unavailable(op: &str, key: &str, e: impl std::fmt::Display) -> ScionError {
 }
 
 impl S3BlobStore {
-    /// Build the client (no IO). An invalid configuration (e.g. a malformed endpoint) is
-    /// INVALID_ARGUMENT.
+    /// Build the client (no IO; SPEC 5.1, PLAN 2.4). An invalid configuration (an empty bucket
+    /// or endpoint, a malformed endpoint, or only one of `access_key`/`secret_key`) is
+    /// INVALID_ARGUMENT. Without static keys, credentials come from the ambient AWS
+    /// configuration (`AWS_*` environment, web identity, ECS task role, instance metadata).
     pub fn new(cfg: S3Config) -> Result<Self> {
         for (name, v) in [("bucket", &cfg.bucket), ("endpoint", &cfg.endpoint)] {
             if v.trim().is_empty() {
@@ -65,10 +67,19 @@ impl S3BlobStore {
                 ));
             }
         }
-        let mut b = AmazonS3Builder::new()
+        let static_credentials = cfg.access_key.is_some() || cfg.secret_key.is_some();
+        // Without static credentials the ambient AWS configuration supplies them (`AWS_*`
+        // environment variables, web identity, ECS task role or instance metadata). With
+        // static credentials the environment is ignored so the client is fully determined by
+        // `cfg`.
+        let base = if static_credentials {
+            AmazonS3Builder::new()
+        } else {
+            AmazonS3Builder::from_env()
+        };
+        let mut b = base
             .with_endpoint(cfg.endpoint.clone())
             .with_bucket_name(cfg.bucket.clone())
-            .with_region(cfg.region.clone())
             .with_allow_http(cfg.allow_http)
             .with_virtual_hosted_style_request(!cfg.path_style)
             .with_retry(RetryConfig {
@@ -82,15 +93,14 @@ impl S3BlobStore {
                     .with_connect_timeout(Duration::from_secs(5))
                     .with_timeout(Duration::from_secs(60)),
             );
+        if !cfg.region.trim().is_empty() {
+            b = b.with_region(cfg.region.clone());
+        }
         if let Some(k) = &cfg.access_key {
             b = b.with_access_key_id(k.clone());
         }
         if let Some(s) = &cfg.secret_key {
             b = b.with_secret_access_key(s.clone());
-        }
-        if cfg.access_key.is_none() && cfg.secret_key.is_none() {
-            // No static credentials: anonymous requests (public or test buckets).
-            b = b.with_skip_signature(true);
         }
         let store = b.build().map_err(|e| {
             ScionError::new(
@@ -283,6 +293,30 @@ mod tests {
         let bare = S3BlobStore::new(cfg("")).unwrap();
         assert_eq!(bare.full_key("a/b"), "a/b");
         assert_eq!(bare.strip("a/b"), Some("a/b"));
+    }
+
+    #[test]
+    fn credentials_must_come_in_pairs() {
+        let mut half = cfg("p");
+        half.secret_key = None;
+        assert_eq!(
+            S3BlobStore::new(half).unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        let mut half = cfg("p");
+        half.access_key = None;
+        assert_eq!(
+            S3BlobStore::new(half).unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+        let mut ambient = cfg("p");
+        ambient.access_key = None;
+        ambient.secret_key = None;
+        ambient.region = String::new();
+        assert!(
+            S3BlobStore::new(ambient).is_ok(),
+            "ambient credentials, no IO"
+        );
     }
 
     #[test]
