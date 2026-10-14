@@ -21,7 +21,7 @@ use crate::points;
 use crate::remote::{Item, resolve_rev};
 use crate::state::{PendingOperation, WcState};
 use crate::status::Prefixes;
-use crate::wc::{SCION_DIR, WcOptions, WorkingCopy, normalize_scope};
+use crate::wc::{SCION_DIR, WcOptions, WorkingCopy, dirty_error, normalize_scope};
 use scion_core::{EntryInfo, ErrorCode, Mode, ObjectId, Result, ScionError, subcode};
 use scion_object::RepoPath;
 use scion_proto::ScionClient;
@@ -54,6 +54,8 @@ pub(crate) struct Plan {
     pub files: Vec<(RepoPath, EntryInfo)>,
     pub dirs_on_the_way: Vec<RepoPath>,
     pub collisions: Vec<(RepoPath, RepoPath)>,
+    /// Target files that already exist on disk (regular files or symlinks).
+    pub existing: Vec<RepoPath>,
 }
 
 fn blocked(msg: &str) -> ScionError {
@@ -99,6 +101,7 @@ impl WorkingCopy {
             let lock = wc.lock()?;
             let listing = wc.base_listing().await?;
             let plan = wc.plan(&listing, &BTreeSet::new())?;
+            wc.refuse_differing_existing(&plan)?;
             Ok::<_, ScionError>((wc, lock, listing, plan))
         }
         .await;
@@ -195,24 +198,51 @@ impl WorkingCopy {
                 Some(_) => {}
             }
         }
+        let mut existing = Vec::new();
         for (p, _) in &files {
             if parent_absent(p, &absent) {
                 continue;
             }
-            if let Some(st) = self.safe.stat(p)?
-                && st.is_dir()
-            {
-                return Err(ScionError::invalid(
-                    subcode::FILE_DIRECTORY,
-                    "a pre-existing directory is in the way of a file",
-                ));
+            match self.safe.stat(p)? {
+                Some(st) if st.is_dir() => {
+                    return Err(ScionError::invalid(
+                        subcode::FILE_DIRECTORY,
+                        "a pre-existing directory is in the way of a file",
+                    ));
+                }
+                Some(_) => existing.push(p.clone()),
+                None => {}
             }
         }
         Ok(Plan {
             files,
             dirs_on_the_way,
             collisions,
+            existing,
         })
+    }
+
+    /// Refuse a checkout that would overwrite pre-existing files with different content
+    /// (local data is never silently overwritten; files already holding their target content
+    /// are adopted). Checked before any write.
+    fn refuse_differing_existing(&self, plan: &Plan) -> Result<()> {
+        if plan.existing.is_empty() {
+            return Ok(());
+        }
+        let targets: BTreeMap<&RepoPath, &EntryInfo> =
+            plan.files.iter().map(|(p, e)| (p, e)).collect();
+        let mut differing = 0usize;
+        for p in &plan.existing {
+            if let Some(e) = targets.get(p)
+                && self.disk_matches(p, e)?.is_none()
+            {
+                differing += 1;
+            }
+        }
+        if differing > 0 {
+            return Err(dirty_error("checkout", differing));
+        }
+        Ok(())
     }
 
     /// Write a validated plan: directories on the way to scope prefixes (SPEC 11.2), then
@@ -356,7 +386,7 @@ impl WorkingCopy {
             out.removed += 1;
             self.checkpoint(point).await?;
         }
-        let mut by_blob: BTreeMap<ObjectId, Vec<(RepoPath, EntryInfo)>> = BTreeMap::new();
+        let mut by_blob: BTreeMap<ObjectId, Vec<(RepoPath, EntryInfo, bool)>> = BTreeMap::new();
         for c in changes {
             let Some(e) = c.new else { continue };
             if existing != Existing::Overwrite {
@@ -369,18 +399,29 @@ impl WorkingCopy {
                     continue;
                 }
             }
-            by_blob.entry(e.id).or_default().push((c.path.clone(), e));
+            by_blob
+                .entry(e.id)
+                .or_default()
+                .push((c.path.clone(), e, c.old.is_some()));
         }
         let ids: Vec<ObjectId> = by_blob.keys().copied().collect();
         for chunk in ids.chunks(self.opts.fetch_batch.max(1)) {
             let items = self.fetcher.get_objects(chunk).await?;
             for (id, item) in items {
                 let targets = by_blob.remove(&id).unwrap_or_default();
-                for (path, e) in targets {
+                for (path, e, had_old) in targets {
                     match &item {
                         Item::Ok(data) => self.write_one(idx, &path, &e, Some(data))?,
                         Item::Redacted => self.write_one(idx, &path, &e, None)?,
                         Item::Denied => {
+                            // Not readable (SPEC 12.6): recorded as inaccessible and, as in a
+                            // fresh checkout, not materialized; the replaced old version goes.
+                            if had_old {
+                                self.safe.remove(&path)?;
+                                idx.entries.remove(&path);
+                                out.removed += 1;
+                                self.checkpoint(point).await?;
+                            }
                             out.denied.push(path);
                             continue;
                         }

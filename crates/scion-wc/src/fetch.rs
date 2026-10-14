@@ -194,9 +194,11 @@ pub(crate) async fn diff_scope(
                             "the root tree is not readable",
                         ));
                     }
-                    // Unknown new content: leave this subtree untouched.
+                    // The new subtree is not readable (SPEC 12.6): it is recorded as
+                    // inaccessible and, as in a fresh checkout, not materialized, so the old
+                    // files under it are removed (subject to goto's dirty-file protection).
                     out.denied.push(p.path.clone());
-                    continue;
+                    None
                 }
                 Some(n) => Some(cache.require(&n)?),
                 None => None,
