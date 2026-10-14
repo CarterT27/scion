@@ -18,7 +18,11 @@
 //! - **Lost responses**: `FailAfter` at `meta.cas_ref.after` (the commit happens, the response
 //!   is UNAVAILABLE: an `Unknown` completion).
 //!
-//! The checker must report zero violations. Every suite runs on the Memory backend and, as
+//! The checker must report zero violations. A search that exhausts its step budget is
+//! inconclusive rather than a violation; such a seed is recorded again on a fresh ref (at
+//! most twice), and a definite violation fails at once. Each history also passes a negative
+//! control: the same events with the final read claiming an unreachable version must be
+//! rejected. Every suite runs on the Memory backend and, as
 //! `external_*`, on CockroachDB + S3 when `SCION_TEST_CRDB_URL` and `SCION_TEST_S3_ENDPOINT`
 //! are set; spec-sized seed counts are in `full_*` (SCION_FULL).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -78,24 +82,36 @@ fn skip_full() -> bool {
     true
 }
 
-/// Which faults a run injects.
+/// Which faults a run injects, and the size of its histories.
 #[derive(Clone, Copy, Debug)]
 struct Faults {
     kills: bool,
     delays: bool,
     lost_responses: bool,
+    /// Pause between fault actions, in milliseconds (`lo..hi`).
+    every_ms: (u64, u64),
+    /// Concurrent clients.
+    clients: usize,
+    /// Operations per history.
+    ops: usize,
 }
 
 const NO_FAULTS: Faults = Faults {
     kills: false,
     delays: false,
     lost_responses: false,
+    every_ms: (5, 25),
+    clients: CLIENTS,
+    ops: OPS,
 };
 
 const ALL_FAULTS: Faults = Faults {
     kills: true,
     delays: true,
     lost_responses: true,
+    every_ms: (5, 25),
+    clients: CLIENTS,
+    ops: OPS,
 };
 
 /// A lazily (re)connecting client of one server.
@@ -172,17 +188,19 @@ struct Shared {
     ref_name: String,
     /// Operations issued so far.
     issued: AtomicUsize,
+    /// Operations to issue.
+    ops: usize,
     /// Next unused land head.
     next_head: AtomicUsize,
     heads: Vec<ObjectId>,
     pool: Vec<ObjectId>,
 }
 
-/// One client: issues operations until the history has about [`OPS`] of them.
+/// One client: issues operations until the history has about `Shared::ops` of them.
 async fn client_loop(id: u32, mut conn: Conn, sh: Arc<Shared>, seed: u64) {
     let mut rng = ChaCha8Rng::seed_from_u64(seed ^ (u64::from(id) << 32) ^ 0x5eed);
     let mut seen_version: u64 = 1;
-    while sh.issued.load(Ordering::SeqCst) < OPS {
+    while sh.issued.load(Ordering::SeqCst) < sh.ops {
         let Some(client) = conn.get().await else {
             // The server is down: the call could not even be sent (no invocation recorded).
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -270,6 +288,10 @@ async fn client_loop(id: u32, mut conn: Conn, sh: Arc<Shared>, seed: u64) {
                             }
                             RefRet::Mismatch
                         }
+                        // An exhausted storage transaction retry committed nothing.
+                        ErrorCode::Unavailable if e.subcode() == Some(subcode::TXN_RETRY) => {
+                            RefRet::Fail
+                        }
                         ErrorCode::NotFastForward
                         | ErrorCode::PermissionDenied
                         | ErrorCode::InvalidArgument
@@ -315,8 +337,14 @@ async fn client_loop(id: u32, mut conn: Conn, sh: Arc<Shared>, seed: u64) {
                     let e = error_from_status(&s);
                     let ret = match e.code {
                         _ if !is_scion_answer(&s) => RefRet::Unknown,
-                        // The ref is unchanged after max_attempts (SPEC 18.4).
-                        ErrorCode::Unavailable if e.subcode() == Some(subcode::LAND_CONTENTION) => {
+                        // The ref is unchanged after max_attempts (SPEC 18.4), and an
+                        // exhausted storage transaction retry committed nothing.
+                        ErrorCode::Unavailable
+                            if matches!(
+                                e.subcode(),
+                                Some(subcode::LAND_CONTENTION | subcode::TXN_RETRY)
+                            ) =>
+                        {
                             RefRet::Fail
                         }
                         ErrorCode::MergeConflict
@@ -353,12 +381,18 @@ async fn drive_faults(
         points::meta_after("cas_ref"),
     ];
     while !done.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(rng.random_range(5..25))).await;
+        tokio::time::sleep(Duration::from_millis(
+            rng.random_range(faults.every_ms.0..faults.every_ms.1),
+        ))
+        .await;
         match rng.random_range(0..3) {
             0 if faults.kills => {
                 let i = rng.random_range(0..c.servers.len());
                 c.kill_server(i).await;
                 tokio::time::sleep(Duration::from_millis(rng.random_range(5..30))).await;
+                // Startup runs the bootstrap through the same storage; an armed fault there
+                // would fail the restart itself (not a client operation).
+                reg.disarm_all();
                 c.restart_server(i).await;
                 kills += 1;
             }
@@ -381,9 +415,17 @@ async fn drive_faults(
     kills
 }
 
-/// Record and check one history on ref `lin/<seed>`.
-async fn run_seed(c: &mut TestCluster, fx: &Fixture, seed: u64, faults: Faults) -> Stats {
-    let ref_name = format!("lin/s{seed}");
+/// Record and check one history on a fresh ref. A definite violation panics; an
+/// inconclusive search (budget exhausted, see `scion_testkit::lincheck`) is returned as
+/// `Err` so the caller can record a fresh history for the seed.
+async fn run_seed(
+    c: &mut TestCluster,
+    fx: &Fixture,
+    seed: u64,
+    attempt: u32,
+    faults: Faults,
+) -> Result<Stats, String> {
+    let ref_name = format!("lin/s{seed}-{attempt}");
     let admin_client = c.client(scion_conformance::Via::Server, &admin()).await;
     let created = admin_client
         .refs()
@@ -401,13 +443,14 @@ async fn run_seed(c: &mut TestCluster, fx: &Fixture, seed: u64, faults: Faults) 
         rec: HistoryRecorder::new(),
         ref_name: ref_name.clone(),
         issued: AtomicUsize::new(0),
+        ops: faults.ops,
         next_head: AtomicUsize::new(0),
         heads: fx.heads.clone(),
         pool: fx.pool.clone(),
     });
     let token = c.token_for(&admin());
     let mut tasks = tokio::task::JoinSet::new();
-    for id in 0..CLIENTS as u32 {
+    for id in 0..faults.clients as u32 {
         let s = &c.servers[id as usize % c.servers.len()];
         let conn = Conn {
             endpoint: s.endpoint.clone(),
@@ -433,7 +476,7 @@ async fn run_seed(c: &mut TestCluster, fx: &Fixture, seed: u64, faults: Faults) 
 
     // A final read after quiescence, so the recorded history pins the final state too.
     let final_client = c.client(scion_conformance::Via::Server, &admin()).await;
-    let t = sh.rec.invoke(CLIENTS as u32, &ref_name, RefOp::Read);
+    let t = sh.rec.invoke(faults.clients as u32, &ref_name, RefOp::Read);
     let r = final_client
         .objects()
         .resolve_ref(v1::ResolveRefRequest {
@@ -459,15 +502,21 @@ async fn run_seed(c: &mut TestCluster, fx: &Fixture, seed: u64, faults: Faults) 
         "seed {seed}: every invocation completed"
     );
     assert!(
-        invoked >= OPS / 2,
+        invoked >= faults.ops / 2,
         "seed {seed}: only {invoked} operations were issued"
     );
     if let Err(v) = check_ref_registers(&events) {
+        if v.detail.contains("inconclusive") {
+            return Err(format!("seed {seed} attempt {attempt}: {v}"));
+        }
         panic!("seed {seed} ({faults:?}): linearizability violation: {v}\nhistory: {events:#?}");
     }
     let initial: BTreeMap<String, (u64, [u8; 34])> =
         [(ref_name.clone(), (1, *fx.root.as_bytes()))].into();
     if let Err(v) = check_ref_registers_with_initial(&events, &initial) {
+        if v.detail.contains("inconclusive") {
+            return Err(format!("seed {seed} attempt {attempt}: {v}"));
+        }
         panic!("seed {seed} ({faults:?}): violation from the known initial state: {v}");
     }
 
@@ -484,7 +533,7 @@ async fn run_seed(c: &mut TestCluster, fx: &Fixture, seed: u64, faults: Faults) 
         check_ref_registers_with_initial(&tampered, &initial).is_err(),
         "seed {seed}: a tampered history must not be linearizable"
     );
-    stats
+    Ok(stats)
 }
 
 /// Outcome counts of recorded histories (to show the runs exercise every outcome).
@@ -543,8 +592,25 @@ async fn run(backend: Backend, seeds: std::ops::Range<u64>, faults: Faults) {
     .await;
     let fx = fixture(&c).await;
     let mut total = Stats::default();
+    let mut inconclusive = Vec::new();
     for seed in seeds {
-        total.add(&run_seed(&mut c, &fx, seed, faults).await);
+        let mut attempt = 0;
+        loop {
+            match run_seed(&mut c, &fx, seed, attempt, faults).await {
+                Ok(stats) => {
+                    total.add(&stats);
+                    break;
+                }
+                Err(e) if attempt < 2 => {
+                    inconclusive.push(e);
+                    attempt += 1;
+                }
+                Err(e) => panic!("seed {seed}: three inconclusive histories in a row: {e}"),
+            }
+        }
+    }
+    if !inconclusive.is_empty() {
+        println!("re-recorded after an inconclusive search: {inconclusive:?}");
     }
     println!("linearizability ({faults:?}): {total:?}");
     assert!(total.reads > 0 && total.cas_ok > 0 && total.lands_ok > 0 && total.mismatches > 0);
@@ -576,6 +642,9 @@ async fn ref_histories_are_linearizable_with_kills_only() {
             kills: true,
             delays: false,
             lost_responses: false,
+            every_ms: (5, 25),
+            clients: CLIENTS,
+            ops: OPS,
         },
     )
     .await;
@@ -595,5 +664,18 @@ async fn external_ref_histories_are_linearizable_with_kills_and_delays() {
     if skip_external() {
         return;
     }
-    run(Backend::External, 300..304, ALL_FAULTS).await;
+    // CockroachDB calls take longer, so more calls overlap and each fault catches more of
+    // them in flight; fewer clients, shorter histories and sparser faults keep the WGL search
+    // within its budget.
+    run(
+        Backend::External,
+        300..306,
+        Faults {
+            every_ms: (150, 400),
+            clients: 4,
+            ops: 120,
+            ..ALL_FAULTS
+        },
+    )
+    .await;
 }

@@ -112,6 +112,31 @@ async fn land_retrying(
     }
 }
 
+/// [`TestCluster::commit`], retrying retryable failures (SPEC 7.2: on the External backend,
+/// CockroachDB contention between concurrent creates surfaces as UNAVAILABLE/txn_retry).
+async fn commit_retrying(
+    client: &ScionClient,
+    parent: &ObjectId,
+    puts: &[(&str, &[u8])],
+    deletes: &[&str],
+    change: u32,
+) -> ObjectId {
+    let contents: Vec<&[u8]> = puts.iter().map(|(_, c)| *c).collect();
+    TestCluster::upload(client, &contents).await;
+    let req = TestCluster::create_request(parent, puts, deletes, change);
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        match client.write().create_changeset(req.clone()).await {
+            Ok(r) => return oid(&r.into_inner().changeset_id),
+            Err(s) if tries < 50 && error_from_status(&s).retryable() => {
+                tokio::time::sleep(std::time::Duration::from_millis(10 * tries)).await;
+            }
+            Err(s) => panic!("CreateChangeset failed: {s:?}"),
+        }
+    }
+}
+
 /// The whole ref log of `name` (ascending).
 async fn ref_log(client: &ScionClient, name: &str) -> Vec<v1::RefLogEntryMsg> {
     let mut out: Vec<v1::RefLogEntryMsg> = Vec::new();
@@ -280,7 +305,7 @@ async fn run_non_overlapping(backend: Backend, n: usize) {
     for i in 0..n {
         let client = clients[i % SERVERS].clone();
         tasks.spawn(async move {
-            let cs = TestCluster::commit(
+            let cs = commit_retrying(
                 &client,
                 &root,
                 &[(&path(i), &content(i))],
@@ -424,7 +449,7 @@ fn edited(base: &[Vec<u8>], slot: usize, text: &str) -> Vec<u8> {
 /// Land `base` on `main` and return `(base changeset tip, version after)`.
 async fn land_base(c: &TestCluster, client: &ScionClient, content: &[u8]) -> (ObjectId, u64) {
     let (root, _) = c.ref_head("main").await;
-    let base = TestCluster::commit(client, &root, &[("shared.txt", content)], &[], 1).await;
+    let base = commit_retrying(client, &root, &[("shared.txt", content)], &[], 1).await;
     let r = land_retrying(client, &base).await.expect("land the base");
     (oid(&r.target), r.version)
 }
@@ -440,7 +465,7 @@ async fn land_edits(
     let mut heads = Vec::new();
     for (i, content) in &edits {
         let client = &clients[i % SERVERS];
-        let cs = TestCluster::commit(
+        let cs = commit_retrying(
             client,
             base,
             &[("shared.txt", content)],
@@ -680,14 +705,14 @@ async fn run_idempotent_retry(backend: Backend) {
     let (root, _) = c.ref_head("main").await;
     // Move `main` first so that the stack below is rebased (its results differ from its
     // sources and the retry must find them in the `landed` index).
-    let pre = TestCluster::commit(&clients[0], &root, &[("idem/pre.txt", b"p\n")], &[], 41).await;
+    let pre = commit_retrying(&clients[0], &root, &[("idem/pre.txt", b"p\n")], &[], 41).await;
     land_retrying(&clients[0], &pre)
         .await
         .expect("land the first change");
     let (_, v0) = c.ref_head("main").await;
-    let head = TestCluster::commit(&clients[0], &root, &[("idem/a.txt", b"a\n")], &[], 42).await;
+    let head = commit_retrying(&clients[0], &root, &[("idem/a.txt", b"a\n")], &[], 42).await;
     // A two-member stack: both members are recorded by the one committed CAS.
-    let top = TestCluster::commit(&clients[0], &head, &[("idem/b.txt", b"b\n")], &[], 43).await;
+    let top = commit_retrying(&clients[0], &head, &[("idem/b.txt", b"b\n")], &[], 43).await;
 
     let faults = c.faults();
     let point = points::meta_after("cas_ref");
@@ -746,7 +771,7 @@ async fn run_idempotent_retry(backend: Backend) {
     for i in 0..n {
         let p = format!("idem/c{i}.txt");
         heads.push(
-            TestCluster::commit(
+            commit_retrying(
                 &clients[i % SERVERS],
                 &root,
                 &[(&p, format!("c{i}\n").as_bytes())],

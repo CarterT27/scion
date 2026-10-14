@@ -655,6 +655,29 @@ impl Env {
     }
 }
 
+/// Run `call` again while it fails UNAVAILABLE/txn_retry: the storage transaction was
+/// aborted without effect (CockroachDB contention between the concurrently running seeds on
+/// the External backend; retryable per SPEC 7.2). Every other outcome is returned.
+async fn no_txn_retry<T, F, Fut>(mut call: F) -> Result<T, tonic::Status>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<tonic::Response<T>, tonic::Status>>,
+{
+    let mut tries = 0u64;
+    loop {
+        tries += 1;
+        match call().await {
+            Err(s)
+                if tries < 30
+                    && error_from_status(&s).subcode() == Some(scion_core::subcode::TXN_RETRY) =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(5 * tries)).await;
+            }
+            r => return r.map(tonic::Response::into_inner),
+        }
+    }
+}
+
 /// The comparable parts of a failed call.
 fn real_err(s: &tonic::Status) -> (String, Option<String>, Option<BTreeSet<(Vec<u8>, String)>>) {
     let code = TestCluster::error_detail(s)
@@ -941,18 +964,21 @@ impl<'a> Seed<'a> {
         let model = self.model.create(parent, &delta, meta, change);
         self.upload(&delta).await;
         let s = self.server();
-        let real = self.env.alice[s]
-            .write()
-            .create_changeset(v1::CreateChangesetRequest {
-                parents: vec![idb(&self.model.commits[parent].id)],
-                delta: to_proto(&delta),
-                meta_fields: Some(meta_fields(&msg, time)),
-                change_id: change.to_vec(),
-                expected_root_tree: None,
-                import_mode: false,
-            })
-            .await
-            .map(|r| r.into_inner());
+        let req = v1::CreateChangesetRequest {
+            parents: vec![idb(&self.model.commits[parent].id)],
+            delta: to_proto(&delta),
+            meta_fields: Some(meta_fields(&msg, time)),
+            change_id: change.to_vec(),
+            expected_root_tree: None,
+            import_mode: false,
+        };
+        let client = self.env.alice[s].clone();
+        let real = no_txn_retry(|| {
+            let mut svc = client.write();
+            let req = req.clone();
+            async move { svc.create_changeset(req).await }
+        })
+        .await;
         compare(&format!("op {k} {kind}"), &real, &model, |r, m| {
             same_id(&r.changeset_id, &m.id)
         })?;
@@ -980,14 +1006,17 @@ impl<'a> Seed<'a> {
         let onto = self.pick();
         let model = self.model.rebase(c, onto);
         let s = self.server();
-        let real = self.env.alice[s]
-            .write()
-            .rebase(v1::RebaseRequest {
-                changeset: idb(&self.model.commits[c].id),
-                onto: idb(&self.model.commits[onto].id),
-            })
-            .await
-            .map(|r| r.into_inner());
+        let req = v1::RebaseRequest {
+            changeset: idb(&self.model.commits[c].id),
+            onto: idb(&self.model.commits[onto].id),
+        };
+        let client = self.env.alice[s].clone();
+        let real = no_txn_retry(|| {
+            let mut svc = client.write();
+            let req = req.clone();
+            async move { svc.rebase(req).await }
+        })
+        .await;
         let expected = model
             .as_ref()
             .map(|r| match r {
@@ -1020,16 +1049,19 @@ impl<'a> Seed<'a> {
         let meta = self.model.meta(&msg, time, &alice());
         let model = self.model.merge(a, b, meta, change);
         let s = self.server();
-        let real = self.env.alice[s]
-            .write()
-            .merge(v1::MergeRequest {
-                a: idb(&self.model.commits[a].id),
-                b: idb(&self.model.commits[b].id),
-                meta_fields: Some(meta_fields(&msg, time)),
-                change_id: change.to_vec(),
-            })
-            .await
-            .map(|r| r.into_inner());
+        let req = v1::MergeRequest {
+            a: idb(&self.model.commits[a].id),
+            b: idb(&self.model.commits[b].id),
+            meta_fields: Some(meta_fields(&msg, time)),
+            change_id: change.to_vec(),
+        };
+        let client = self.env.alice[s].clone();
+        let real = no_txn_retry(|| {
+            let mut svc = client.write();
+            let req = req.clone();
+            async move { svc.merge(req).await }
+        })
+        .await;
         compare(&format!("op {k} merge"), &real, &model, |r, m| {
             same_id(&r.changeset_id, &m.id)
         })?;
@@ -1055,15 +1087,18 @@ impl<'a> Seed<'a> {
         let allow_empty = self.rng.random_range(0..5) == 0;
         let model = self.model.land(&name, head, allow_empty);
         let s = self.server();
-        let real = self.env.alice[s]
-            .write()
-            .land(v1::LandRequest {
-                r#ref: name.clone(),
-                head: idb(&self.model.commits[head].id),
-                allow_empty,
-            })
-            .await
-            .map(|r| r.into_inner());
+        let req = v1::LandRequest {
+            r#ref: name.clone(),
+            head: idb(&self.model.commits[head].id),
+            allow_empty,
+        };
+        let client = self.env.alice[s].clone();
+        let real = no_txn_retry(|| {
+            let mut svc = client.write();
+            let req = req.clone();
+            async move { svc.land(req).await }
+        })
+        .await;
         compare(&format!("op {k} land {name}"), &real, &model, |r, m| {
             same_id(&r.target, &m.0)?;
             if r.version != m.1 {
@@ -1125,16 +1160,19 @@ impl<'a> Seed<'a> {
         } else {
             &self.env.alice[s]
         };
-        let real = client
-            .refs()
-            .update_ref(v1::UpdateRefRequest {
-                name: name.clone(),
-                expected_version: expected,
-                new_target: idb(&self.model.commits[target].id),
-                allow_non_fast_forward: flag,
-            })
-            .await
-            .map(|r| r.into_inner());
+        let req = v1::UpdateRefRequest {
+            name: name.clone(),
+            expected_version: expected,
+            new_target: idb(&self.model.commits[target].id),
+            allow_non_fast_forward: flag,
+        };
+        let client = client.clone();
+        let real = no_txn_retry(|| {
+            let mut svc = client.refs();
+            let req = req.clone();
+            async move { svc.update_ref(req).await }
+        })
+        .await;
         compare(
             &format!("op {k} update_ref {name}"),
             &real,
@@ -1166,16 +1204,19 @@ impl<'a> Seed<'a> {
         }
         let content = candidates[self.rng.random_range(0..candidates.len())].clone();
         let s = self.server();
-        let r = self.env.admin[s]
-            .admin()
-            .redact(v1::RedactRequest {
-                object_ids: vec![blob_id(&content).to_vec()],
-                reason: format!("differential seed {}", self.seed),
-                purge_after_seconds: None,
-            })
-            .await
-            .map_err(|s| format!("op {k} redact: {s:?}"))?
-            .into_inner();
+        let req = v1::RedactRequest {
+            object_ids: vec![blob_id(&content).to_vec()],
+            reason: format!("differential seed {}", self.seed),
+            purge_after_seconds: None,
+        };
+        let client = self.env.admin[s].clone();
+        let r = no_txn_retry(|| {
+            let mut svc = client.admin();
+            let req = req.clone();
+            async move { svc.redact(req).await }
+        })
+        .await
+        .map_err(|s| format!("op {k} redact: {s:?}"))?;
         if !self.ignore_redactions {
             self.model.redacted.insert(content);
         }
