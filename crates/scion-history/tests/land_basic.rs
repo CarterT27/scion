@@ -571,3 +571,177 @@ async fn concurrent_lands_of_two_revisions_of_one_change_land_once() {
     assert_eq!(err.code, ErrorCode::AlreadyLanded);
     assert_eq!(env.main_row().await.version, 2);
 }
+
+/// Fast-forward `main` to `target` (UpdateRef at the current version).
+async fn ff_main(env: &Env, target: scion_core::ObjectId) {
+    let row = env.main_row().await;
+    env.h
+        .update_ref(
+            scion_history::UpdateRefRequest {
+                name: main(),
+                expected_version: row.version,
+                new_target: target,
+                allow_non_fast_forward: false,
+            },
+            &alice(),
+            &Authz::ALL,
+        )
+        .await
+        .unwrap();
+}
+
+/// A merge of `parents` whose delta (relative to the first parent) puts `files`.
+async fn merge_of(
+    env: &Env,
+    parents: Vec<scion_core::ObjectId>,
+    files: &[&str],
+    change: u8,
+) -> scion_core::ObjectId {
+    let mut delta = Vec::new();
+    for f in files {
+        delta.push(put(&env.h, f, &format!("{f}\n")).await);
+    }
+    commit_delta(&env.h, parents, delta, cid(change)).await
+}
+
+/// SPEC 8.4 / 18.5: with merges on `main`, the stack stops at the first changeset that is an
+/// ancestor of the tip by ANY path, including side branches merged through nested merges, while
+/// unmerged descendants of a merged side branch stay in the stack.
+#[tokio::test]
+async fn stack_detection_with_nested_merges_on_main() {
+    let env = env().await;
+    let root = env.root;
+    // main: root -> m1 -> m2 -> m3; side branch s1 -> s2 off m1, plus an unmerged x1 on s2.
+    let m1 = env.commit(root, "m1.txt", "m1.txt\n", 1).await;
+    let m2 = env.commit(m1, "m2.txt", "m2.txt\n", 2).await;
+    let m3 = env.commit(m2, "m3.txt", "m3.txt\n", 3).await;
+    let s1 = env.commit(m1, "s1.txt", "s1.txt\n", 4).await;
+    let s2 = env.commit(s1, "s2.txt", "s2.txt\n", 5).await;
+    let x1 = env.commit(s2, "x1.txt", "x1.txt\n", 6).await;
+    // A second side branch q1 -> q2 off root, merged into another side merge n = [q2, k1] which
+    // is then merged into main (a nested merge: q1 is not on main's first-parent chain, and
+    // neither is n).
+    let q1 = env.commit(root, "q1.txt", "q1.txt\n", 7).await;
+    let q2 = env.commit(q1, "q2.txt", "q2.txt\n", 8).await;
+    let k1 = env.commit(root, "k1.txt", "k1.txt\n", 9).await;
+    let n = merge_of(&env, vec![q2, k1], &["k1.txt"], 10).await;
+    let big = merge_of(&env, vec![m3, s2], &["s1.txt", "s2.txt"], 11).await;
+    let top = merge_of(&env, vec![big, n], &["k1.txt", "q1.txt", "q2.txt"], 12).await;
+    let mut tip = top;
+    for i in 0..20u8 {
+        tip = env
+            .commit(tip, &format!("t/{i}.txt"), &format!("{i}\n"), 100 + i)
+            .await;
+    }
+    ff_main(&env, tip).await;
+
+    // Stack on the merged side branch: [h1, h2] (s2 is an ancestor through `big`).
+    let h1 = env.commit(s2, "h1.txt", "h1\n", 30).await;
+    let h2 = env.commit(h1, "h2.txt", "h2\n", 31).await;
+    let r = env.land(h2).await.unwrap();
+    let sources: Vec<_> = r.landed.iter().map(|e| e.source).collect();
+    assert_eq!(sources, vec![h1, h2]);
+
+    // Stack on the unmerged x1 (child of the merged s2): [x1, y1].
+    let y1 = env.commit(x1, "y1.txt", "y1\n", 32).await;
+    let r = env.land(y1).await.unwrap();
+    let sources: Vec<_> = r.landed.iter().map(|e| e.source).collect();
+    assert_eq!(sources, vec![x1, y1]);
+
+    // Stack on q1, reachable from the tip only through two merges: [z1].
+    let z1 = env.commit(q1, "z1.txt", "z1\n", 33).await;
+    let r = env.land(z1).await.unwrap();
+    let sources: Vec<_> = r.landed.iter().map(|e| e.source).collect();
+    assert_eq!(sources, vec![z1]);
+
+    // A head that is itself an ancestor through merges is an idempotent no-op.
+    let row = env.main_row().await;
+    let r = env.land(q2).await.unwrap();
+    assert_eq!((r.target, r.version), (row.target, row.version));
+    assert!(r.landed.is_empty());
+    for f in [
+        "s1.txt", "s2.txt", "x1.txt", "y1.txt", "q1.txt", "z1.txt", "h2.txt",
+    ] {
+        assert!(env.read(&row.target, f).await.is_some(), "{f}");
+    }
+    assert_fsck_clean(&env.h).await;
+}
+
+/// SPEC 8.4 `Retrying` on a `landed` unique violation: a concurrent land of another revision
+/// commits between `Checking` and `Committing`; the retry re-reads the index and fails
+/// ALREADY_LANDED with the ref unchanged.
+#[tokio::test]
+async fn landed_unique_violation_is_retried_then_already_landed() {
+    let env = env().await;
+    let x = env.commit(env.root, "x.txt", "x\n", 10).await;
+    env.land(x).await.unwrap();
+    let a = env.commit(env.root, "a.txt", "a\n", 1).await;
+    let landed = env.land(a).await.unwrap();
+    env.observer.take();
+    // Another revision of change 1 (non-conflicting content).
+    let amended = env.commit(env.root, "a2.txt", "a2\n", 1).await;
+    env.contended.hide_landed(1);
+    let err = env.land(amended).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::AlreadyLanded);
+    assert_eq!(
+        err.payload,
+        ErrorPayload::AlreadyLanded {
+            source: a,
+            result: landed.target,
+            version: landed.version
+        }
+    );
+    assert_eq!(
+        env.observer.take(),
+        vec![
+            (1, LandAttemptOutcome::LandedConflict),
+            (2, LandAttemptOutcome::Failed(ErrorCode::AlreadyLanded))
+        ]
+    );
+    let row = env.main_row().await;
+    assert_eq!((row.target, row.version), (landed.target, landed.version));
+    assert_eq!(env.log(&main()).await.len() as u64, landed.version);
+}
+
+/// A `landed` unique violation caused by a concurrent land of the SAME source: the retry finds
+/// the recorded row and returns it (idempotent), without a second ref version.
+#[tokio::test]
+async fn landed_unique_violation_from_the_same_source_is_idempotent() {
+    let env = env().await;
+    let x = env.commit(env.root, "x.txt", "x\n", 10).await;
+    env.land(x).await.unwrap();
+    let b = env.commit(env.root, "b.txt", "b\n", 2).await;
+    let first = env.land(b).await.unwrap();
+    env.observer.take();
+    env.contended.hide_landed(1);
+    // The blind attempt re-rebases `b` (empty on the new tip, recorded as onto with
+    // allow_empty) and loses on the unique index; the retry sees the recorded row.
+    let r = env.land_on(&main(), b, true).await.unwrap();
+    assert_eq!(r, first);
+    assert_eq!(
+        env.observer.take(),
+        vec![
+            (1, LandAttemptOutcome::LandedConflict),
+            (2, LandAttemptOutcome::Idempotent)
+        ]
+    );
+    assert_eq!(env.main_row().await.version, first.version);
+    assert_eq!(env.log(&main()).await.len() as u64, first.version);
+}
+
+/// Two revisions of one change id in a single stack are rejected up front (they could never
+/// both be recorded in the `landed` index).
+#[tokio::test]
+async fn duplicate_change_id_in_one_stack_is_rejected() {
+    let env = env().await;
+    let s1 = env.commit(env.root, "s1.txt", "s1\n", 40).await;
+    let s2 = env.commit(s1, "s2.txt", "s2\n", 40).await;
+    let err = env.land(s2).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert_eq!(err.subcode(), Some(subcode::DUPLICATE));
+    assert_eq!(
+        env.observer.take(),
+        vec![(1, LandAttemptOutcome::Failed(ErrorCode::InvalidArgument))]
+    );
+    assert_eq!(env.main_row().await.version, 1);
+}

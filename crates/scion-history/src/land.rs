@@ -2,10 +2,12 @@
 //!
 //! Each attempt runs the SPEC 8.4 states `Resolving` -> stack detection -> `Checking` ->
 //! `Rebasing` -> `Committing` with a constant number of metadata transactions besides the
-//! per-member reads: one strong ref read, one `get_landed` per stack member, the rebases, and one
-//! `cas_ref`. No lock or lease is ever taken: progress depends only on the single-row CAS, and a
-//! lost race (`VersionMismatch` or a `landed` unique violation) backs off with full jitter and
-//! starts over at `Resolving`, re-reading the ref AND the policy.
+//! per-member reads: one strong ref read, the stack detection (skip-pointer reads, cached, plus
+//! one strong `changeset_children` read per stack member; independent of how far behind the tip
+//! the stack's base is), one `get_landed` per stack member, the rebases, and one `cas_ref`.
+//! No lock or lease is ever taken: progress depends only on the single-row CAS, and a lost race
+//! (`VersionMismatch` or a `landed` unique violation) backs off with full jitter and starts over
+//! at `Resolving`, re-reading the ref AND the policy.
 
 use crate::history::History;
 use crate::hooks::{LandAttemptOutcome, LandAuthorizer, LandAuthorizerSource, Rebaser};
@@ -17,7 +19,7 @@ use rand_chacha::ChaCha8Rng;
 use scion_core::fault::points;
 use scion_core::{ErrorCode, ErrorPayload, ObjectId, Principal, Result, ScionError, subcode};
 use scion_store::{CasOutcome, LandedEntry, RefCas, RefExpect};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -258,8 +260,11 @@ impl History {
         let mut seen = BTreeSet::new();
         for m in &pending {
             if !seen.insert(m.changeset.change_id) {
-                return Err(ScionError::new(
-                    ErrorCode::InvalidArgument,
+                // Two revisions of one change in one stack: the second `landed` row would hit
+                // the unique index on every attempt, so fail fast instead of retrying until
+                // land_contention.
+                return Err(ScionError::invalid(
+                    subcode::DUPLICATE,
                     format!(
                         "change {} appears twice in the stack",
                         m.changeset.change_id.to_hex()
@@ -359,6 +364,21 @@ impl History {
     }
 
     /// Is `c` (generation `gen_c`) an ancestor of `tip` by any path (SPEC 18.5 full form)?
+    ///
+    /// The generation-pruned search down from `tip` costs O(generation gap) on a linear `main`,
+    /// which would make a land with a stale base linear in how far behind it is. The answer is
+    /// therefore computed bidirectionally, one step of each side in turn, and the first side to
+    /// finish decides:
+    /// - down: the SPEC 18.5 generation-pruned DFS from `tip` (finds `c`, or exhausts: false);
+    /// - up: a BFS over `changeset_children` from `c`, pruned to generations below `tip`'s. A
+    ///   descendant of `c` that is `tip` or on `tip`'s first-parent chain (O(log n) skip-pointer
+    ///   check) proves ancestry; exhausting every such descendant proves the opposite, because
+    ///   every path from `c` up to `tip` runs through ancestors of `tip`.
+    ///
+    /// For a fresh stack the candidate's descendants are the members above it, so the up side
+    /// finishes after O(stack) steps independent of the gap (SPEC 19.18). `children` is a strong
+    /// read, and every changeset on a path down from `tip` was committed before `tip` became the
+    /// ref target, so no relevant edge can be missed.
     async fn tip_ancestor(
         &self,
         c: &ObjectId,
@@ -372,7 +392,50 @@ impl History {
         if gen_c >= tip_gen {
             return Ok(false);
         }
-        self.is_ancestor(c, tip).await
+        let mut down = vec![*tip];
+        let mut down_seen: HashSet<ObjectId> = HashSet::new();
+        let mut up = VecDeque::from([*c]);
+        let mut up_seen: HashSet<ObjectId> = HashSet::from([*c]);
+        loop {
+            // One step down from `tip`.
+            let Some(x) = down.pop() else {
+                return Ok(false);
+            };
+            if x == *c {
+                return Ok(true);
+            }
+            if down_seen.insert(x) {
+                let (cs, row) = self.objects.get_changeset(&x).await?;
+                if row.generation > gen_c {
+                    // Reverse push so the first parent is explored first.
+                    for p in cs.parents.iter().rev() {
+                        if !down_seen.contains(p) {
+                            down.push(*p);
+                        }
+                    }
+                }
+            }
+            // One step up from `c`.
+            let Some(y) = up.pop_front() else {
+                return Ok(false);
+            };
+            for child in self.meta().children(&y).await? {
+                if child == *tip {
+                    return Ok(true);
+                }
+                if !up_seen.insert(child) {
+                    continue;
+                }
+                let gen_child = self.objects.get_changeset(&child).await?.1.generation;
+                if gen_child >= tip_gen {
+                    continue;
+                }
+                if self.is_first_parent_ancestor(&child, tip).await? {
+                    return Ok(true);
+                }
+                up.push_back(child);
+            }
+        }
     }
 
     /// SPEC 8.4 stack detection, oldest member first: the first-parent chain from `head` back
@@ -382,8 +445,9 @@ impl History {
     /// ancestor is an ancestor). The walk stops at the first changeset on `tip`'s first-parent
     /// history (O(log n) via skip pointers, SPEC 18.5). Members reachable from `tip` only
     /// through a merge (possible only when `tip`'s history contains merges) are then trimmed
-    /// with the full generation-pruned form: one check of the oldest candidate, plus a binary
-    /// search when it turns out to be an ancestor. A multi-parent (or parentless) member fails
+    /// with the full form ([`History::tip_ancestor`], bidirectional so that a stale base on a
+    /// linear `main` costs O(stack), not O(gap)): one check of the oldest candidate, plus a
+    /// binary search when it turns out to be an ancestor. A multi-parent (or parentless) member fails
     /// INVALID_ARGUMENT/merge_in_stack.
     async fn land_stack(&self, head: &ObjectId, tip: &ObjectId) -> Result<Vec<ChangesetRecord>> {
         let tip_gen = self.changeset(tip).await?.generation;

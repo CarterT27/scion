@@ -47,11 +47,7 @@ async fn one_file_put(h: &History, path: RepoPath, content: &str) -> DeltaEntry 
 async fn measure(files: u64) -> Gate {
     let repo = shared_subtree_repo(files, DEPTH);
     let mem = Arc::new(scion_store::MemMetaStore::new(MemOptions::default()));
-    let contended = Arc::new(ContendedMeta {
-        inner: mem.clone(),
-        forced_mismatches: Default::default(),
-        cas_calls: Default::default(),
-    });
+    let contended = Arc::new(ContendedMeta::new(mem.clone()));
     let storage = Storage::new(
         contended.clone(),
         Arc::new(scion_store::MemBlobStore::new()),
@@ -224,4 +220,62 @@ async fn full_land_gate_1e7() {
     let small = measure(1_000).await;
     let huge = measure(10_000_000).await;
     check(&small, &huge);
+}
+
+/// Counter deltas of a 1-file land whose base is `gap` versions behind the tip of a linear main.
+async fn stale_base_land(gap: u16) -> CounterSnapshot {
+    let env = env().await;
+    let mut tip = env.root;
+    for i in 0..gap {
+        let delta = vec![land_support::put(&env.h, &format!("m/{i}.txt"), "m\n").await];
+        let next = commit_delta(&env.h, vec![tip], delta, cid16(i)).await;
+        env.h
+            .update_ref(
+                scion_history::UpdateRefRequest {
+                    name: main(),
+                    expected_version: u64::from(i) + 1,
+                    new_target: next,
+                    allow_non_fast_forward: false,
+                },
+                &alice(),
+                &AllowAll,
+            )
+            .await
+            .unwrap();
+        tip = next;
+    }
+    let head = env.commit(env.root, "stale.txt", "stale\n", 1).await;
+    let before = env.counters.snapshot();
+    let r = env.land(head).await.unwrap();
+    let delta = env.counters.snapshot() - before;
+    assert_eq!(r.version, u64::from(gap) + 2);
+    assert_eq!(
+        env.h.changeset(&r.target).await.unwrap().changeset.parents,
+        vec![tip]
+    );
+    eprintln!(
+        "stale-base land, gap {gap}: meta_txns {}, changesets_read {}",
+        delta.meta_txns, delta.changesets_read
+    );
+    delta
+}
+
+/// SPEC 18.5 / 19.18: on a linear main, stack detection uses the first-parent form, so the work
+/// of a land does not grow linearly with how far behind the tip the stack's base is.
+#[tokio::test]
+async fn stale_base_stack_detection_is_not_linear_in_the_gap() {
+    let small = stale_base_land(16).await;
+    let large = stale_base_land(512).await;
+    assert!(
+        large.changesets_read <= small.changesets_read + 64,
+        "changesets read: gap 16 -> {}, gap 512 -> {}",
+        small.changesets_read,
+        large.changesets_read
+    );
+    assert!(
+        large.meta_txns <= small.meta_txns + 16,
+        "meta txns: gap 16 -> {}, gap 512 -> {}",
+        small.meta_txns,
+        large.meta_txns
+    );
 }

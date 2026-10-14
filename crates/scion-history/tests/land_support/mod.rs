@@ -31,16 +31,43 @@ use std::time::{Duration, SystemTime};
 // ---------------------------------------------------------------------------------------------
 
 /// Delegates to `MemMetaStore`; `cas_ref` reports `VersionMismatch` (with the real current row,
-/// no effect) while `forced_mismatches > 0` (`u32::MAX` = always).
+/// no effect) while `forced_mismatches > 0` (`u32::MAX` = always), and `get_landed` reports
+/// "not landed" while `landed_blind > 0` (a concurrent land committing between the `Checking`
+/// read and the CAS, so the CAS hits the `landed` unique violation).
 pub struct ContendedMeta {
     pub inner: Arc<MemMetaStore>,
     pub forced_mismatches: AtomicU32,
     pub cas_calls: AtomicU32,
+    pub landed_blind: AtomicU32,
+}
+
+/// Decrement `n` unless it is 0 (`u32::MAX` = forever); true when it was positive.
+fn take_one(n: &AtomicU32) -> bool {
+    n.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| match n {
+        0 => None,
+        u32::MAX => Some(u32::MAX),
+        n => Some(n - 1),
+    })
+    .is_ok()
 }
 
 impl ContendedMeta {
+    pub fn new(inner: Arc<MemMetaStore>) -> Self {
+        ContendedMeta {
+            inner,
+            forced_mismatches: AtomicU32::new(0),
+            cas_calls: AtomicU32::new(0),
+            landed_blind: AtomicU32::new(0),
+        }
+    }
+
     pub fn force_mismatches(&self, n: u32) {
         self.forced_mismatches.store(n, Ordering::SeqCst);
+    }
+
+    /// The next `n` `get_landed` calls report "not landed".
+    pub fn hide_landed(&self, n: u32) {
+        self.landed_blind.store(n, Ordering::SeqCst);
     }
 }
 
@@ -98,15 +125,7 @@ impl MetaStore for ContendedMeta {
     }
     async fn cas_ref(&self, cas: RefCas) -> Result<CasOutcome> {
         self.cas_calls.fetch_add(1, Ordering::SeqCst);
-        let forced = self
-            .forced_mismatches
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| match n {
-                0 => None,
-                u32::MAX => Some(u32::MAX),
-                n => Some(n - 1),
-            })
-            .is_ok();
-        if forced {
+        if take_one(&self.forced_mismatches) {
             let current = self.inner.get_ref(&cas.name).await?;
             return Ok(CasOutcome::VersionMismatch { current });
         }
@@ -121,7 +140,11 @@ impl MetaStore for ContendedMeta {
         self.inner.ref_log(name, from_version, limit).await
     }
     async fn get_landed(&self, name: &RefName, change_id: &ChangeId) -> Result<Option<LandedRow>> {
-        self.inner.get_landed(name, change_id).await
+        let row = self.inner.get_landed(name, change_id).await?;
+        if row.is_some() && take_one(&self.landed_blind) {
+            return Ok(None);
+        }
+        Ok(row)
     }
     async fn get_derived(&self, k: &DerivedKey, c: Consistency) -> Result<Option<DerivedRow>> {
         self.inner.get_derived(k, c).await
@@ -201,11 +224,7 @@ pub fn fast_land(max_attempts: u32) -> HistoryConfig {
 
 pub async fn env_with(cfg: HistoryConfig) -> Env {
     let mem = Arc::new(MemMetaStore::new(MemOptions::default()));
-    let contended = Arc::new(ContendedMeta {
-        inner: mem.clone(),
-        forced_mismatches: AtomicU32::new(0),
-        cas_calls: AtomicU32::new(0),
-    });
+    let contended = Arc::new(ContendedMeta::new(mem.clone()));
     let faults = FaultRegistry::new();
     let storage = Storage::new(
         contended.clone(),

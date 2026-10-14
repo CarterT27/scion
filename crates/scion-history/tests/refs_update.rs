@@ -274,17 +274,14 @@ async fn create_and_delete_refs_are_audited_and_versions_continue() {
     assert!(audit.iter().all(|a| a.target == "release/1"));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_update_ref_at_one_version_exactly_one_wins() {
+/// SPEC 19.5 CAS: `n` concurrent UpdateRef calls at the same expected version; exactly one wins,
+/// the others get REF_VERSION_MISMATCH, and the ref log has no gap.
+async fn concurrent_update_ref_at_one_version(n: u16) {
     let env = env().await;
-    let n = scion_core::test_support::proptest_cases(100) as u8;
-    let n = n.clamp(10, 200);
     let mut targets = Vec::new();
     for i in 0..n {
-        targets.push(
-            env.commit(env.root, &format!("f{i}.txt"), &format!("{i}\n"), i)
-                .await,
-        );
+        let delta = vec![put(&env.h, &format!("f{i}.txt"), &format!("{i}\n")).await];
+        targets.push(commit_delta(&env.h, vec![env.root], delta, cid16(i)).await);
     }
     let mut tasks = Vec::new();
     for t in targets {
@@ -300,7 +297,16 @@ async fn concurrent_update_ref_at_one_version_exactly_one_wins() {
                 assert_eq!(row.version, 2);
                 ok += 1;
             }
-            Err(e) => assert_eq!(e.code, ErrorCode::RefVersionMismatch),
+            Err(e) => {
+                assert_eq!(e.code, ErrorCode::RefVersionMismatch);
+                assert!(matches!(
+                    e.payload,
+                    ErrorPayload::RefMismatch {
+                        current_version: 2,
+                        current_target: Some(_)
+                    }
+                ));
+            }
         }
     }
     assert_eq!(ok, 1);
@@ -309,6 +315,17 @@ async fn concurrent_update_ref_at_one_version_exactly_one_wins() {
         log.iter().map(|e| e.version).collect::<Vec<_>>(),
         vec![1, 2]
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_update_ref_at_one_version_exactly_one_wins() {
+    concurrent_update_ref_at_one_version(100).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "spec-sized (SCION_FULL): 1000 concurrent UpdateRef calls"]
+async fn full_concurrent_update_ref_at_one_version_exactly_one_wins() {
+    concurrent_update_ref_at_one_version(1000).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
