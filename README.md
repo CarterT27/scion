@@ -134,3 +134,8 @@ the Git CLI is unavailable. See [`docs/testing.md`](docs/testing.md) for details
 For design details, start with [SPEC.md](SPEC.md),
 [implementation-defined behavior](docs/implementation-defined.md), and
 [storage semantics](docs/contracts/storage-semantics.md).
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+Third-party Git fixtures retain their own license notices in [`corpus/git`](corpus/git).
