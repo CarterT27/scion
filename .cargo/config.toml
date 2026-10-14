@@ -8,6 +8,5 @@ retry = 5
 color = "auto"
 
 [build]
-# Orchestration (amendment O-4): parallel worktrees share one target dir.
-target-dir = "/Users/cartertran/Development/scion/target"
+# Incremental artifacts are large and this workspace is built from scratch in CI anyway.
 incremental = false
