@@ -13,7 +13,7 @@
 //! - Land: [`PolicyLandAuthzSource`], which re-reads the policy on every attempt (SPEC 8.4).
 //!
 //! MERGE_CONFLICT payloads omit conflicts and clean entries at paths the caller cannot read
-//! (SPEC 12.6 applied to conflict reports; [`filter_conflict_payload`]).
+//! (SPEC 12.6 applied to conflict reports; `filter_conflict_payload`).
 //!
 //! Error payloads (MERGE_CONFLICT `ConflictReport`, ALREADY_LANDED, TOO_LARGE limits, subcodes)
 //! are encoded by `scion_proto::status_from_error` (SPEC 7.2). Log events carry

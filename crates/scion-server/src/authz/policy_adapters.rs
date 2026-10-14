@@ -86,7 +86,7 @@ impl PolicyLandAuthzSource {
 }
 
 impl LandAuthorizerSource for PolicyLandAuthzSource {
-    /// A fresh [`PolicyLandAuthz`] over `PolicyHandle::current()` (SPEC 8.4: every attempt).
+    /// A fresh `PolicyLandAuthz` over `PolicyHandle::current()` (SPEC 8.4: every attempt).
     fn current(&self) -> Arc<dyn LandAuthorizer> {
         Arc::new(PolicyLandAuthz::new(
             self.handle.current(),
