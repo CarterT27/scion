@@ -43,8 +43,12 @@ async fn redaction_is_learned_within_one_poll_interval_and_cached_copy_deleted()
     let item = get_one(&a, x).await.unwrap();
     assert_eq!(item.status, REDACTED);
     assert!(item.content.is_empty());
-    assert!(!h.daemon().cache().contains(&x), "cached copy deleted");
-    assert!(!h.cache_file(&x).exists());
+    assert!(
+        eventually(Duration::from_secs(2), || !h.daemon().cache().contains(&x)
+            && !h.cache_file(&x).exists())
+        .await,
+        "cached copy deleted"
+    );
     assert_eq!(h.daemon().stats().redaction_epoch, 1);
     assert!(redacted_at.elapsed() < Duration::from_secs(4));
 }

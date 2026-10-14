@@ -287,11 +287,12 @@ async fn daemon_metrics_move() {
     h.up.redact(missing_id(7));
     via.auth().who_am_i(v1::WhoAmIRequest {}).await.unwrap();
     assert!(
-        eventually(Duration::from_secs(5), || h
-            .daemon()
-            .stats()
-            .redaction_epoch
-            == 1)
+        // The metric is published right after the set is applied: wait for the metric.
+        eventually(Duration::from_secs(5), || metric_sum(
+            &h.metrics.render(),
+            "scion_redaction_epoch",
+            "tier=\"daemon\""
+        ) == 1.0)
         .await
     );
     let text = h.metrics.render();
