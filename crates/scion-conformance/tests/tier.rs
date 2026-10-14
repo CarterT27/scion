@@ -1181,7 +1181,7 @@ async fn run_checkout_scenarios(backend: Backend) {
             let snap = wct::checkout_snapshot(&s, rev, &[rp]).await.unwrap();
             assert_eq!(
                 snapshot_tree(&snap),
-                materialize(tree, &[dir.clone()]),
+                materialize(tree, std::slice::from_ref(&dir)),
                 "{rev}: sparse checkout of {}",
                 String::from_utf8_lossy(&dir)
             );
@@ -1272,4 +1272,88 @@ async fn external_working_copy_scenarios_through_the_daemon() {
         return;
     }
     run_checkout_scenarios(Backend::External).await;
+}
+
+// ---------------------------------------------------------------------------------------
+// Harness self-check: several servers over one storage (used by the multi-server suites).
+// ---------------------------------------------------------------------------------------
+
+async fn run_multi_server(backend: Backend) {
+    let mut c = TestCluster::start(opts(backend).with_servers(2)).await;
+    let alice = gh("alice");
+    let token = c.token_for(&alice);
+    let s0 = c.client(Via::Server, &alice).await;
+    let s1 = scion_proto::ScionClient::connect(
+        &c.servers[1].endpoint,
+        c.servers[1].tls.clone(),
+        Some(token.clone()),
+    )
+    .await
+    .unwrap();
+    let (root, _) = c.ref_head("main").await;
+    let cs = TestCluster::commit(&s0, &root, &[("multi/a.txt", b"a\n")], &[], 1).await;
+    // The second server sees the first server's writes and accepts the shared token.
+    let r = s1
+        .query()
+        .get_changesets(v1::GetChangesetsRequest {
+            ids: vec![cs.as_bytes().to_vec()],
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(r.items[0].status, v1::ItemStatus::Ok as i32);
+    let before = c.counters();
+    c.kill_server(1).await;
+    assert!(s1.auth().who_am_i(v1::WhoAmIRequest {}).await.is_err());
+    c.restart_server(1).await;
+    let s1 = scion_proto::ScionClient::connect(
+        &c.servers[1].endpoint,
+        c.servers[1].tls.clone(),
+        Some(token),
+    )
+    .await
+    .unwrap();
+    let who = s1.auth().who_am_i(v1::WhoAmIRequest {}).await.unwrap();
+    assert_eq!(who.into_inner().principal, "github:alice");
+    let f = TestCluster::fetch(&s1, &[ObjectId::hash_blob(b"a\n")], None, None)
+        .await
+        .unwrap();
+    assert!(f.items[0].verified);
+    let delta = c.counters() - before;
+    assert!(
+        delta.meta_txns > 0,
+        "the restarted server reads the shared storage"
+    );
+    // A policy change applies to every server.
+    let acl = TestCluster::DEFAULT_ACL.replace("\"github:alice\", ", "");
+    assert_ne!(acl, TestCluster::DEFAULT_ACL);
+    c.set_policy(&acl).unwrap();
+    for s in [&s0, &s1] {
+        let e = s
+            .query()
+            .get_changesets(v1::GetChangesetsRequest {
+                ids: vec![cs.as_bytes().to_vec()],
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(e.code(), tonic::Code::PermissionDenied);
+    }
+    assert!(
+        c.set_policy("not toml [").is_err(),
+        "invalid policy is rejected"
+    );
+    invariants::check_16_2(&c).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cluster_servers_share_storage_keys_and_policy() {
+    run_multi_server(Backend::Memory).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn external_cluster_servers_share_storage_keys_and_policy() {
+    if skip_external() {
+        return;
+    }
+    run_multi_server(Backend::External).await;
 }

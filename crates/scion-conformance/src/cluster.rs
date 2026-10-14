@@ -287,3 +287,30 @@ impl TestCluster {
         self.servers[i].restart().await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_env_always_has_memory_first() {
+        let b = Backend::from_env();
+        assert!(matches!(b[0], Backend::Memory));
+        assert_eq!(b.len(), 1 + usize::from(Backend::external_available()));
+    }
+
+    #[test]
+    fn default_options() {
+        let o = ClusterOpts::default();
+        assert!(matches!(o.backend, Backend::Memory));
+        assert_eq!((o.servers, o.daemon), (1, true));
+        assert_eq!(o.acl_toml, TestCluster::DEFAULT_ACL);
+        assert_eq!(
+            o.server.service_principals.len(),
+            TestCluster::SERVICES.len()
+        );
+        let o = o.with_servers(3).with_daemon(false).with_acl("x");
+        assert_eq!((o.servers, o.daemon, o.acl_toml.as_str()), (3, false, "x"));
+        assert_eq!(Via::ALL.map(Via::as_str), ["server", "daemon"]);
+    }
+}

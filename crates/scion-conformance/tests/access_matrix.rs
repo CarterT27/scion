@@ -135,7 +135,11 @@ fn no_leak(s: Scenario, what: &str, bytes: &[u8]) {
     if s == Scenario::Allowed {
         return;
     }
-    for needle in [SECRET_NAME.as_bytes(), SECRET_CONTENT, &SECRET_CONTENT[..16]] {
+    for needle in [
+        SECRET_NAME.as_bytes(),
+        SECRET_CONTENT,
+        &SECRET_CONTENT[..16],
+    ] {
         assert!(
             !bytes.windows(needle.len()).any(|w| w == needle),
             "{what}: restricted data leaked to {s:?}"
@@ -207,8 +211,15 @@ async fn streaming<T: Message>(
         }
         Err(st) => st,
     };
-    assert_eq!(st.code(), tonic::Code::PermissionDenied, "{what} ({s:?}): {st:?}");
-    assert!(TestCluster::epochs(st.metadata()).is_some(), "{what}: trailers");
+    assert_eq!(
+        st.code(),
+        tonic::Code::PermissionDenied,
+        "{what} ({s:?}): {st:?}"
+    );
+    assert!(
+        TestCluster::epochs(st.metadata()).is_some(),
+        "{what}: trailers"
+    );
     no_leak(s, what, st.message().as_bytes());
     None
 }
@@ -232,7 +243,9 @@ async fn run_case(method: &str, s: Scenario, via: Via, c: &ScionClient, f: &Fixt
             let v = unary(
                 s,
                 &w(""),
-                c.objects().get_server_info(v1::GetServerInfoRequest {}).await,
+                c.objects()
+                    .get_server_info(v1::GetServerInfoRequest {})
+                    .await,
                 tier(via, true),
             );
             assert!(v.is_some(), "GetServerInfo is open to everyone");
@@ -261,7 +274,9 @@ async fn run_case(method: &str, s: Scenario, via: Via, c: &ScionClient, f: &Fixt
                 assert!(r.items.iter().all(|i| i.verified));
             }
             // Range reads follow the same decisions.
-            let r = TestCluster::fetch(c, &[f.secret], Some(0), Some(8)).await.unwrap();
+            let r = TestCluster::fetch(c, &[f.secret], Some(0), Some(8))
+                .await
+                .unwrap();
             assert_eq!(r.items[0].status, if reads_secrets { okv } else { den });
             no_leak(s, &w("range"), &r.items[0].content);
         }
@@ -373,7 +388,12 @@ async fn run_case(method: &str, s: Scenario, via: Via, c: &ScionClient, f: &Fixt
                 limit: 10,
                 page_token: Vec::new(),
             };
-            let v = unary(s, &w("all"), c.query().log(req(None)).await, tier(via, false));
+            let v = unary(
+                s,
+                &w("all"),
+                c.query().log(req(None)).await,
+                tier(via, false),
+            );
             if let Some(v) = expect_some(s, &w("all"), v, reads_root) {
                 let ids: Vec<Vec<u8>> = v.entries.iter().map(|e| e.id.clone()).collect();
                 assert_eq!(ids, vec![idb(&f.c2), idb(&f.c1), idb(&f.root)]);
@@ -523,7 +543,10 @@ async fn run_matrix(backend: Backend) {
         }
     }
     let d = c.daemon.as_ref().unwrap();
-    assert!(d.handle.cache().contains(&f.secret), "the daemon cached the secret");
+    assert!(
+        d.handle.cache().contains(&f.secret),
+        "the daemon cached the secret"
+    );
     invariants::check_16_2(&c).await.unwrap();
 }
 
@@ -550,9 +573,13 @@ async fn run_daemon_decisions(backend: Backend) {
     let alice = c.client(Via::Daemon, &TestCluster::gh("alice")).await;
     let ok = v1::ItemStatus::Ok as i32;
     let denied = v1::ItemStatus::Denied as i32;
-    let r = TestCluster::fetch(&carol, &[f.secret], None, None).await.unwrap();
+    let r = TestCluster::fetch(&carol, &[f.secret], None, None)
+        .await
+        .unwrap();
     assert_eq!(r.items[0].status, ok);
-    let r = TestCluster::fetch(&alice, &[f.secret], None, None).await.unwrap();
+    let r = TestCluster::fetch(&alice, &[f.secret], None, None)
+        .await
+        .unwrap();
     assert_eq!(r.items[0].status, denied, "carol's decision is not alice's");
     // Grant alice /secrets: the new policy epoch reaches the daemon with the next response
     // and drops its decisions, so alice is now served.
@@ -566,12 +593,17 @@ async fn run_daemon_decisions(backend: Backend) {
     loop {
         // Any forwarded response carries the new epoch.
         alice.auth().who_am_i(v1::WhoAmIRequest {}).await.unwrap();
-        let r = TestCluster::fetch(&alice, &[f.secret], None, None).await.unwrap();
+        let r = TestCluster::fetch(&alice, &[f.secret], None, None)
+            .await
+            .unwrap();
         if r.items[0].status == ok {
             assert!(r.items[0].verified);
             break;
         }
-        assert!(Instant::now() < deadline, "the policy change never reached the daemon");
+        assert!(
+            Instant::now() < deadline,
+            "the policy change never reached the daemon"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     // Revoke again: the cached positive decision is dropped as well.
@@ -579,11 +611,16 @@ async fn run_daemon_decisions(backend: Backend) {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         alice.auth().who_am_i(v1::WhoAmIRequest {}).await.unwrap();
-        let r = TestCluster::fetch(&alice, &[f.secret], None, None).await.unwrap();
+        let r = TestCluster::fetch(&alice, &[f.secret], None, None)
+            .await
+            .unwrap();
         if r.items[0].status == denied {
             break;
         }
-        assert!(Instant::now() < deadline, "the revocation never reached the daemon");
+        assert!(
+            Instant::now() < deadline,
+            "the revocation never reached the daemon"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     invariants::check_16_2(&c).await.unwrap();
