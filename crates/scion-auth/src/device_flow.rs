@@ -49,12 +49,16 @@ struct TokenResponse {
     interval: Option<u64>,
 }
 
+fn client() -> Result<reqwest::Client> {
+    http_client().ok_or_else(|| github_unavailable("no HTTP client"))
+}
+
 async fn post_json<T: for<'de> Deserialize<'de>>(
+    http: &reqwest::Client,
     url: String,
     body: serde_json::Value,
     what: &str,
 ) -> Result<T> {
-    let http = http_client().ok_or_else(|| github_unavailable("no HTTP client"))?;
     let resp = http
         .post(url)
         .header(reqwest::header::ACCEPT, "application/json")
@@ -85,7 +89,9 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
 /// unknown client id or a disabled device flow) is UNAUTHENTICATED.
 pub async fn start(oauth_base: &str, client_id: &str) -> Result<DeviceCode> {
     let base = oauth_base.trim_end_matches('/');
+    let http = client()?;
     let r: CodeResponse = post_json(
+        &http,
         format!("{base}/login/device/code"),
         serde_json::json!({ "client_id": client_id }),
         "device code",
@@ -118,14 +124,18 @@ pub async fn start(oauth_base: &str, client_id: &str) -> Result<DeviceCode> {
 /// errors are UNAUTHENTICATED.
 pub async fn poll(oauth_base: &str, client_id: &str, dc: &DeviceCode) -> Result<String> {
     let base = oauth_base.trim_end_matches('/');
-    let deadline = tokio::time::Instant::now() + dc.expires_in;
+    // Server-supplied values are untrusted: an absurd `expires_in` means "no client deadline"
+    // rather than an Instant overflow panic.
+    let deadline = tokio::time::Instant::now().checked_add(dc.expires_in);
     let mut interval = dc.interval;
+    let http = client()?;
     loop {
         tokio::time::sleep(interval.max(MIN_POLL_INTERVAL)).await;
-        if tokio::time::Instant::now() >= deadline {
+        if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
             return Err(ScionError::unauthenticated("GitHub device code expired"));
         }
         let r: TokenResponse = post_json(
+            &http,
             format!("{base}/login/oauth/access_token"),
             serde_json::json!({
                 "client_id": client_id,
@@ -143,9 +153,10 @@ pub async fn poll(oauth_base: &str, client_id: &str, dc: &DeviceCode) -> Result<
         match r.error.as_deref() {
             Some("authorization_pending") => {}
             Some("slow_down") => {
+                // RFC 8628 3.5: the interval only ever grows; GitHub sends the new value.
                 interval = match r.interval {
-                    Some(s) => Duration::from_secs(s),
-                    None => interval + SLOW_DOWN_STEP,
+                    Some(s) => Duration::from_secs(s).max(interval),
+                    None => interval.saturating_add(SLOW_DOWN_STEP),
                 };
                 tracing::debug!(
                     interval_secs = interval.as_secs(),

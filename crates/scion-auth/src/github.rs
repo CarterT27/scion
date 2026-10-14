@@ -1,6 +1,6 @@
 //! GitHub REST client (`GET /user`, SPEC 12.2; P06).
 
-use scion_core::{Result, ScionError, subcode};
+use scion_core::{Principal, Result, ScionError, subcode};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -99,8 +99,10 @@ impl GitHubClient {
             .json()
             .await
             .map_err(|_| github_unavailable("malformed /user response"))?;
-        if user.login.is_empty() {
-            return Err(github_unavailable("empty login in /user response"));
+        // The login becomes the principal `github:<login>` (SPEC 12.2 step 3), so it must be a
+        // valid principal name (implementation-defined limits: 1-255 printable ASCII bytes without `:` or `/`).
+        if Principal::parse(&format!("github:{}", user.login)).is_err() {
+            return Err(github_unavailable("invalid login in /user response"));
         }
         Ok(GitHubUser {
             login: user.login,

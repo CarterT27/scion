@@ -98,10 +98,16 @@ fn truncate_to_seconds(t: SystemTime) -> SystemTime {
 }
 
 fn format_time(t: SystemTime) -> Result<String> {
+    use std::fmt::Write;
     if t < UNIX_EPOCH {
         return Err(config_error("token timestamps must not precede 1970"));
     }
-    Ok(humantime::format_rfc3339_seconds(t).to_string())
+    // humantime's Display fails (rather than formats) past 9999-12-31T23:59:59Z; `to_string`
+    // would turn that into a panic, so format fallibly.
+    let mut s = String::new();
+    write!(s, "{}", humantime::format_rfc3339_seconds(t))
+        .map_err(|_| config_error("token timestamps must not exceed year 9999"))?;
+    Ok(s)
 }
 
 fn parse_time(s: &str) -> Result<SystemTime> {
@@ -380,6 +386,30 @@ mod tests {
         assert_eq!(k.verifier().verify(&tok, now).unwrap(), claims);
         assert_eq!(claims.iat, t(1_700_000_000));
         assert_eq!(claims.gid, Some(7));
+    }
+
+    #[test]
+    fn timestamps_past_year_9999_are_errors_not_panics() {
+        let k = Keyring::generate_for_tests(1);
+        let sub = Principal::Service("ci".into());
+        let ten_k_years = Duration::from_secs(10_000 * 366 * 86_400);
+        let e = k.issue(&sub, ten_k_years, t(1_700_000_000)).unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArgument);
+        // The last representable second still works.
+        let c = Claims {
+            sub,
+            gid: None,
+            iat: t(0),
+            exp: t(253_402_300_799),
+            kid: String::new(),
+        };
+        let tok = k.sign(&c).unwrap();
+        assert_eq!(k.verifier().verify(&tok, t(1)).unwrap().exp, c.exp);
+        let past = Claims {
+            exp: t(253_402_300_800),
+            ..c
+        };
+        assert_eq!(k.sign(&past).unwrap_err().code, ErrorCode::InvalidArgument);
     }
 
     #[test]

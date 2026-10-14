@@ -64,8 +64,6 @@ async fn transport_error_is_unavailable() {
 #[tokio::test]
 async fn non_json_user_response_is_unavailable() {
     // An endpoint that answers 200 with something that is not a GitHub user.
-    let gh = FakeGitHub::start().await;
-    gh.set_down(true);
     let srv = wiremock::MockServer::start().await;
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/user"))
@@ -91,7 +89,31 @@ async fn non_json_user_response_is_unavailable() {
         .respond_with(wiremock::ResponseTemplate::new(502))
         .mount(&srv)
         .await;
+    // A login that cannot form a principal name (`github:<login>`).
+    for (tok, login) in [
+        ("colon", "a:b"),
+        ("slash", "a/b"),
+        ("empty", ""),
+        ("space", "a b"),
+    ] {
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/user"))
+            .and(wiremock::matchers::header(
+                "authorization",
+                format!("Bearer {tok}").as_str(),
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "login": login, "id": 1 })),
+            )
+            .mount(&srv)
+            .await;
+    }
     let c = GitHubClient::new(&srv.uri());
+    for tok in ["colon", "slash", "empty", "space"] {
+        let e = c.user(tok).await.unwrap_err();
+        assert_eq!(e.code, ErrorCode::Unavailable, "{tok}: {e}");
+    }
     assert_eq!(
         c.user("tok").await.unwrap_err().code,
         ErrorCode::Unavailable
@@ -258,4 +280,71 @@ async fn github_down_does_not_affect_existing_tokens() {
             .code,
         ErrorCode::Unavailable
     );
+}
+
+#[tokio::test]
+async fn device_flow_slow_down_interval_never_shrinks() {
+    // RFC 8628 3.5: after slow_down the interval grows. A server answering slow_down with a
+    // smaller interval than the current one must not make the client poll faster.
+    let srv = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/login/oauth/access_token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "error": "slow_down", "interval": 0 })),
+        )
+        .up_to_n_times(1)
+        .mount(&srv)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/login/oauth/access_token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "access_token": "gho_x" })),
+        )
+        .mount(&srv)
+        .await;
+    let dc = DeviceCode {
+        device_code: "d".into(),
+        user_code: "U".into(),
+        verification_uri: "https://github.com/login/device".into(),
+        interval: Duration::from_millis(300),
+        expires_in: Duration::from_secs(30),
+    };
+    let t0 = std::time::Instant::now();
+    let tok = device_flow::poll(&srv.uri(), "cid", &dc).await.unwrap();
+    assert_eq!(tok, "gho_x");
+    // Two waits of at least the original 300 ms interval.
+    assert!(
+        t0.elapsed() >= Duration::from_millis(600),
+        "{:?}",
+        t0.elapsed()
+    );
+    let reqs = srv.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 2);
+    let body: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(
+        body["grant_type"],
+        "urn:ietf:params:oauth:grant-type:device_code"
+    );
+    assert_eq!(body["device_code"], "d");
+    assert_eq!(body["client_id"], "cid");
+}
+
+#[tokio::test]
+async fn device_flow_huge_expires_in_does_not_panic() {
+    // Untrusted server values: an absurd `expires_in` must not overflow the client deadline.
+    let gh = FakeGitHub::start().await;
+    gh.set_expires_in_secs(u64::MAX);
+    let dc = device_flow::start(&gh.oauth_base(), "cid").await.unwrap();
+    assert_eq!(dc.expires_in, Duration::from_secs(u64::MAX));
+    gh.approve_device_code(&dc.user_code, "gho_huge");
+    let tok = tokio::time::timeout(
+        Duration::from_secs(10),
+        device_flow::poll(&gh.oauth_base(), "cid", &dc),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(tok, "gho_huge");
 }
