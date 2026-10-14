@@ -1,0 +1,61 @@
+[package]
+name = "scion-daemon"
+description = "Per-node caching daemon (SPEC 10)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "scion-daemon"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[features]
+testing = ["dep:tempfile"]
+
+[dependencies]
+tokio-util = { workspace = true }
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-cache = { workspace = true }
+scion-auth = { workspace = true }
+scion-config = { workspace = true }
+scion-obs = { workspace = true }
+scion-proto = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+tower = { workspace = true }
+tower-layer = { workspace = true }
+tower-service = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+pin-project-lite = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+zstd = { workspace = true }
+blake3 = { workspace = true }
+parking_lot = { workspace = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+tempfile = { workspace = true }

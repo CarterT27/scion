@@ -1,0 +1,33 @@
+[package]
+name = "scion-derived"
+description = "Derived data framework and v1 types (SPEC 9)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-store = { workspace = true }
+scion-merge = { workspace = true }
+scion-history = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+arc-swap = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+scion-refmodel = { workspace = true }
+proptest = { workspace = true }

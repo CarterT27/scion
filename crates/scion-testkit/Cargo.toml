@@ -1,0 +1,43 @@
+[package]
+name = "scion-testkit"
+description = "Test infrastructure: corpora, fakes, TLS, linearizability checker (SPEC 19.0)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-proto = { workspace = true }
+scion-refmodel = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+gix = { workspace = true }
+tempfile = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+parking_lot = { workspace = true }
+blake3 = { workspace = true }
+zstd = { workspace = true }
+http = { workspace = true }
+tower = { workspace = true }
+hyper-util = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

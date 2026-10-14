@@ -1,0 +1,182 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/scion-core",
+    "crates/scion-object",
+    "crates/scion-store",
+    "crates/scion-store-crdb",
+    "crates/scion-store-s3",
+    "crates/scion-merge",
+    "crates/scion-history",
+    "crates/scion-derived",
+    "crates/scion-redaction",
+    "crates/scion-policy",
+    "crates/scion-auth",
+    "crates/scion-config",
+    "crates/scion-obs",
+    "crates/scion-proto",
+    "crates/scion-server",
+    "crates/scion-cache",
+    "crates/scion-daemon",
+    "crates/scion-wc",
+    "crates/scion-cli",
+    "crates/scion-import",
+    "crates/scion-refmodel",
+    "crates/scion-testkit",
+    "crates/scion-conformance",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+publish = false
+repository = "https://github.com/scion-scm/scion"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[workspace.dependencies]
+# ---- internal crates ----
+scion-core = { path = "crates/scion-core" }
+scion-object = { path = "crates/scion-object" }
+scion-store = { path = "crates/scion-store" }
+scion-store-crdb = { path = "crates/scion-store-crdb" }
+scion-store-s3 = { path = "crates/scion-store-s3" }
+scion-merge = { path = "crates/scion-merge" }
+scion-history = { path = "crates/scion-history" }
+scion-derived = { path = "crates/scion-derived" }
+scion-redaction = { path = "crates/scion-redaction" }
+scion-policy = { path = "crates/scion-policy" }
+scion-auth = { path = "crates/scion-auth" }
+scion-config = { path = "crates/scion-config" }
+scion-obs = { path = "crates/scion-obs" }
+scion-proto = { path = "crates/scion-proto" }
+scion-server = { path = "crates/scion-server" }
+scion-cache = { path = "crates/scion-cache" }
+scion-daemon = { path = "crates/scion-daemon" }
+scion-wc = { path = "crates/scion-wc" }
+scion-cli = { path = "crates/scion-cli" }
+scion-import = { path = "crates/scion-import" }
+scion-refmodel = { path = "crates/scion-refmodel" }
+scion-testkit = { path = "crates/scion-testkit" }
+scion-conformance = { path = "crates/scion-conformance" }
+
+# ---- async runtime ----
+tokio = { version = "=1.53.3", features = ["full"] }
+tokio-stream = { version = "=0.1.19", features = ["net", "sync", "fs"] }
+tokio-util = { version = "=0.7.20", features = ["io", "codec"] }
+futures = "=0.3.34"
+pin-project-lite = "=0.2.17"
+
+# ---- gRPC / HTTP ----
+tonic = { version = "=0.14.6", features = ["transport", "tls-ring", "tls-native-roots", "codegen", "router", "server", "channel"] }
+tonic-prost = "=0.14.6"
+tonic-prost-build = "=0.14.6"
+prost = "=0.14.4"
+prost-types = "=0.14.4"
+tower = { version = "=0.5.3", features = ["limit", "load-shed", "util", "timeout"] }
+tower-layer = "=0.3.3"
+tower-service = "=0.3.3"
+http = "=1.5.0"
+http-body = "=1.1.0"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.12.0", features = ["client", "server", "http1", "http2"] }
+hyper-util = { version = "=0.1.21", features = ["tokio", "client", "client-legacy", "server", "server-auto", "http1", "http2", "service"] }
+
+# ---- TLS ----
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "logging", "tls12"] }
+rustls-pemfile = "=2.2.0"
+rcgen = "=0.14.10"
+
+# ---- hashing / compression ----
+blake3 = "=1.8.7"
+zstd = "=0.13.3"
+
+# ---- core utilities ----
+bytes = "=1.12.1"
+async-trait = "=0.1.92"
+thiserror = "=2.0.21"
+anyhow = "=1.0.104"
+hex = "=0.4.3"
+base64 = "=0.22.1"
+
+# ---- serialization / config ----
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+toml = "=0.9.12"
+serde_path_to_error = "=0.1.20"
+humantime = "=2.4.0"
+humantime-serde = "=1.1.1"
+
+# ---- storage backends ----
+tokio-postgres = "=0.7.18"
+deadpool-postgres = "=0.14.2"
+tokio-postgres-rustls = { version = "=0.14.0", default-features = false, features = ["ring"] }
+object_store = { version = "=0.12.5", features = ["aws"] }
+
+# ---- concurrency / caches ----
+parking_lot = "=0.12.5"
+dashmap = "=6.2.1"
+im = "=15.1.0"
+lru = "=0.16.4"
+arc-swap = "=1.9.2"
+
+# ---- policy / server ----
+notify = "=8.2.0"
+governor = "=0.10.4"
+
+# ---- auth / crypto ----
+pasetors = { version = "=0.7.8", default-features = false, features = ["std", "v4"] }
+ed25519-dalek = { version = "=2.2.0", features = ["pkcs8", "pem", "rand_core"] }
+sha2 = "=0.10.9"
+subtle = "=2.6.1"
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "json", "http2"] }
+
+# ---- observability ----
+axum = "=0.8.9"
+prometheus = { version = "=0.14.0", default-features = false }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["json", "env-filter", "fmt", "registry"] }
+
+# ---- client / filesystem ----
+rustix = { version = "=1.1.5", features = ["fs"] }
+ignore = "=0.4.33"
+fs4 = "=0.13.1"
+tempfile = "=3.27.0"
+
+# ---- git ----
+gix = { version = "=0.89.0", default-features = false, features = ["max-performance-safe", "basic", "sha1", "blocking-network-client"] }
+
+# ---- CLI ----
+clap = { version = "=4.6.7", features = ["derive", "env"] }
+schemars = "=1.2.3"
+jsonschema = { version = "=0.58.6", default-features = false }
+assert_cmd = "=2.2.2"
+
+# ---- randomness ----
+rand = "=0.9.5"
+rand_chacha = "=0.9.0"
+
+# ---- dev-only ----
+proptest = "=1.12.0"
+wiremock = "=0.6.5"
+similar = "=2.7.0"
+uuid = { version = "=1.28.0", features = ["v4"] }
+
+[profile.test]
+opt-level = 1
+
+[profile.test.package."*"]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 2

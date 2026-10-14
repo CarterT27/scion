@@ -1,0 +1,42 @@
+[package]
+name = "scion-import"
+description = "One-way git importer (SPEC 14)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "scion-import"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[features]
+testing = []
+
+[dependencies]
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-proto = { workspace = true }
+scion-auth = { workspace = true }
+gix = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+blake3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+scion-server = { workspace = true, features = ["testing"] }

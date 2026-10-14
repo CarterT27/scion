@@ -1,0 +1,38 @@
+[package]
+name = "scion-auth"
+description = "Tokens, keyrings, service principals, GitHub login (SPEC 12)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+test-hooks = []
+
+[dependencies]
+scion-core = { workspace = true }
+pasetors = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+hex = { workspace = true }
+blake3 = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+humantime = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+wiremock = { workspace = true }
+tempfile = { workspace = true }

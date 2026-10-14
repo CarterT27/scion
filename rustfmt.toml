@@ -1,0 +1,2 @@
+# Default rustfmt settings (PLAN 5.1); edition comes from Cargo.toml.
+edition = "2024"

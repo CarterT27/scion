@@ -1,0 +1,27 @@
+[package]
+name = "scion-store-s3"
+description = "S3-compatible BlobStore backend (SPEC 5.1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scion-core = { workspace = true }
+scion-store = { workspace = true }
+object_store = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }

@@ -1,0 +1,4 @@
+# PLAN 5.1: unwrap/expect are denied in library code but allowed in tests.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

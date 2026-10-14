@@ -1,0 +1,46 @@
+[package]
+name = "scion-cli"
+description = "The scion command-line client (SPEC 11.8)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lib]
+name = "scion_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scion"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-config = { workspace = true }
+scion-proto = { workspace = true }
+scion-auth = { workspace = true }
+scion-wc = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+humantime = { workspace = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+scion-conformance = { workspace = true }
+assert_cmd = { workspace = true }
+jsonschema = { workspace = true }
+tempfile = { workspace = true }

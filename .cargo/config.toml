@@ -1,0 +1,6 @@
+[env]
+# Keep proptest regressions out of the source tree.
+PROPTEST_DISABLE_FAILURE_PERSISTENCE = "1"
+
+[term]
+color = "auto"

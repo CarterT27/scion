@@ -1,0 +1,48 @@
+[package]
+name = "scion-wc"
+description = "Working-copy library (SPEC 11)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+testing = []
+
+[dependencies]
+tokio-util = { workspace = true }
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-merge = { workspace = true }
+scion-cache = { workspace = true }
+scion-config = { workspace = true }
+scion-proto = { workspace = true }
+scion-auth = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+rustix = { workspace = true }
+ignore = { workspace = true }
+fs4 = { workspace = true }
+tempfile = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+schemars = { workspace = true }
+blake3 = { workspace = true }
+zstd = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+scion-server = { workspace = true, features = ["testing"] }
+proptest = { workspace = true }

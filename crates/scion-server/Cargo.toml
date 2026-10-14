@@ -1,0 +1,77 @@
+[package]
+name = "scion-server"
+description = "The authoritative Scion server (SPEC 3.1, 7)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "scion-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[features]
+testing = ["dep:tempfile"]
+
+[dependencies]
+tokio-util = { workspace = true }
+scion-core = { workspace = true }
+scion-object = { workspace = true }
+scion-store = { workspace = true }
+scion-store-crdb = { workspace = true }
+scion-store-s3 = { workspace = true }
+scion-merge = { workspace = true }
+scion-history = { workspace = true }
+scion-derived = { workspace = true }
+scion-redaction = { workspace = true }
+scion-policy = { workspace = true }
+scion-auth = { workspace = true }
+scion-config = { workspace = true }
+scion-obs = { workspace = true }
+scion-proto = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+tower = { workspace = true }
+tower-layer = { workspace = true }
+tower-service = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+rcgen = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+pin-project-lite = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+governor = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+lru = { workspace = true }
+arc-swap = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+zstd = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+scion-testkit = { workspace = true }
+tempfile = { workspace = true }
+proptest = { workspace = true }
