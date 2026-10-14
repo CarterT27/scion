@@ -104,6 +104,8 @@ pub struct StatCache {
     pub written_at_ns: i128,
 }
 
+// The frozen struct declaration carries no derives (PLAN 2.17), so the impl is written out.
+#[allow(clippy::derivable_impls)]
 impl Default for StatCache {
     fn default() -> Self {
         StatCache {

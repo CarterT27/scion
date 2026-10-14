@@ -201,10 +201,10 @@ impl Walk<'_> {
             let tuple = fs_safe::tuple_from_stat(&st);
             if tuple.is_dir() {
                 self.visit_dir(dir, &name, &child)?;
-            } else if let Some(mode) = tuple.entry_mode() {
-                if self.prefixes.in_scope(&child) {
-                    self.visit_file(dir, &name, &child, tuple, mode)?;
-                }
+            } else if let Some(mode) = tuple.entry_mode()
+                && self.prefixes.in_scope(&child)
+            {
+                self.visit_file(dir, &name, &child, tuple, mode)?;
             }
         }
         Ok(())
@@ -247,18 +247,19 @@ impl Walk<'_> {
         }
 
         // Trusted by stat: same tuple and not racily clean.
-        if let Some(e) = self.idx.entries.get(&path) {
-            if e.stat == stat && !self.idx.is_racy(e) {
-                let (id, mode, redacted) = (e.id, e.mode, e.redacted);
-                self.seen.insert(path.clone());
-                match base {
-                    None => self.report.added.push(path),
-                    Some(b) if b.id != id => self.report.modified.push(path),
-                    Some(b) if !redacted && b.mode != mode => self.report.mode_changed.push(path),
-                    Some(_) => {}
-                }
-                return Ok(());
+        if let Some(e) = self.idx.entries.get(&path)
+            && e.stat == stat
+            && !self.idx.is_racy(e)
+        {
+            let (id, mode, redacted) = (e.id, e.mode, e.redacted);
+            self.seen.insert(path.clone());
+            match base {
+                None => self.report.added.push(path),
+                Some(b) if b.id != id => self.report.modified.push(path),
+                Some(b) if !redacted && b.mode != mode => self.report.mode_changed.push(path),
+                Some(_) => {}
             }
+            return Ok(());
         }
 
         let content = match disk_mode {
