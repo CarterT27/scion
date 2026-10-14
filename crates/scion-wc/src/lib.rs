@@ -37,6 +37,7 @@ pub mod testing;
 #[cfg(feature = "testing")]
 mod testing_write;
 
+pub use commit::CommitReport;
 pub use diff::FileChangeView;
 pub use goto::GotoReport;
 pub use land::LandReport;
