@@ -61,6 +61,24 @@ enum Parents {
     Blocked,
 }
 
+/// Open parent directories reused across a run of [`SafeRoot::write_file_cached`] calls,
+/// keyed by repository path. Each was opened with `O_NOFOLLOW`, so a cached descriptor names
+/// the real directory even if a symlink is swapped in later. Holders must clear it after any
+/// removal, which may prune (and later recreate) a cached directory.
+#[derive(Default)]
+pub(crate) struct DirCache {
+    dirs: std::collections::HashMap<Vec<u8>, OwnedFd>,
+}
+
+impl DirCache {
+    pub(crate) fn clear(&mut self) {
+        self.dirs.clear();
+    }
+}
+
+/// Bound on [`DirCache`] descriptors, well below the common 256-descriptor soft limit.
+const DIR_CACHE_LIMIT: usize = 128;
+
 impl SafeRoot {
     /// Open the root directory (SPEC 11.3). The root path itself may contain symlinks (for
     /// example `/tmp` on macOS); everything below it is resolved without following any.
@@ -85,16 +103,6 @@ impl SafeRoot {
     /// with `data` as the target.
     pub fn write_file_atomic(&self, p: &RepoPath, data: &[u8], mode: Mode) -> Result<()> {
         self.write_file_atomic_raw(p.as_bytes(), data, mode)
-    }
-
-    /// Return the post-rename stat without walking the same parents a second time.
-    pub(crate) fn write_file_atomic_with_stat(
-        &self,
-        p: &RepoPath,
-        data: &[u8],
-        mode: Mode,
-    ) -> Result<StatTuple> {
-        self.write_file_with_stat(p.as_bytes(), data, mode)
     }
 
     /// Create (or atomically replace) a symlink with the given target (SPEC 11.3).
@@ -166,36 +174,89 @@ impl SafeRoot {
     }
 
     fn write_file_with_stat(&self, p: &[u8], data: &[u8], mode: Mode) -> Result<StatTuple> {
-        let perm: u16 = match mode {
-            Mode::File => 0o644,
-            Mode::Executable => 0o755,
-            Mode::Symlink => return self.symlink_with_stat(p, data),
-            Mode::Tree => {
-                return Err(ScionError::invalid(
-                    subcode::INVALID_MODE,
-                    "cannot write a tree entry as a file",
-                ));
-            }
-        };
+        if mode == Mode::Tree {
+            return Err(tree_write_error());
+        }
         let (chain, leaf) = self.parents_for_write(p)?;
         let dir = chain.last().map(|f| f.as_fd()).unwrap_or(self.fd.as_fd());
-        let (tmp, fd) = create_temp(dir, perm)?;
-        let result = (|| -> Result<StatTuple> {
-            let mut file = std::fs::File::from(fd);
-            file.write_all(data)
-                .map_err(|e| io_error("write temporary file", e))?;
-            // The creation mode is filtered by the umask; set the exact bits.
-            rustix::fs::fchmod(&file, fs_mode(perm))
-                .map_err(|e| errno_plain("set file mode", e))?;
-            rustix::fs::renameat(dir, tmp.as_slice(), dir, leaf)
-                .map_err(|e| rename_error(e, "file"))?;
-            let stat = rustix::fs::fstat(&file).map_err(|e| errno_plain("stat written file", e))?;
-            Ok(tuple_from_stat(&stat))
-        })();
-        if result.is_err() {
-            let _ = rustix::fs::unlinkat(dir, tmp.as_slice(), AtFlags::empty());
+        write_file_in(dir, leaf, data, mode)
+    }
+
+    /// [`SafeRoot::write_file_atomic`] resolving parents through `cache`, so a run of writes
+    /// opens each parent directory once instead of once per file (SPEC 11.3). Returns the
+    /// post-rename stat.
+    pub(crate) fn write_file_cached(
+        &self,
+        cache: &mut DirCache,
+        p: &RepoPath,
+        data: &[u8],
+        mode: Mode,
+    ) -> Result<StatTuple> {
+        match mode {
+            Mode::Tree => return Err(tree_write_error()),
+            // Refused before any parent is created, as in `symlink_with_stat`.
+            Mode::Symlink if data.is_empty() || data.contains(&0) => {
+                return Err(symlink_target_error());
+            }
+            _ => {}
         }
-        result
+        let p = p.as_bytes();
+        let comps = components(p)?;
+        let Some((leaf, parents)) = comps.split_last() else {
+            return Err(root_refused());
+        };
+        let parent = p[..p.len() - leaf.len()]
+            .strip_suffix(b"/")
+            .unwrap_or_default();
+        let dir = self.cached_parent(cache, parent, parents)?;
+        write_file_in(
+            dir.map(|f| f.as_fd()).unwrap_or(self.fd.as_fd()),
+            leaf,
+            data,
+            mode,
+        )
+    }
+
+    /// The descriptor of `parent` (`None` for the root), opening and creating the components
+    /// below the deepest cached ancestor with the same `O_NOFOLLOW` walk as
+    /// [`SafeRoot::walk_parents`].
+    fn cached_parent<'c>(
+        &self,
+        cache: &'c mut DirCache,
+        parent: &[u8],
+        comps: &[&[u8]],
+    ) -> Result<Option<&'c OwnedFd>> {
+        if comps.is_empty() {
+            return Ok(None);
+        }
+        if !cache.dirs.contains_key(parent) {
+            // `known` leading components are already open; `end` is the length of their path.
+            let (mut known, mut end) = (0, 0);
+            let mut len = parent.len();
+            for depth in (1..comps.len()).rev() {
+                len -= comps[depth].len() + 1;
+                if cache.dirs.contains_key(&parent[..len]) {
+                    (known, end) = (depth, len);
+                    break;
+                }
+            }
+            if cache.dirs.len() + comps.len() - known > DIR_CACHE_LIMIT {
+                cache.dirs.clear();
+                (known, end) = (0, 0);
+            }
+            for comp in &comps[known..] {
+                let fd = {
+                    let dir = match end {
+                        0 => self.fd.as_fd(),
+                        _ => cache.dirs[&parent[..end]].as_fd(),
+                    };
+                    open_or_create_dir(dir, comp)?
+                };
+                end += if end == 0 { comp.len() } else { comp.len() + 1 };
+                cache.dirs.insert(parent[..end].to_vec(), fd);
+            }
+        }
+        Ok(cache.dirs.get(parent))
     }
 
     pub(crate) fn symlink_raw(&self, p: &[u8], target: &[u8]) -> Result<()> {
@@ -204,42 +265,11 @@ impl SafeRoot {
 
     fn symlink_with_stat(&self, p: &[u8], target: &[u8]) -> Result<StatTuple> {
         if target.is_empty() || target.contains(&0) {
-            return Err(ScionError::invalid(
-                subcode::INVALID_PATH,
-                "symlink target must be non-empty and contain no NUL byte",
-            ));
+            return Err(symlink_target_error());
         }
         let (chain, leaf) = self.parents_for_write(p)?;
         let dir = chain.last().map(|f| f.as_fd()).unwrap_or(self.fd.as_fd());
-        let mut created = None;
-        for _ in 0..TEMP_ATTEMPTS {
-            let tmp = temp_name();
-            match rustix::fs::symlinkat(target, dir, tmp.as_slice()) {
-                Ok(()) => {
-                    created = Some(tmp);
-                    break;
-                }
-                Err(Errno::EXIST) => continue,
-                Err(e) => return Err(errno_plain("create symlink", e)),
-            }
-        }
-        let Some(tmp) = created else {
-            return Err(ScionError::new(
-                ErrorCode::Unavailable,
-                "could not find an unused temporary name",
-            ));
-        };
-        let result = rustix::fs::renameat(dir, tmp.as_slice(), dir, leaf)
-            .map_err(|e| rename_error(e, "symlink"))
-            .and_then(|()| {
-                stat_at(dir, leaf)?
-                    .map(|st| tuple_from_stat(&st))
-                    .ok_or_else(|| ScionError::not_found("written symlink disappeared"))
-            });
-        if result.is_err() {
-            let _ = rustix::fs::unlinkat(dir, tmp.as_slice(), AtFlags::empty());
-        }
-        result
+        symlink_in(dir, leaf, target)
     }
 
     pub(crate) fn remove_raw(&self, p: &[u8]) -> Result<()> {
@@ -615,6 +645,80 @@ fn fs_mode(perm: u16) -> FsMode {
     FsMode::from_bits_truncate(perm.into())
 }
 
+/// Write `data` as `dir/leaf` via a temporary file renamed over the final name (SPEC 11.3);
+/// returns the stat of the written file.
+fn write_file_in(dir: BorrowedFd<'_>, leaf: &[u8], data: &[u8], mode: Mode) -> Result<StatTuple> {
+    let perm: u16 = match mode {
+        Mode::File => 0o644,
+        Mode::Executable => 0o755,
+        Mode::Symlink => return symlink_in(dir, leaf, data),
+        Mode::Tree => return Err(tree_write_error()),
+    };
+    let (tmp, fd) = create_temp(dir, perm)?;
+    let result = (|| -> Result<StatTuple> {
+        let mut file = std::fs::File::from(fd);
+        file.write_all(data)
+            .map_err(|e| io_error("write temporary file", e))?;
+        // The creation mode is filtered by the umask; set the exact bits.
+        rustix::fs::fchmod(&file, fs_mode(perm)).map_err(|e| errno_plain("set file mode", e))?;
+        rustix::fs::renameat(dir, tmp.as_slice(), dir, leaf)
+            .map_err(|e| rename_error(e, "file"))?;
+        let stat = rustix::fs::fstat(&file).map_err(|e| errno_plain("stat written file", e))?;
+        Ok(tuple_from_stat(&stat))
+    })();
+    if result.is_err() {
+        let _ = rustix::fs::unlinkat(dir, tmp.as_slice(), AtFlags::empty());
+    }
+    result
+}
+
+/// Create `dir/leaf` as a symlink to `target` via a temporary name renamed over the final name.
+fn symlink_in(dir: BorrowedFd<'_>, leaf: &[u8], target: &[u8]) -> Result<StatTuple> {
+    if target.is_empty() || target.contains(&0) {
+        return Err(symlink_target_error());
+    }
+    let mut created = None;
+    for _ in 0..TEMP_ATTEMPTS {
+        let tmp = temp_name();
+        match rustix::fs::symlinkat(target, dir, tmp.as_slice()) {
+            Ok(()) => {
+                created = Some(tmp);
+                break;
+            }
+            Err(Errno::EXIST) => continue,
+            Err(e) => return Err(errno_plain("create symlink", e)),
+        }
+    }
+    let Some(tmp) = created else {
+        return Err(ScionError::new(
+            ErrorCode::Unavailable,
+            "could not find an unused temporary name",
+        ));
+    };
+    let result = rustix::fs::renameat(dir, tmp.as_slice(), dir, leaf)
+        .map_err(|e| rename_error(e, "symlink"))
+        .and_then(|()| {
+            stat_at(dir, leaf)?
+                .map(|st| tuple_from_stat(&st))
+                .ok_or_else(|| ScionError::not_found("written symlink disappeared"))
+        });
+    if result.is_err() {
+        let _ = rustix::fs::unlinkat(dir, tmp.as_slice(), AtFlags::empty());
+    }
+    result
+}
+
+fn tree_write_error() -> ScionError {
+    ScionError::invalid(subcode::INVALID_MODE, "cannot write a tree entry as a file")
+}
+
+fn symlink_target_error() -> ScionError {
+    ScionError::invalid(
+        subcode::INVALID_PATH,
+        "symlink target must be non-empty and contain no NUL byte",
+    )
+}
+
 /// Create a fresh temporary file in `dir`.
 fn create_temp(dir: BorrowedFd<'_>, perm: u16) -> Result<(Vec<u8>, OwnedFd)> {
     for _ in 0..TEMP_ATTEMPTS {
@@ -731,18 +835,90 @@ mod tests {
     #[test]
     fn atomic_write_returns_the_post_rename_stat_for_each_mode() {
         let (_dir, root) = root();
+        let mut dirs = DirCache::default();
         let path = RepoPath::parse(b"nested/file").unwrap();
         for mode in [Mode::File, Mode::Executable, Mode::Symlink, Mode::File] {
             let written = root
-                .write_file_atomic_with_stat(&path, b"target", mode)
+                .write_file_cached(&mut dirs, &path, b"target", mode)
                 .unwrap();
             assert_eq!(Some(written), root.stat(&path).unwrap());
         }
         let blocked = RepoPath::parse(b"nested/file/escape").unwrap();
         assert!(
-            root.write_file_atomic_with_stat(&blocked, b"no", Mode::File)
+            root.write_file_cached(&mut dirs, &blocked, b"no", Mode::File)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn cached_writes_reuse_parents_and_stay_bounded() {
+        let (dir, root) = root();
+        let mut dirs = DirCache::default();
+        let p = |s: &str| RepoPath::parse(s.as_bytes()).unwrap();
+        root.write_file_cached(&mut dirs, &p("top"), b"t", Mode::File)
+            .unwrap();
+        assert!(dirs.dirs.is_empty(), "root-level files need no descriptor");
+        root.write_file_cached(&mut dirs, &p("a/b/c/one"), b"1", Mode::File)
+            .unwrap();
+        root.write_file_cached(&mut dirs, &p("a/b/two"), b"2", Mode::File)
+            .unwrap();
+        root.write_file_cached(&mut dirs, &p("a/bc/three"), b"3", Mode::File)
+            .unwrap();
+        let mut keys: Vec<_> = dirs.dirs.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, [&b"a"[..], b"a/b", b"a/b/c", b"a/bc"]);
+        for (f, want) in [("a/b/c/one", "1"), ("a/b/two", "2"), ("a/bc/three", "3")] {
+            assert_eq!(std::fs::read_to_string(dir.path().join(f)).unwrap(), want);
+        }
+        for i in 0..DIR_CACHE_LIMIT + 10 {
+            root.write_file_cached(&mut dirs, &p(&format!("many/d{i}/f")), b"x", Mode::File)
+                .unwrap();
+            assert!(dirs.dirs.len() <= DIR_CACHE_LIMIT);
+        }
+        let last = format!("many/d{}/f", DIR_CACHE_LIMIT + 9);
+        assert_eq!(std::fs::read(dir.path().join(last)).unwrap(), b"x");
+        assert!(
+            root.write_file_cached(&mut dirs, &p("t"), b"x", Mode::Tree)
+                .is_err()
+        );
+        assert!(
+            root.write_file_cached(&mut dirs, &p("new/link"), b"", Mode::Symlink)
+                .is_err()
+        );
+        assert!(
+            !dir.path().join("new").exists(),
+            "refused before creating parents"
+        );
+    }
+
+    #[test]
+    fn cached_writes_refuse_symlinked_parents_and_never_follow_swapped_ones() {
+        let (dir, root) = root();
+        let outside = tempfile::tempdir().unwrap();
+        let mut dirs = DirCache::default();
+        let p = |s: &str| RepoPath::parse(s.as_bytes()).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        assert!(
+            root.write_file_cached(&mut dirs, &p("link/evil"), b"x", Mode::File)
+                .is_err()
+        );
+        // A directory replaced by a symlink after it was cached: the cached descriptor still
+        // names the original (moved) directory, so nothing reaches the symlink target.
+        root.write_file_cached(&mut dirs, &p("d/first"), b"1", Mode::File)
+            .unwrap();
+        std::fs::rename(dir.path().join("d"), dir.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("d")).unwrap();
+        root.write_file_cached(&mut dirs, &p("d/second"), b"2", Mode::File)
+            .unwrap();
+        assert!(dir.path().join("moved/second").exists());
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+        // After a clear, the walk sees the symlink and refuses it.
+        dirs.clear();
+        assert!(
+            root.write_file_cached(&mut dirs, &p("d/third"), b"3", Mode::File)
+                .is_err()
+        );
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
     }
 
     #[test]

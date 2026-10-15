@@ -14,7 +14,7 @@
 //! 5. save the index and the state with the pending operation cleared.
 
 use crate::fetch::{Change, Listing, list_scope};
-use crate::fs_safe::{case_collisions, check_entry_path};
+use crate::fs_safe::{DirCache, case_collisions, check_entry_path};
 use crate::index::{IndexEntry, StatCache};
 use crate::placeholder::placeholder_bytes;
 use crate::points;
@@ -353,13 +353,14 @@ impl WorkingCopy {
     fn write_one(
         &self,
         idx: &mut StatCache,
+        dirs: &mut DirCache,
         path: &RepoPath,
         e: &EntryInfo,
         content: Option<&[u8]>,
     ) -> Result<()> {
         let redacted = content.is_none();
         let stat = match content {
-            Some(data) => self.safe.write_file_atomic_with_stat(path, data, e.mode)?,
+            Some(data) => self.safe.write_file_cached(dirs, path, data, e.mode)?,
             None => {
                 // SPEC 13.7 placeholder; a redacted symlink is materialized as a regular file.
                 let mode = if e.mode == Mode::Executable {
@@ -368,7 +369,7 @@ impl WorkingCopy {
                     Mode::File
                 };
                 self.safe
-                    .write_file_atomic_with_stat(path, &placeholder_bytes(&e.id), mode)?
+                    .write_file_cached(dirs, path, &placeholder_bytes(&e.id), mode)?
             }
         };
         idx.entries.insert(
@@ -433,6 +434,7 @@ impl WorkingCopy {
         // JoinSet aborts the outstanding read on errors or cancellation; only the caller
         // writes files, under the existing journal and lock.
         let mut reads = tokio::task::JoinSet::new();
+        let mut dirs = DirCache::default();
         if let Some(ids) = batches.next() {
             let fetcher = self.fetcher.clone();
             reads.spawn(async move { fetcher.get_objects(&ids).await });
@@ -450,33 +452,42 @@ impl WorkingCopy {
                 // Start the next RPC before synchronous file writes on single-thread runtimes.
                 tokio::task::yield_now().await;
             }
-            for (id, item) in items {
-                let targets = by_blob.remove(&id).unwrap_or_default();
-                for (path, e, had_old) in targets {
-                    match &item {
-                        Item::Ok(data) => self.write_one(idx, &path, &e, Some(data))?,
-                        Item::Redacted => self.write_one(idx, &path, &e, None)?,
-                        Item::Denied => {
-                            // Not readable (SPEC 12.6): recorded as inaccessible and, as in a
-                            // fresh checkout, not materialized; the replaced old version goes.
-                            if had_old {
-                                self.safe.remove(&path)?;
-                                idx.entries.remove(&path);
-                                out.removed += 1;
-                                self.checkpoint(point).await?;
-                            }
-                            out.denied.push(path);
-                            continue;
+            // Path order keeps consecutive writes in the same (cached) directories.
+            let mut writes: Vec<_> = items
+                .iter()
+                .flat_map(|(id, item)| {
+                    let targets = by_blob.remove(id).unwrap_or_default();
+                    targets.into_iter().map(move |t| (t, item))
+                })
+                .collect();
+            writes.sort_unstable_by(|a, b| a.0.0.cmp(&b.0.0));
+            for ((path, e, had_old), item) in writes {
+                match item {
+                    Item::Ok(data) => self.write_one(idx, &mut dirs, &path, &e, Some(data))?,
+                    Item::Redacted => self.write_one(idx, &mut dirs, &path, &e, None)?,
+                    Item::Denied => {
+                        // Not readable (SPEC 12.6): recorded as inaccessible and, as in a
+                        // fresh checkout, not materialized; the replaced old version goes.
+                        if had_old {
+                            // Removal may prune a cached parent directory.
+                            dirs.clear();
+                            self.safe.remove(&path)?;
+                            idx.entries.remove(&path);
+                            out.removed += 1;
+                            self.checkpoint(point).await?;
                         }
-                        Item::NotFound => {
-                            return Err(ScionError::not_found(format!(
-                                "blob {id} not found upstream"
-                            )));
-                        }
+                        out.denied.push(path);
+                        continue;
                     }
-                    out.written += 1;
-                    self.checkpoint(point).await?;
+                    Item::NotFound => {
+                        return Err(ScionError::not_found(format!(
+                            "blob {} not found upstream",
+                            e.id
+                        )));
+                    }
                 }
+                out.written += 1;
+                self.checkpoint(point).await?;
             }
         }
         Ok(out)
