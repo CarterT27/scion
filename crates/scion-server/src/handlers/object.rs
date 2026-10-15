@@ -6,11 +6,12 @@ use crate::context::caller;
 use crate::errors::{StatusExt, to_status};
 use crate::handlers::BoxStream;
 use bytes::Bytes;
-use scion_core::{ErrorCode, ObjectId, Principal, Result, ScionError};
+use futures::{StreamExt, stream};
+use scion_core::{ErrorCode, Kind, ObjectId, Principal, Result, ScionError};
 use scion_object::RefName;
 use scion_proto::convert::{id_bytes, missing_field, parse_ids};
 use scion_proto::v1;
-use scion_store::StoredFrame;
+use scion_store::{Consistency, StoredFrame};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
@@ -21,6 +22,24 @@ pub const CHUNK_BYTES: usize = 1 << 20;
 
 /// Chunks buffered between the producer task and the gRPC response stream.
 const STREAM_BUFFER: usize = 4;
+
+/// Bound both read concurrency and the stored + decoded bytes held during verification.
+const READ_CONCURRENCY: usize = 8;
+const READ_BYTES: u64 = 64 << 20;
+
+/// Oversize or unknown objects are read alone, as in the serial implementation.
+fn read_window(weights: &[u64]) -> usize {
+    let mut bytes = 0u64;
+    let mut count = 0;
+    for weight in weights.iter().take(READ_CONCURRENCY) {
+        if count > 0 && bytes.saturating_add(*weight) > READ_BYTES {
+            break;
+        }
+        bytes = bytes.saturating_add(*weight);
+        count += 1;
+    }
+    count
+}
 
 /// The wire access class (SPEC 7.3).
 pub fn access_class_to_proto(c: AccessClass) -> v1::AccessClass {
@@ -169,14 +188,6 @@ async fn serve_one(
             };
         }
     };
-    let label = match encoding {
-        v1::Encoding::Zstd => "zstd",
-        _ => "raw",
-    };
-    ctx.metrics
-        .object_bytes_served
-        .with_label_values(&["server", label])
-        .inc_by(data.len() as u64);
     Ok(Served::Data(Payload {
         id: *id,
         encoding,
@@ -196,32 +207,91 @@ async fn produce(
     length: Option<u64>,
     tx: mpsc::Sender<std::result::Result<v1::ObjectChunk, Status>>,
 ) {
-    let mut integrity: Option<ScionError> = None;
-    for id in &ids {
-        match serve_one(&ctx, &p, id, offset, length).await {
-            Ok(Served::Status(c)) => {
-                if tx.send(Ok(c)).await.is_err() {
-                    return; // The caller went away.
+    let work = async {
+        let mut integrity: Option<ScionError> = None;
+        let inline_bytes = ctx.objects.config().inline_threshold_bytes.max(1) as u64;
+        let candidates_per_batch = (READ_BYTES / inline_bytes).clamp(1, READ_CONCURRENCY as u64);
+        for candidates in ids.chunks(candidates_per_batch as usize) {
+            // Sizes only schedule reads; serve_one still authorizes and verifies every id.
+            // A failed preflight retains the original per-item failure semantics.
+            let weights: Vec<u64> = if candidates.len() == 1 {
+                vec![READ_BYTES]
+            } else {
+                match ctx
+                    .storage
+                    .meta
+                    .get_objects(candidates, Consistency::Strong)
+                    .await
+                {
+                    Ok(rows) => rows
+                        .into_iter()
+                        .map(|row| {
+                            row.map_or(READ_BYTES, |r| r.size.saturating_add(r.stored_size).max(1))
+                        })
+                        .collect(),
+                    Err(_) => vec![READ_BYTES; candidates.len()],
                 }
-            }
-            Ok(Served::Data(payload)) => {
-                for i in 0..payload.chunk_count() {
-                    if tx.send(Ok(payload.chunk(i))).await.is_err() {
-                        return; // The caller went away.
+            };
+            let mut start = 0;
+            while start < candidates.len() {
+                let count = read_window(&weights[start..]);
+                let ctx = &ctx;
+                let p = &p;
+                let epochs = (ctx.policy.epoch(), ctx.redactions.epoch());
+                let mut reads = stream::iter(candidates[start..start + count].iter().copied())
+                    .map(|id| async move { serve_one(ctx, p, &id, offset, length).await })
+                    .buffered(READ_CONCURRENCY);
+                while let Some(mut served) = reads.next().await {
+                    // Prefetch must not retain permission across policy or redaction changes.
+                    if epochs != (ctx.policy.epoch(), ctx.redactions.epoch())
+                        && let Ok(Served::Data(payload)) = &served
+                    {
+                        served = serve_one(ctx, p, &payload.id, offset, length).await;
+                    }
+                    match served {
+                        Ok(Served::Status(c)) => {
+                            if tx.send(Ok(c)).await.is_err() {
+                                return;
+                            }
+                        }
+                        Ok(Served::Data(payload)) => {
+                            let label = match payload.encoding {
+                                v1::Encoding::Zstd => "zstd",
+                                _ => "raw",
+                            };
+                            for i in 0..payload.chunk_count() {
+                                let chunk = payload.chunk(i);
+                                let bytes = chunk.data.len() as u64;
+                                if tx.send(Ok(chunk)).await.is_err() {
+                                    return;
+                                }
+                                ctx.metrics
+                                    .object_bytes_served
+                                    .with_label_values(&["server", label])
+                                    .inc_by(bytes);
+                            }
+                        }
+                        Ok(Served::Integrity(e)) => {
+                            integrity.get_or_insert(e);
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Err(to_status(&e))).await;
+                            return;
+                        }
                     }
                 }
-            }
-            Ok(Served::Integrity(e)) => {
-                integrity.get_or_insert(e);
-            }
-            Err(e) => {
-                let _ = tx.send(Err(to_status(&e))).await;
-                return;
+                start += count;
             }
         }
-    }
-    if let Some(e) = integrity {
-        let _ = tx.send(Err(to_status(&e))).await;
+        if let Some(e) = integrity {
+            let _ = tx.send(Err(to_status(&e))).await;
+        }
+    };
+    // Dropping the response cancels pending storage futures, including a stalled read.
+    tokio::select! {
+        biased;
+        _ = tx.closed() => {}
+        _ = work => {}
     }
 }
 
@@ -287,8 +357,47 @@ pub async fn has_objects(
     let c = caller(&req)?;
     let ids = parse_ids(&req.get_ref().ids, "ids").map_status()?;
     let mut present = Vec::with_capacity(ids.len());
-    for id in &ids {
-        present.push(has_one(ctx, &c.principal, id).await.map_status()?);
+    for ids in ids.chunks(1000) {
+        let blobs: Vec<_> = ids
+            .iter()
+            .copied()
+            .filter(|id| id.kind() == Kind::Blob)
+            .collect();
+        let mut absent = std::collections::HashMap::new();
+        if !blobs.is_empty()
+            && let Ok(rows) = ctx
+                .storage
+                .meta
+                .get_objects(&blobs, Consistency::Strong)
+                .await
+        {
+            let missing: Vec<_> = blobs
+                .into_iter()
+                .zip(rows)
+                .filter_map(|(id, row)| row.is_none().then_some(id))
+                .collect();
+            if !missing.is_empty()
+                && let Ok(uploaded) = ctx
+                    .storage
+                    .meta
+                    .has_uploads(&missing, &c.principal.id_string())
+                    .await
+            {
+                absent.extend(missing.into_iter().zip(uploaded));
+            }
+        }
+        for id in ids {
+            // Published paths always follow the durable object row. Only absent blobs can
+            // skip path authorization; all failures retain the original cached-read path.
+            let has = if ctx.redactions.contains(id) {
+                false
+            } else if let Some(uploaded) = absent.get(id) {
+                *uploaded
+            } else {
+                has_one(ctx, &c.principal, id).await.map_status()?
+            };
+            present.push(has);
+        }
     }
     Ok(Response::new(v1::HasObjectsResponse { present }))
 }
@@ -333,6 +442,59 @@ mod tests {
             total_size: 9,
             class,
         }
+    }
+
+    #[tokio::test]
+    async fn dropping_receiver_cancels_pending_storage_read() {
+        use scion_core::fault::FaultAction;
+        use std::time::Duration;
+
+        let srv = crate::testing::InProcessServer::start(Default::default()).await;
+        let ctx = srv.ctx();
+        let before = ctx.storage.faults.hits("meta.get_objects.before");
+        ctx.storage.faults.arm(
+            "meta.get_objects.before",
+            FaultAction::Delay(Duration::from_secs(60)),
+            None,
+        );
+        let (tx, rx) = mpsc::channel(STREAM_BUFFER);
+        let task = tokio::spawn(produce(
+            ctx.clone(),
+            Principal::GitHub {
+                login: "alice".into(),
+                id: None,
+            },
+            vec![
+                ObjectId::hash_blob(b"missing"),
+                ObjectId::hash_blob(b"missing2"),
+            ],
+            None,
+            None,
+            tx,
+        ));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while ctx.storage.faults.hits("meta.get_objects.before") == before {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("preflight began");
+        drop(rx);
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("read canceled without waiting for storage")
+            .expect("producer joined");
+        ctx.storage.faults.disarm_all();
+    }
+
+    #[test]
+    fn read_windows_bound_bytes_and_isolate_unknown_or_oversize_objects() {
+        assert_eq!(read_window(&[1; 20]), READ_CONCURRENCY);
+        assert_eq!(read_window(&[READ_BYTES / 2; 8]), 2);
+        assert_eq!(read_window(&[READ_BYTES + 1, 1]), 1);
+        assert_eq!(read_window(&[1, READ_BYTES, 1]), 1);
+        assert_eq!(read_window(&[u64::MAX, 1]), 1);
+        assert_eq!(read_window(&[]), 0);
     }
 
     #[test]

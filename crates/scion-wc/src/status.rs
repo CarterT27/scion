@@ -26,7 +26,7 @@ use scion_core::{EntryInfo, ErrorCode, Mode, ObjectId, Result, ScionError};
 use scion_object::RepoPath;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Base tree access for status (implemented over the local tree cache; SPEC 11.5).
+/// Base tree access for status (SPEC 11.5).
 pub trait TreeLookup: Send + Sync {
     /// Every file-level entry of the base tree under the scope prefixes.
     fn files_in_scope(&self, scope: &[RepoPath]) -> Result<BTreeMap<RepoPath, EntryInfo>>;
@@ -112,6 +112,7 @@ struct Walk<'a> {
     base_dirs: BTreeSet<Vec<u8>>,
     seen: BTreeSet<RepoPath>,
     report: StatusReport,
+    index_changed: bool,
 }
 
 /// Walk in-scope files (skipping `.scion`, ignored files and inaccessible prefixes), hash only
@@ -124,8 +125,28 @@ pub fn status(
     inaccessible: &[RepoPath],
     base: &dyn TreeLookup,
 ) -> Result<StatusReport> {
+    status_files(
+        root,
+        idx,
+        ign,
+        scope,
+        inaccessible,
+        base.files_in_scope(scope)?,
+    )
+    .map(|(report, _)| report)
+}
+
+/// Status over an already fetched listing; the flag includes racy clean entries that need
+/// the saved index timestamp to advance, even when their stat tuples stayed the same.
+pub(crate) fn status_files(
+    root: &SafeRoot,
+    idx: &mut StatCache,
+    ign: &IgnoreMatcher,
+    scope: &[RepoPath],
+    inaccessible: &[RepoPath],
+    mut base_files: BTreeMap<RepoPath, EntryInfo>,
+) -> Result<(StatusReport, bool)> {
     let prefixes = Prefixes::new(scope, inaccessible);
-    let mut base_files = base.files_in_scope(scope)?;
     base_files
         .retain(|p, _| prefixes.in_scope(p.as_bytes()) && !prefixes.inaccessible(p.as_bytes()));
     let mut base_dirs = BTreeSet::new();
@@ -145,6 +166,7 @@ pub fn status(
         base_dirs,
         seen: BTreeSet::new(),
         report: StatusReport::default(),
+        index_changed: false,
     };
     if !w.prefixes.scope.is_empty() {
         w.walk_dir(root.root_fd(), &[])?;
@@ -163,12 +185,15 @@ pub fn status(
         prefixes,
         seen,
         mut report,
+        mut index_changed,
         ..
     } = w;
+    let before = idx.entries.len();
     idx.entries.retain(|p, _| {
         let b = p.as_bytes();
         seen.contains(p) || !prefixes.in_scope(b) || prefixes.inaccessible(b)
     });
+    index_changed |= idx.entries.len() != before;
     report.deleted = deleted;
     for v in [
         &mut report.modified,
@@ -180,7 +205,7 @@ pub fn status(
         v.sort();
         v.dedup();
     }
-    Ok(report)
+    Ok((report, index_changed))
 }
 
 impl Walk<'_> {
@@ -366,15 +391,15 @@ impl Walk<'_> {
         mode: Mode,
         redacted: bool,
     ) {
-        self.idx.entries.insert(
-            path,
-            IndexEntry {
-                stat,
-                id,
-                mode,
-                redacted,
-            },
-        );
+        let entry = IndexEntry {
+            stat,
+            id,
+            mode,
+            redacted,
+        };
+        self.index_changed |=
+            self.idx.entries.get(&path) != Some(&entry) || self.idx.is_racy(&entry);
+        self.idx.entries.insert(path, entry);
     }
 }
 
@@ -420,6 +445,71 @@ impl TreeLookup for MapTreeLookup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn index_update_flag_preserves_racy_detection_without_rewriting_warm_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("f"), b"same").unwrap();
+        let root = SafeRoot::open(dir.path()).unwrap();
+        let path = RepoPath::parse(b"f").unwrap();
+        let id = ObjectId::hash_blob(b"same");
+        let stat = root.stat(&path).unwrap().unwrap();
+        let ign = IgnoreMatcher::load(dir.path()).unwrap();
+        let base = BTreeMap::from([(
+            path.clone(),
+            EntryInfo {
+                id,
+                mode: Mode::File,
+                size: 4,
+            },
+        )]);
+        let mut idx = StatCache {
+            written_at_ns: stat.mtime_ns,
+            ..StatCache::default()
+        };
+        idx.entries.insert(
+            path.clone(),
+            IndexEntry {
+                stat,
+                id,
+                mode: Mode::File,
+                redacted: false,
+            },
+        );
+        let (report, changed) = status_files(
+            &root,
+            &mut idx,
+            &ign,
+            &[RepoPath::root()],
+            &[],
+            base.clone(),
+        )
+        .unwrap();
+        assert!(report.is_clean());
+        assert_eq!(report.hashed, 1);
+        assert!(
+            changed,
+            "identical racy clean entries still advance the saved timestamp"
+        );
+        idx.written_at_ns += 1;
+        let (report, changed) = status_files(
+            &root,
+            &mut idx,
+            &ign,
+            &[RepoPath::root()],
+            &[],
+            base.clone(),
+        )
+        .unwrap();
+        assert_eq!(report.hashed, 0);
+        assert!(!changed, "a warm cache does not need saving");
+        std::fs::remove_file(dir.path().join("f")).unwrap();
+        let (report, changed) =
+            status_files(&root, &mut idx, &ign, &[RepoPath::root()], &[], base).unwrap();
+        assert_eq!(report.deleted, vec![path]);
+        assert!(changed);
+        assert!(idx.entries.is_empty());
+    }
 
     #[test]
     fn prefix_rules() {

@@ -28,6 +28,34 @@ use scion_proto::ScionClient;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+// Keep at most the materializing batch and one fetched/fetching batch in memory. A blob
+// larger than the byte budget is fetched alone (the fetcher already buffers entire blobs).
+const MATERIALIZE_BATCH_BYTES: u64 = 16 << 20;
+
+fn blob_batches(
+    blobs: impl Iterator<Item = (ObjectId, u64)>,
+    max_count: usize,
+) -> Vec<Vec<ObjectId>> {
+    let mut batches = Vec::new();
+    let mut batch = Vec::new();
+    let mut bytes = 0u64;
+    for (id, size) in blobs {
+        if !batch.is_empty()
+            && (batch.len() >= max_count.max(1)
+                || size.saturating_add(bytes) > MATERIALIZE_BATCH_BYTES)
+        {
+            batches.push(std::mem::take(&mut batch));
+            bytes = 0;
+        }
+        batch.push(id);
+        bytes = bytes.saturating_add(size);
+    }
+    if !batch.is_empty() {
+        batches.push(batch);
+    }
+    batches
+}
+
 /// Counts of an [`WorkingCopy::apply_changes`] run.
 #[derive(Debug, Default)]
 pub(crate) struct ApplyOutcome {
@@ -404,9 +432,31 @@ impl WorkingCopy {
                 .or_default()
                 .push((c.path.clone(), e, c.old.is_some()));
         }
-        let ids: Vec<ObjectId> = by_blob.keys().copied().collect();
-        for chunk in ids.chunks(self.opts.fetch_batch.max(1)) {
-            let items = self.fetcher.get_objects(chunk).await?;
+        let batches = blob_batches(
+            by_blob.iter().map(|(id, targets)| (*id, targets[0].1.size)),
+            self.opts.fetch_batch,
+        );
+        let mut batches = batches.into_iter();
+        // JoinSet aborts the outstanding read on errors or cancellation; only the caller
+        // writes files, under the existing journal and lock.
+        let mut reads = tokio::task::JoinSet::new();
+        if let Some(ids) = batches.next() {
+            let fetcher = self.fetcher.clone();
+            reads.spawn(async move { fetcher.get_objects(&ids).await });
+        }
+        while let Some(result) = reads.join_next().await {
+            let items = result.map_err(|e| {
+                ScionError::new(
+                    ErrorCode::Unavailable,
+                    format!("blob fetch task failed: {e}"),
+                )
+            })??;
+            if let Some(ids) = batches.next() {
+                let fetcher = self.fetcher.clone();
+                reads.spawn(async move { fetcher.get_objects(&ids).await });
+                // Start the next RPC before synchronous file writes on single-thread runtimes.
+                tokio::task::yield_now().await;
+            }
             for (id, item) in items {
                 let targets = by_blob.remove(&id).unwrap_or_default();
                 for (path, e, had_old) in targets {
@@ -456,5 +506,32 @@ impl WorkingCopy {
         let out = self.write_plan(&mut idx, plan, point).await?;
         self.save_index(&mut idx)?;
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn materialization_batches_bound_objects_and_declared_bytes() {
+        let ids: Vec<_> = (0..5).map(|n| ObjectId::hash_blob(&[n])).collect();
+        let sizes = [
+            1,
+            1,
+            MATERIALIZE_BATCH_BYTES,
+            MATERIALIZE_BATCH_BYTES + 1,
+            1,
+        ];
+        let batches = blob_batches(ids.iter().copied().zip(sizes), 2);
+        assert_eq!(
+            batches,
+            vec![ids[..2].to_vec(), vec![ids[2]], vec![ids[3]], vec![ids[4]]]
+        );
+        assert_eq!(
+            blob_batches(ids.iter().copied().map(|id| (id, 0)), 0).len(),
+            5
+        );
+        assert!(blob_batches(std::iter::empty(), 2).is_empty());
     }
 }

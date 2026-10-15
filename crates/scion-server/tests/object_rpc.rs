@@ -196,6 +196,96 @@ async fn mixed_batch_returns_each_status_without_failing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn get_objects_rechecks_redaction_of_prefetched_payload() {
+    let srv = start().await;
+    let cs = commit(&srv, &[("a.txt", b"a"), ("b.txt", b"b")]).await;
+    let ctx = srv.ctx();
+    let before = ctx.storage.faults.hits("blob.get.after");
+    ctx.storage.faults.arm(
+        "blob.get.before",
+        FaultAction::Delay(Duration::from_secs(5)),
+        Some(1),
+    );
+    let c = srv.client(Some(&alice())).await;
+    let response = c
+        .objects()
+        .get_objects(v1::GetObjectsRequest {
+            ids: ids(&[cs.blobs["a.txt"], cs.blobs["b.txt"]]),
+            offset: None,
+            length: None,
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while ctx.storage.faults.hits("blob.get.after") == before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("second payload is prefetched while first is stalled");
+    let redacted = cs.blobs["b.txt"];
+    ctx.redactor
+        .redact(&[redacted], "prefetch race", &admin(), None)
+        .await
+        .unwrap();
+    ctx.redactions.refresh().await.unwrap();
+    let mut stream = response.into_inner();
+    let first = stream.message().await.unwrap().unwrap();
+    assert_eq!(first.id, ids(&[cs.blobs["a.txt"]])[0]);
+    assert_eq!(first.status, v1::ItemStatus::Ok as i32);
+    let second = stream.message().await.unwrap().unwrap();
+    assert_eq!(second.id, ids(&[redacted])[0]);
+    assert_eq!(second.status, v1::ItemStatus::Redacted as i32);
+    assert!(second.data.is_empty());
+    assert!(stream.message().await.unwrap().is_none());
+    assert_eq!(
+        ctx.metrics
+            .object_bytes_served
+            .with_label_values(&["server", "zstd"])
+            .get(),
+        ctx.objects
+            .stat(&cs.blobs["a.txt"])
+            .await
+            .unwrap()
+            .unwrap()
+            .stored_size,
+        "discarded prefetched bytes must not count as served",
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_objects_starts_multiple_reads_before_first_completes() {
+    let srv = start().await;
+    let cs = commit(&srv, &[("a.txt", b"a"), ("b.txt", b"b")]).await;
+    let ctx = srv.ctx();
+    let before = ctx.storage.faults.hits("blob.get.before");
+    ctx.storage.faults.arm(
+        "blob.get.before",
+        FaultAction::Delay(Duration::from_secs(60)),
+        None,
+    );
+    let c = srv.client(Some(&alice())).await;
+    let response = c
+        .objects()
+        .get_objects(v1::GetObjectsRequest {
+            ids: ids(&[cs.blobs["a.txt"], cs.blobs["b.txt"]]),
+            offset: None,
+            length: None,
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while ctx.storage.faults.hits("blob.get.before") < before + 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("both reads start while the first remains stalled");
+    drop(response);
+    ctx.storage.faults.disarm_all();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn get_objects_errors() {
     let srv = start().await;
     let cs = commit(&srv, &[("a.txt", b"aaa"), ("b.txt", b"bbb")]).await;
@@ -331,6 +421,12 @@ async fn has_objects_success_errors_and_auth() {
 
     // Metadata outage: UNAVAILABLE.
     let faults = srv.storage.faults.clone();
+    // A failed preflight must retain the original path and its outage behavior.
+    faults.arm(
+        &points::meta_before("get_objects"),
+        FaultAction::Error(ErrorCode::Unavailable),
+        None,
+    );
     faults.arm(
         &points::meta_before("object_paths"),
         FaultAction::Error(ErrorCode::Unavailable),
@@ -509,4 +605,62 @@ async fn check_access_answers_for_the_subject() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::Unauthenticated);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn has_objects_batches_unseen_blobs_in_order() {
+    let srv =
+        scion_server::testing::InProcessServer::start(scion_server::testing::ServerTestOpts {
+            tweak: Some(std::sync::Arc::new(|c| {
+                c.redaction.propagation_bound_ms = 600_000
+            })),
+            ..opts()
+        })
+        .await;
+    let c = srv.client(Some(&alice())).await;
+    has(&c, &[]).await;
+    let mut requested: Vec<_> = (0_u32..1003)
+        .map(|n| ObjectId::hash_blob(&n.to_be_bytes()))
+        .collect();
+    let owned = requested[17];
+    requested.extend([owned, requested[1]]);
+    srv.storage
+        .meta
+        .record_upload(&owned, "github:alice", std::time::SystemTime::now())
+        .await
+        .unwrap();
+    let before = srv.storage.counters.snapshot();
+    let present = has(&c, &requested).await;
+    assert_eq!((srv.storage.counters.snapshot() - before).meta_txns, 4);
+    assert_eq!(
+        present,
+        requested.iter().map(|id| *id == owned).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        has(&srv.client(Some(&bob())).await, &[owned, owned]).await,
+        vec![false, false]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn has_objects_batch_preflight_failures_fall_back() {
+    let srv = start().await;
+    let c = srv.client(Some(&alice())).await;
+    let missing = ObjectId::hash_blob(b"absent fallback");
+    for operation in ["get_objects", "has_uploads"] {
+        srv.storage.faults.arm(
+            &points::meta_before(operation),
+            FaultAction::Error(ErrorCode::Unavailable),
+            Some(1),
+        );
+        assert_eq!(has(&c, &[missing, missing]).await, vec![false, false]);
+        srv.storage.faults.disarm_all();
+    }
+    let cs = commit(&srv, &[("readable", b"cached")]).await;
+    let live = cs.blobs["readable"];
+    assert_eq!(has(&c, &[live]).await, vec![true]);
+    srv.mem.as_ref().unwrap().meta.set_fail_txn_every(Some(1));
+    // The preflight fails, but the existing authorization cache remains available.
+    assert_eq!(has(&c, &[live, live]).await, vec![true, true]);
+    srv.mem.as_ref().unwrap().meta.set_fail_txn_every(None);
 }

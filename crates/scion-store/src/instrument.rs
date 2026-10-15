@@ -302,9 +302,28 @@ impl<M: MetaStore> MetaStore for InstrumentedMeta<M> {
         );
         Ok(())
     }
+    async fn record_uploads(
+        &self,
+        ids: &[ObjectId],
+        principal: &str,
+        at: SystemTime,
+    ) -> Result<()> {
+        // Keep the existing ownership-write fault checkpoints for batched writes too.
+        meta_call!(
+            self,
+            "record_upload",
+            self.inner.record_uploads(ids, principal, at)
+        );
+        Ok(())
+    }
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool> {
         let out = meta_call!(self, "has_upload", self.inner.has_upload(id, principal));
         self.rows(usize::from(out));
+        Ok(out)
+    }
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>> {
+        let out = meta_call!(self, "has_uploads", self.inner.has_uploads(ids, principal));
+        self.rows(out.iter().filter(|present| **present).count());
         Ok(out)
     }
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>> {

@@ -70,6 +70,64 @@ rehashing during commit. At 10k files, Git's commit samples ranged from 67.5 to 
 These are small, single-client, single-commit workloads, not production throughput results
 or a direct comparison with OpenScion's published timings.
 
+### Real repository with persistent storage
+
+The [CLI benchmark](scripts/benchmark-git.py) also exercises the full default-branch history
+of `pingdotgg/t3code` at `bf8ffe81a63c82d3de5fbaa9991fd5f30034a452`: 5,573 commits and
+28,068 materialized files. These 2026-10-14 measurements use release binaries, local HTTPS,
+and Docker CockroachDB/MinIO with the default permissions, verification, and rate limits.
+Submodule contents are omitted on both sides.
+
+Median seconds, with three fresh-directory checkout trials after a separate first measurement:
+
+| Checkout | Scion before | Scion after | Less elapsed time |
+| --- | ---: | ---: | ---: |
+| Full tree, direct server | 30.43 | 14.49 | 52% |
+| Full tree, warmed daemon | 18.62 | 10.19 | 45% |
+| `apps/web`, direct server (1,521 files) | 2.28 | 0.95 | 58% |
+| `apps/web`, warmed daemon | 0.48 | 0.45 | 6% |
+
+Git's full-tree checkout was 2.47 seconds in the direct comparison. In the expanded
+resource-instrumented run, Git took 3.03 seconds for the full tree and 0.21 seconds for
+`apps/web`. Compare before and after within a row: direct full checkout repeats the original
+procedure, while daemon and sparse workloads use the expanded runner. Back-to-back controls
+showed no material change in status, history, or single-file-read time. OS caches are not
+flushed; these are single-client local measurements, not controlled cold-cache or WAN tests.
+
+A final run against a freshly imported store measured 14.96 seconds for direct full checkout
+versus Git's 2.90 seconds, and 0.97 seconds for sparse checkout versus Git's 0.21 seconds.
+Every checkout passed hash and mode checks. The complete release import into an empty
+CockroachDB database and MinIO prefix took 1,397.59 seconds (23m18s), importing all 5,573
+commits and 84,696 blobs with the same final graph identifier as the original import.
+The local Git full-history clone without checkout took 3.56 seconds; Scion import also
+constructs and durably publishes server history, so these operations have different costs.
+The earlier full import used a development build and is not a controlled before/after
+timing. Reimporting unchanged history uploaded nothing (0.060 seconds versus Git fetch's
+0.031 seconds). No-change status, history, and single-file reads remain broadly unchanged.
+
+The expanded runner records every sample, client CPU and peak RSS on macOS, sampled server
+CPU/RSS, RPC and byte counters, and logical metadata calls/object-storage requests when the
+server exports them. It verifies checkout file hashes and executable/symlink modes outside
+the timers, checks matching sparse scopes, and removes its temporary working copies.
+The server exposes storage snapshots as `scion_storage_access` and `scion_storage_bytes`
+on its existing admin metrics listener; scraping does not query the storage backends.
+
+With a local server whose `main` matches the Git mirror's `HEAD`, and an optional daemon:
+
+```sh
+python3 scripts/benchmark-git.py --help
+python3 scripts/benchmark-git.py --self-test
+python3 scripts/benchmark-git.py \
+  --repo /path/to/repo.git --scion target/release/scion \
+  --importer target/release/scion-import --endpoint https://127.0.0.1:18443 \
+  --ca-file /path/to/ca.pem --token-file /path/to/raw-scion-token \
+  --work-dir /tmp/scion-benchmark --output /tmp/scion-results.json \
+  --daemon-endpoint unix:///path/to/daemon.sock --server-pid SERVER_PID
+```
+
+The work directory must not exist. Omit `--daemon-endpoint` when testing only direct access;
+`--importer` adds local full-history Git clones and no-change synchronization checks.
+
 ## How it works
 
 ```text

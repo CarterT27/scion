@@ -301,6 +301,49 @@ async fn meta_uploads(s: Arc<dyn MetaStore>) -> CaseResult {
         )?,
         "uploads are per object"
     );
+    ok(
+        s.record_uploads(&[id, other, other], "github:alice", t(3))
+            .await,
+        "batch record",
+    )?;
+    ensure!(
+        ok(s.has_upload(&other, "github:alice").await, "batch has")?,
+        "batch records new ids"
+    );
+    ensure!(
+        !ok(
+            s.has_upload(&other, "github:bob").await,
+            "batch other principal"
+        )?,
+        "batch preserves ownership"
+    );
+    ok(
+        s.record_uploads(&[], "github:alice", t(4)).await,
+        "empty batch",
+    )?;
+    let missing = ObjectId::hash_blob(b"never uploaded");
+    ensure_eq!(
+        ok(
+            s.has_uploads(&[other, missing, id, other], "github:alice")
+                .await,
+            "batch ownership"
+        )?,
+        vec![true, false, true, true],
+        "ownership order and duplicates"
+    );
+    ensure_eq!(
+        ok(
+            s.has_uploads(&[id, other], "github:bob").await,
+            "other principal"
+        )?,
+        vec![false, false],
+        "ownership isolates principals"
+    );
+    ensure_eq!(
+        ok(s.has_uploads(&[], "github:alice").await, "empty ownership")?,
+        Vec::<bool>::new(),
+        "empty ownership"
+    );
     Ok(())
 }
 

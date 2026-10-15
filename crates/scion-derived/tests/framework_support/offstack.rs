@@ -67,9 +67,23 @@ impl MetaStore for OffStackMeta {
         self.off(async move { m.record_upload(&id, &p, at).await })
             .await
     }
+    async fn record_uploads(
+        &self,
+        ids: &[ObjectId],
+        principal: &str,
+        at: SystemTime,
+    ) -> Result<()> {
+        let (m, ids, p) = (self.inner.clone(), ids.to_vec(), principal.to_owned());
+        self.off(async move { m.record_uploads(&ids, &p, at).await })
+            .await
+    }
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool> {
         let (m, id, p) = (self.inner.clone(), *id, principal.to_owned());
         self.off(async move { m.has_upload(&id, &p).await }).await
+    }
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>> {
+        let (m, ids, p) = (self.inner.clone(), ids.to_vec(), principal.to_owned());
+        self.off(async move { m.has_uploads(&ids, &p).await }).await
     }
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>> {
         let (m, id) = (self.inner.clone(), *id);

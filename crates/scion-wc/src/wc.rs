@@ -14,7 +14,7 @@ use crate::lock::{self, WcLock};
 use crate::remote::{Fetcher, root_tree_of};
 use crate::state::{self, WcState};
 use crate::status::{self, StatusReport};
-use crate::tree_cache::{CachedTreeLookup, TreeCache};
+use crate::tree_cache::TreeCache;
 use scion_core::{FaultRegistry, ObjectId, Result, ScionError};
 use scion_object::RepoPath;
 use scion_proto::ScionClient;
@@ -200,6 +200,15 @@ impl WorkingCopy {
 
     /// Status of the scope against the base tree, with `idx` refreshed (not saved).
     pub(crate) async fn status_inner(&mut self, idx: &mut StatCache) -> Result<StatusReport> {
+        self.status_with_index_update(idx)
+            .await
+            .map(|(report, _)| report)
+    }
+
+    async fn status_with_index_update(
+        &mut self,
+        idx: &mut StatCache,
+    ) -> Result<(StatusReport, bool)> {
         let root = self.root_tree(&self.state.base).await?;
         let listing = list_scope(
             &self.fetcher,
@@ -212,18 +221,13 @@ impl WorkingCopy {
         let mut inaccessible = self.state.inaccessible.clone();
         inaccessible.extend(listing.denied.iter().cloned());
         let ign = IgnoreMatcher::load(&self.root)?;
-        let lookup = CachedTreeLookup {
-            cache: &self.cache,
-            root,
-            inaccessible: inaccessible.clone(),
-        };
-        status::status(
+        status::status_files(
             &self.safe,
             idx,
             &ign,
             &self.state.sparse,
             &inaccessible,
-            &lookup,
+            listing.files,
         )
     }
 
@@ -235,8 +239,10 @@ impl WorkingCopy {
             self.recover_inner().await?;
         }
         let mut idx = self.load_index()?;
-        let report = self.status_inner(&mut idx).await?;
-        self.save_index(&mut idx)?;
+        let (report, index_changed) = self.status_with_index_update(&mut idx).await?;
+        if index_changed {
+            self.save_index(&mut idx)?;
+        }
         Ok(report)
     }
 }

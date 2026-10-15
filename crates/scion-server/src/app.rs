@@ -243,6 +243,39 @@ impl ServerApp {
             metrics,
             registry,
         } = deps;
+        let counters = storage.counters.clone();
+        metrics
+            .register_snapshot(
+                "scion_storage_access",
+                "Current instrumented storage access counters (logical metadata calls and rows, object storage requests).",
+                move || {
+                    let s = counters.snapshot();
+                    vec![
+                        ("metadata_calls", s.meta_txns),
+                        ("metadata_rows", s.meta_rows_read),
+                        ("object_path_rows", s.object_paths_rows_read),
+                        ("object_gets", s.blob_gets),
+                        ("object_puts", s.blob_puts),
+                    ]
+                },
+            )
+            .map_err(|e| ScionError::new(ErrorCode::Unavailable, format!("storage metrics: {e}")))?;
+        let counters = storage.counters.clone();
+        metrics
+            .register_snapshot(
+                "scion_storage_bytes",
+                "Current storage bytes read, before and after decompression.",
+                move || {
+                    let s = counters.snapshot();
+                    vec![
+                        ("stored", s.blob_bytes_read),
+                        ("decoded", s.object_bytes_read),
+                    ]
+                },
+            )
+            .map_err(|e| {
+                ScionError::new(ErrorCode::Unavailable, format!("storage metrics: {e}"))
+            })?;
         let objects = ObjectRepo::new(
             storage.clone(),
             ObjectRepoConfig {

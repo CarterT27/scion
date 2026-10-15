@@ -14,7 +14,7 @@ use scion_object::{Canonical, Changeset, RefName};
 use scion_proto::convert::{id_bytes, ids_bytes, required_id};
 use scion_proto::{ScionClient, error_from_status, v1};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Rounds without progress before a batch fetch gives up.
 const MAX_STALLS: u32 = 3;
@@ -137,10 +137,11 @@ pub(crate) async fn root_tree_of(client: &ScionClient, cs: &ObjectId) -> Result<
 }
 
 /// Batched, verified, resumable GetObjects (SPEC 7.3, 10.1).
+#[derive(Clone)]
 pub(crate) struct Fetcher {
     client: ScionClient,
     batch: usize,
-    requested: Mutex<BTreeSet<ObjectId>>,
+    requested: Arc<Mutex<BTreeSet<ObjectId>>>,
 }
 
 /// Progress state of one batch.
@@ -195,7 +196,7 @@ impl Fetcher {
         Fetcher {
             client,
             batch: batch.max(1),
-            requested: Mutex::new(BTreeSet::new()),
+            requested: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 

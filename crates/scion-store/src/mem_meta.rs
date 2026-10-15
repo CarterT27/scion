@@ -390,9 +390,37 @@ impl MetaStore for MemMetaStore {
         })
     }
 
+    async fn record_uploads(
+        &self,
+        ids: &[ObjectId],
+        principal: &str,
+        at: SystemTime,
+    ) -> Result<()> {
+        self.write(|t| {
+            let mut changed = false;
+            for id in ids {
+                let key = (*id, principal.to_owned());
+                if !t.uploads.contains_key(&key) {
+                    t.uploads.insert(key, at);
+                    changed = true;
+                }
+            }
+            Ok(((), changed))
+        })
+    }
+
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool> {
         self.read(Consistency::Strong, |t| {
             Ok(t.uploads.contains_key(&(*id, principal.to_owned())))
+        })
+    }
+
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>> {
+        self.read(Consistency::Strong, |t| {
+            Ok(ids
+                .iter()
+                .map(|id| t.uploads.contains_key(&(*id, principal.to_owned())))
+                .collect())
         })
     }
 

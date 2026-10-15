@@ -92,8 +92,19 @@ impl MetaStore for ContendedMeta {
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()> {
         self.inner.record_upload(id, principal, at).await
     }
+    async fn record_uploads(
+        &self,
+        ids: &[ObjectId],
+        principal: &str,
+        at: SystemTime,
+    ) -> Result<()> {
+        self.inner.record_uploads(ids, principal, at).await
+    }
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool> {
         self.inner.has_upload(id, principal).await
+    }
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>> {
+        self.inner.has_uploads(ids, principal).await
     }
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>> {
         self.inner.object_paths(id, limit).await

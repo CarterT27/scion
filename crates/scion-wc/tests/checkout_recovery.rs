@@ -108,3 +108,64 @@ async fn every_materialization_point_scenario_recovers() {
         }
     }
 }
+
+#[tokio::test]
+async fn checkout_prefetches_one_batch_while_writes_pause_and_cancellation_recovers() {
+    let env = Env::start().await;
+    let f = tree();
+    env.commit(&f, "main");
+    let faults = FaultRegistry::new();
+    faults.arm(
+        points::CHECKOUT_MID_WRITE,
+        FaultAction::Delay(std::time::Duration::from_secs(2)),
+        Some(1),
+    );
+    let opts = WcOptions {
+        faults: faults.clone(),
+        fetch_batch: 1,
+        ..WcOptions::default()
+    };
+    let dir = tmp();
+    let root = dir.path().join("wc");
+    let task = {
+        let root = root.clone();
+        let client = env.client.clone();
+        let opts = opts.clone();
+        tokio::spawn(
+            async move { WorkingCopy::checkout(client, &root, "main", Vec::new(), opts).await },
+        )
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let blob_reads = env
+                .up
+                .requests()
+                .into_iter()
+                .filter(|r| r.ids.iter().any(|id| id.kind() == scion_core::Kind::Blob))
+                .count();
+            if blob_reads >= 2 {
+                assert_eq!(blob_reads, 2, "only one next batch is prefetched");
+                assert_eq!(scion_wc::testing::snapshot(&root).unwrap().len(), 1);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    assert!(
+        task.await
+            .err()
+            .expect("checkout task was cancelled")
+            .is_cancelled()
+    );
+    faults.disarm_all();
+    let mut wc = WorkingCopy::open(&root, env.client.clone(), opts).unwrap();
+    wc.recover().await.unwrap();
+    assert_eq!(
+        snapshot_files(&scion_wc::testing::snapshot(&root).unwrap()),
+        f
+    );
+    assert!(wc.status().await.unwrap().is_clean());
+}

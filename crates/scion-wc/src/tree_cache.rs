@@ -1,5 +1,4 @@
-//! Local tree cache under `.scion/cache` (scion-cache DiskCache) and the status `TreeLookup`
-//! backed by it (SPEC 10.1, 11.5; P18).
+//! Local tree cache under `.scion/cache` (scion-cache DiskCache; SPEC 10.1, 11.5; P18).
 //!
 //! Trees are cached exactly as verified (raw canonical bytes) in a [`DiskCache`] so `status`,
 //! `goto` and `sparse` can walk the base tree without contacting the server (SPEC 11.5: status
@@ -8,11 +7,10 @@
 //! `.scion/cache/roots` so the base root tree is known without a `GetChangesets` call.
 
 use crate::fs_safe::write_atomic;
-use crate::status::{Prefixes, TreeLookup};
 use bytes::Bytes;
 use scion_cache::{DiskCache, Payload};
-use scion_core::{EntryInfo, ErrorCode, Kind, Mode, ObjectId, Result, ScionError, empty_tree_id};
-use scion_object::{Canonical, RepoPath, Tree};
+use scion_core::{Kind, ObjectId, Result, ScionError, empty_tree_id};
+use scion_object::{Canonical, Tree};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -139,44 +137,6 @@ impl TreeCache {
         };
         write_atomic(&self.dir, ROOTS_FILE, text.as_bytes(), 0o644, false)
     }
-
-    /// Walk the cached tree `root` within `scope`, skipping `inaccessible` prefixes; every file
-    /// entry in scope (SPEC 11.2). NOT_FOUND when a needed tree is not cached.
-    pub(crate) fn files_in_scope(
-        &self,
-        root: &ObjectId,
-        scope: &[RepoPath],
-        inaccessible: &[RepoPath],
-    ) -> Result<BTreeMap<RepoPath, EntryInfo>> {
-        let prefixes = Prefixes::new(scope, inaccessible);
-        let mut out = BTreeMap::new();
-        let mut stack: Vec<(RepoPath, ObjectId)> = vec![(RepoPath::root(), *root)];
-        while let Some((path, id)) = stack.pop() {
-            let tree = self.require(&id)?;
-            for e in &tree.entries {
-                let child = path.join(&e.name)?;
-                let b = child.as_bytes();
-                if prefixes.inaccessible(b) {
-                    continue;
-                }
-                if e.mode == Mode::Tree {
-                    if prefixes.in_scope(b) || prefixes.leads_to_scope(b) {
-                        stack.push((child, e.id));
-                    }
-                } else if prefixes.in_scope(b) {
-                    out.insert(
-                        child,
-                        EntryInfo {
-                            mode: e.mode,
-                            id: e.id,
-                            size: e.size,
-                        },
-                    );
-                }
-            }
-        }
-        Ok(out)
-    }
 }
 
 fn load_roots(path: &Path) -> BTreeMap<ObjectId, ObjectId> {
@@ -197,39 +157,14 @@ fn load_roots(path: &Path) -> BTreeMap<ObjectId, ObjectId> {
     out
 }
 
-/// A status [`TreeLookup`] over the local tree cache (SPEC 11.5: zero RPCs when trees are
-/// cached). Trees must have been made available beforehand (`WorkingCopy::status` fetches any
-/// missing ones first).
-pub(crate) struct CachedTreeLookup<'a> {
-    pub(crate) cache: &'a TreeCache,
-    pub(crate) root: ObjectId,
-    pub(crate) inaccessible: Vec<RepoPath>,
-}
-
-impl TreeLookup for CachedTreeLookup<'_> {
-    fn files_in_scope(&self, scope: &[RepoPath]) -> Result<BTreeMap<RepoPath, EntryInfo>> {
-        self.cache
-            .files_in_scope(&self.root, scope, &self.inaccessible)
-            .map_err(|e| {
-                if e.code == ErrorCode::NotFound {
-                    ScionError::unavailable(
-                        scion_core::subcode::UPSTREAM_UNAVAILABLE,
-                        format!("base tree not cached locally: {}", e.message),
-                    )
-                } else {
-                    e
-                }
-            })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scion_core::{ErrorCode, Mode};
     use scion_object::{Extensions, Name, TreeEntry};
 
     #[test]
-    fn insert_get_roots_and_scope_walk() {
+    fn insert_get_and_roots() {
         let dir = tempfile::tempdir().unwrap();
         let cache = TreeCache::open(dir.path()).unwrap();
         let blob = ObjectId::hash_blob(b"x");
@@ -275,25 +210,8 @@ mod tests {
         cache
             .insert_verified(&root_id, Bytes::from(root.encode()))
             .unwrap();
-        let all = cache
-            .files_in_scope(&root_id, &[RepoPath::root()], &[])
-            .unwrap();
-        assert_eq!(all.len(), 2);
-        let scoped = cache
-            .files_in_scope(&root_id, &[RepoPath::parse(b"a").unwrap()], &[])
-            .unwrap();
-        assert_eq!(
-            scoped.keys().cloned().collect::<Vec<_>>(),
-            vec![RepoPath::parse(b"a/f").unwrap()]
-        );
-        let hidden = cache
-            .files_in_scope(
-                &root_id,
-                &[RepoPath::root()],
-                &[RepoPath::parse(b"a").unwrap()],
-            )
-            .unwrap();
-        assert_eq!(hidden.len(), 1);
+        assert_eq!(cache.require(&root_id).unwrap().entries.len(), 2);
+        assert_eq!(cache.require(&sub_id).unwrap().entries.len(), 1);
 
         let cs = ObjectId::new(Kind::Changeset, [3; 32]);
         cache.set_root(&cs, &root_id).unwrap();

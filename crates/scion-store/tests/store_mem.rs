@@ -528,3 +528,87 @@ async fn storage_in_memory_wires_decorators() {
     assert_eq!(storage.blobs.get("k").await.unwrap(), None);
     assert_eq!(storage.counters.snapshot().blob_gets, 1);
 }
+
+#[tokio::test]
+async fn upload_batch_is_atomic_on_transaction_failure() {
+    let meta = MemMetaStore::new(MemOptions::default());
+    let ids = [
+        ObjectId::hash_blob(b"first"),
+        ObjectId::hash_blob(b"second"),
+    ];
+    meta.set_fail_txn_every(Some(1));
+    assert_eq!(
+        meta.record_uploads(&ids, "github:alice", t(1))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Unavailable
+    );
+    meta.set_fail_txn_every(None);
+    for id in &ids {
+        assert!(!meta.has_upload(id, "github:alice").await.unwrap());
+    }
+    meta.record_uploads(&ids, "github:alice", t(2))
+        .await
+        .unwrap();
+    for id in &ids {
+        assert!(meta.has_upload(id, "github:alice").await.unwrap());
+        assert!(!meta.has_upload(id, "github:bob").await.unwrap());
+    }
+}
+
+#[tokio::test]
+async fn batch_ownership_reads_are_strong_and_faulted_once() {
+    let (storage, handles) = Storage::in_memory(MemOptions {
+        stale_lag_commits: 3,
+        ..MemOptions::default()
+    });
+    let id = ObjectId::hash_blob(b"ownership strong");
+    storage
+        .meta
+        .record_upload(&id, "github:alice", t(1))
+        .await
+        .unwrap();
+    let before = storage.counters.snapshot();
+    assert_eq!(
+        storage
+            .meta
+            .has_uploads(&[id, id], "github:alice")
+            .await
+            .unwrap(),
+        vec![true, true]
+    );
+    assert_eq!((storage.counters.snapshot() - before).meta_txns, 1);
+    storage.faults.arm(
+        &scion_core::points::meta_before("has_uploads"),
+        FaultAction::Error(ErrorCode::Unavailable),
+        Some(1),
+    );
+    assert_eq!(
+        storage
+            .meta
+            .has_uploads(&[id], "github:alice")
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Unavailable
+    );
+    assert_eq!(
+        storage
+            .meta
+            .has_uploads(&[id], "github:alice")
+            .await
+            .unwrap(),
+        vec![true]
+    );
+    handles.meta.set_fail_txn_every(Some(1));
+    assert_eq!(
+        storage
+            .meta
+            .has_uploads(&[id], "github:alice")
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Unavailable
+    );
+}

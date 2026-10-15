@@ -276,3 +276,140 @@ async fn meta_uploads_are_rejected_and_never_readable() {
     }
     assert_eq!(has(&b, &[mid]).await, vec![false]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upload_batches_preserve_order_and_reduce_metadata_writes() {
+    let srv = InProcessServer::start(ServerTestOpts {
+        tweak: Some(Arc::new(|c| c.redaction.propagation_bound_ms = 600_000)),
+        ..opts()
+    })
+    .await;
+    let c = srv.client(Some(&alice())).await;
+    let items: Vec<_> = (0_u32..130)
+        .map(|n| {
+            let data = n.to_be_bytes().to_vec();
+            (ObjectId::hash_blob(&data).as_bytes().to_vec(), 1, data)
+        })
+        .collect();
+    upload(&c, vec![]).await.unwrap();
+    let before = srv.storage.counters.snapshot();
+    let results = upload(&c, items.clone()).await.unwrap();
+    let delta = srv.storage.counters.snapshot() - before;
+    // One strong pre-check and insert per object, plus three ownership batch transactions.
+    assert_eq!(delta.meta_txns, 2 * 130 + 3);
+    for (result, (raw_id, _, data)) in results.iter().zip(&items) {
+        assert_eq!(&result.id, raw_id);
+        assert_eq!(status(result), v1::ItemStatus::Ok);
+        let id = ObjectId::hash_blob(data);
+        assert!(
+            srv.storage
+                .meta
+                .has_upload(&id, "github:alice")
+                .await
+                .unwrap()
+        );
+    }
+    let before = srv.storage.counters.snapshot();
+    assert_eq!(upload(&c, items).await.unwrap(), results);
+    let delta = srv.storage.counters.snapshot() - before;
+    assert_eq!(delta.meta_txns, 130 + 3);
+    assert_eq!(delta.blob_puts, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upload_batch_failure_never_records_ownership() {
+    let srv = start().await;
+    let c = srv.client(Some(&alice())).await;
+    let items: Vec<_> = [b"batch first".to_vec(), b"batch second".to_vec()]
+        .into_iter()
+        .map(|data| (ObjectId::hash_blob(&data).as_bytes().to_vec(), 1, data))
+        .collect();
+    srv.storage.faults.arm(
+        &points::meta_before("record_upload"),
+        FaultAction::Error(ErrorCode::Unavailable),
+        Some(1),
+    );
+    let err = upload(&c, items.clone()).await.unwrap_err();
+    assert_eq!(code(&err), ErrorCode::Unavailable);
+    srv.storage.faults.disarm_all();
+    for (raw_id, _, data) in &items {
+        let id = ObjectId::hash_blob(data);
+        assert_eq!(raw_id, &id.as_bytes().to_vec());
+        assert!(srv.ctx().objects.stat(&id).await.unwrap().is_some());
+        assert!(
+            !srv.storage
+                .meta
+                .has_upload(&id, "github:alice")
+                .await
+                .unwrap()
+        );
+    }
+    assert!(
+        upload(&c, items)
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| status(r) == v1::ItemStatus::Ok)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upload_batches_are_bounded_by_payload_bytes() {
+    let srv = InProcessServer::start(ServerTestOpts {
+        tweak: Some(Arc::new(|c| c.redaction.propagation_bound_ms = 600_000)),
+        ..opts()
+    })
+    .await;
+    let c = srv.client(Some(&alice())).await;
+    // Two 3 MiB objects fit together; the third starts a new batch. A 9 MiB object
+    // must run alone, and the following small item starts another batch.
+    let items: Vec<_> = [
+        (1, 3 * 1024 * 1024),
+        (2, 3 * 1024 * 1024),
+        (3, 3 * 1024 * 1024),
+        (4, 9 * 1024 * 1024),
+        (5, 1),
+    ]
+    .into_iter()
+    .map(|(byte, len)| {
+        let data = vec![byte; len];
+        (ObjectId::hash_blob(&data).as_bytes().to_vec(), 1, data)
+    })
+    .collect();
+    upload(&c, vec![]).await.unwrap();
+    let before = srv.storage.counters.snapshot();
+    let results = upload(&c, items.clone()).await.unwrap();
+    let delta = srv.storage.counters.snapshot() - before;
+    assert_eq!(delta.meta_txns, 2 * 5 + 4);
+    for (result, (raw_id, _, data)) in results.iter().zip(items) {
+        assert_eq!(result.id, raw_id);
+        assert_eq!(status(result), v1::ItemStatus::Ok);
+        let id = ObjectId::hash_blob(&data);
+        assert_eq!(srv.ctx().objects.get(&id).await.unwrap().as_ref(), data);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upload_batch_ownership_item_error_is_reported_per_item() {
+    let srv = start().await;
+    let c = srv.client(Some(&alice())).await;
+    let data = b"ownership item error".to_vec();
+    let id = ObjectId::hash_blob(&data);
+    srv.storage.faults.arm(
+        &points::meta_before("record_upload"),
+        FaultAction::Error(ErrorCode::InvalidArgument),
+        Some(1),
+    );
+    let results = upload(&c, vec![(id.as_bytes().to_vec(), 1, data)])
+        .await
+        .unwrap();
+    assert_eq!(results[0].error_code, "INVALID_ARGUMENT");
+    assert_eq!(status(&results[0]), v1::ItemStatus::Unspecified);
+    assert!(
+        !srv.storage
+            .meta
+            .has_upload(&id, "github:alice")
+            .await
+            .unwrap()
+    );
+}

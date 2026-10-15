@@ -6,6 +6,26 @@ use prometheus::{
 };
 use std::sync::Arc;
 
+struct SnapshotCollector {
+    values: IntGaugeVec,
+    snapshot: Box<dyn Fn() -> Vec<(&'static str, u64)> + Send + Sync>,
+}
+
+impl prometheus::core::Collector for SnapshotCollector {
+    fn desc(&self) -> Vec<&prometheus::core::Desc> {
+        self.values.desc()
+    }
+
+    fn collect(&self) -> Vec<prometheus::proto::MetricFamily> {
+        for (kind, value) in (self.snapshot)() {
+            self.values
+                .with_label_values(&[kind])
+                .set(i64::try_from(value).unwrap_or(i64::MAX));
+        }
+        self.values.collect()
+    }
+}
+
 /// Every SPEC 15.2 metric, registered in one registry.
 pub struct Metrics {
     /// The registry rendered at `/metrics`.
@@ -73,7 +93,21 @@ fn int_gauge_vec(r: &Registry, name: &str, help: &str, labels: &[&str]) -> IntGa
 }
 
 impl Metrics {
-    /// Every exported metric name.
+    /// Export an existing set of counters at scrape time, without polling the backend.
+    /// Values are gauges because their source may be reset independently of this registry.
+    pub fn register_snapshot(
+        &self,
+        name: &str,
+        help: &str,
+        snapshot: impl Fn() -> Vec<(&'static str, u64)> + Send + Sync + 'static,
+    ) -> prometheus::Result<()> {
+        self.registry.register(Box::new(SnapshotCollector {
+            values: IntGaugeVec::new(Opts::new(name, help), &["kind"])?,
+            snapshot: Box::new(snapshot),
+        }))
+    }
+
+    /// Built-in exported metric names; callers may register additional snapshot metrics.
     pub const NAMES: &'static [&'static str] = &[
         "scion_rpc_duration_seconds",
         "scion_cache_requests_total",
@@ -241,6 +275,23 @@ impl Metrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshots_are_current_and_do_not_accumulate_between_scrapes() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let m = Metrics::new();
+        let value = Arc::new(AtomicU64::new(3));
+        let observed = value.clone();
+        m.register_snapshot("test_storage_access", "Test snapshot.", move || {
+            vec![("reads", observed.load(Ordering::Relaxed))]
+        })
+        .unwrap();
+        assert!(m.render().contains("test_storage_access{kind=\"reads\"} 3"));
+        value.store(8, Ordering::Relaxed);
+        assert!(m.render().contains("test_storage_access{kind=\"reads\"} 8"));
+        value.store(0, Ordering::Relaxed);
+        assert!(m.render().contains("test_storage_access{kind=\"reads\"} 0"));
+    }
 
     #[test]
     fn registers_every_name() {

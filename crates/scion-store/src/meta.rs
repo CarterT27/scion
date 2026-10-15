@@ -26,8 +26,13 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn insert_object(&self, row: ObjectRow) -> Result<InsertOutcome>;
     /// Record that `principal` uploaded `id` (`object_uploads`, SPEC 12.5).
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()>;
+    /// Record all uploads for one principal atomically, deduplicating existing records.
+    async fn record_uploads(&self, ids: &[ObjectId], principal: &str, at: SystemTime)
+    -> Result<()>;
     /// True when `principal` uploaded `id`.
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool>;
+    /// Strong ownership checks in input order (including duplicates), in one transaction.
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>>;
     /// `object_paths` rows for this id only, ascending by path, at most `limit` (SPEC 12.5).
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>>;
     /// Changeset rows for `ids`, in order.
@@ -118,8 +123,19 @@ impl<T: MetaStore + ?Sized> MetaStore for Arc<T> {
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()> {
         (**self).record_upload(id, principal, at).await
     }
+    async fn record_uploads(
+        &self,
+        ids: &[ObjectId],
+        principal: &str,
+        at: SystemTime,
+    ) -> Result<()> {
+        (**self).record_uploads(ids, principal, at).await
+    }
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool> {
         (**self).has_upload(id, principal).await
+    }
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>> {
+        (**self).has_uploads(ids, principal).await
     }
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>> {
         (**self).object_paths(id, limit).await

@@ -4,7 +4,8 @@ use crate::app::AppContext;
 use crate::context::caller;
 use crate::errors::to_status;
 use bytes::Bytes;
-use scion_core::{ErrorCode, Kind, ObjectId, Principal, Result, ScionError, subcode};
+use futures::StreamExt;
+use scion_core::{ErrorCode, Kind, ObjectId, Result, ScionError, subcode};
 use scion_proto::convert::{missing_field, parse_id};
 use scion_proto::v1;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use tonic::{Request, Response, Status};
 /// The per-item outcome of one upload: the result to report, or an error that fails the whole
 /// call (infrastructure failures, which the client retries).
 enum ItemOutcome {
-    Done(v1::UploadResult),
+    Done(v1::UploadResult, Option<ObjectId>),
     Fatal(ScionError),
 }
 
@@ -63,10 +64,9 @@ fn uploadable(kind: Kind) -> bool {
     matches!(kind, Kind::Blob | Kind::Tree)
 }
 
-/// Validate and store one item for `p`.
+/// Validate and store one item; ownership is recorded after the batch succeeds.
 async fn store_one(
     ctx: &AppContext,
-    p: &Principal,
     item: v1::UploadItem,
 ) -> Result<(ObjectId, scion_store::InsertOutcome)> {
     if item.id.is_empty() {
@@ -101,21 +101,17 @@ async fn store_one(
         .objects
         .put_verified(&id, Bytes::from(item.data))
         .await?;
-    ctx.storage
-        .meta
-        .record_upload(&id, &p.id_string(), ctx.clock.now())
-        .await?;
     Ok((id, outcome))
 }
 
-async fn upload_one(ctx: &AppContext, p: &Principal, item: v1::UploadItem) -> ItemOutcome {
+async fn upload_one(ctx: &AppContext, item: v1::UploadItem) -> ItemOutcome {
     let raw_id = item.id.clone();
-    match store_one(ctx, p, item).await {
+    match store_one(ctx, item).await {
         // Inserted and AlreadyExists look the same: a redundant upload is deduplicated and
         // reveals nothing about prior existence (SPEC 12.5).
         Ok((id, outcome)) => {
             tracing::debug!(object = %id, ?outcome, "upload stored");
-            ItemOutcome::Done(ok_result(&raw_id))
+            ItemOutcome::Done(ok_result(&raw_id), Some(id))
         }
         Err(e) if is_fatal(&e) => ItemOutcome::Fatal(e),
         Err(e) => {
@@ -124,9 +120,56 @@ async fn upload_one(ctx: &AppContext, p: &Principal, item: v1::UploadItem) -> It
                 // corruption, so no integrity alert.
                 tracing::info!("uploaded bytes do not match their id");
             }
-            ItemOutcome::Done(error_result(&raw_id, &e))
+            ItemOutcome::Done(error_result(&raw_id, &e), None)
         }
     }
+}
+
+// Bound both request count and raw bytes; a single larger item is processed alone.
+const UPLOAD_BATCH_ITEMS: usize = 64;
+const UPLOAD_BATCH_BYTES: usize = 8 * 1024 * 1024;
+const UPLOAD_CONCURRENCY: usize = 8;
+
+async fn upload_batch(
+    ctx: &AppContext,
+    principal: &str,
+    items: Vec<v1::UploadItem>,
+    results: &mut Vec<v1::UploadResult>,
+) -> Result<(), Status> {
+    let mut uploads = futures::stream::iter(items)
+        .map(|item| upload_one(ctx, item))
+        .buffered(UPLOAD_CONCURRENCY);
+    let mut batch_results = Vec::new();
+    let mut stored = Vec::new();
+    while let Some(outcome) = uploads.next().await {
+        match outcome {
+            ItemOutcome::Done(result, id) => {
+                batch_results.push(result);
+                stored.extend(id);
+            }
+            ItemOutcome::Fatal(e) => return Err(to_status(&e)),
+        }
+    }
+    if !stored.is_empty() {
+        // Ownership becomes visible only after verified durable object stores succeeded.
+        if let Err(e) = ctx
+            .storage
+            .meta
+            .record_uploads(&stored, principal, ctx.clock.now())
+            .await
+        {
+            if is_fatal(&e) {
+                return Err(to_status(&e));
+            }
+            for result in &mut batch_results {
+                if result.status == v1::ItemStatus::Ok as i32 {
+                    *result = error_result(&result.id, &e);
+                }
+            }
+        }
+    }
+    results.extend(batch_results);
+    Ok(())
 }
 
 /// `WriteService.UploadObjects` (SPEC 7.5, 12.5, 13.6, 17), a client stream of
@@ -150,11 +193,23 @@ pub async fn upload_objects(
     let c = caller(&req)?;
     let mut stream = req.into_inner();
     let mut results = Vec::new();
+    let principal = c.principal.id_string();
+    let mut batch = Vec::new();
+    let mut bytes = 0_usize;
     while let Some(item) = stream.message().await? {
-        match upload_one(ctx, &c.principal, item).await {
-            ItemOutcome::Done(r) => results.push(r),
-            ItemOutcome::Fatal(e) => return Err(to_status(&e)),
+        if !batch.is_empty() && bytes.saturating_add(item.data.len()) > UPLOAD_BATCH_BYTES {
+            upload_batch(ctx, &principal, std::mem::take(&mut batch), &mut results).await?;
+            bytes = 0;
         }
+        bytes = bytes.saturating_add(item.data.len());
+        batch.push(item);
+        if batch.len() >= UPLOAD_BATCH_ITEMS || bytes >= UPLOAD_BATCH_BYTES {
+            upload_batch(ctx, &principal, std::mem::take(&mut batch), &mut results).await?;
+            bytes = 0;
+        }
+    }
+    if !batch.is_empty() {
+        upload_batch(ctx, &principal, batch, &mut results).await?;
     }
     Ok(Response::new(v1::UploadObjectsResponse { results }))
 }

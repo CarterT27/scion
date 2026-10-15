@@ -618,6 +618,36 @@ impl MetaStore for CrdbMetaStore {
         .await
     }
 
+    async fn record_uploads(
+        &self,
+        ids: &[ObjectId],
+        principal: &str,
+        at: SystemTime,
+    ) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let rid = self.rid();
+        let keys = ids_bytes(ids);
+        let keys = &keys;
+        self.txn("record_uploads", false, |mut c| async move {
+            let tx = begin(&mut c).await?;
+            for keys in keys.chunks(BATCH_ROWS) {
+                execute(
+                    &tx,
+                    "INSERT INTO object_uploads (repo_id, object_id, principal, at) \
+                     SELECT $1, u.id, $3, $4 FROM UNNEST($2::BYTES[]) AS u(id) \
+                     ON CONFLICT DO NOTHING",
+                    &[&rid, &keys, &principal, &at],
+                )
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
+        })
+        .await
+    }
+
     async fn has_upload(&self, id: &ObjectId, principal: &str) -> Result<bool> {
         let rid = self.rid();
         let id = id.as_bytes().as_slice();
@@ -630,6 +660,27 @@ impl MetaStore for CrdbMetaStore {
             )
             .await?;
         Ok(!rows.is_empty())
+    }
+
+    async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rid = self.rid();
+        let keys = ids_bytes(ids);
+        let rows = self
+            .read_strong(
+                "has_uploads",
+                "SELECT object_id FROM object_uploads WHERE repo_id = $1 \
+             AND object_id = ANY($2) AND principal = $3",
+                &[&rid, &keys, &principal],
+            )
+            .await?;
+        let uploaded: BTreeSet<ObjectId> = rows
+            .iter()
+            .map(|r| id_of(&col::<Vec<u8>>(r, 0)?))
+            .collect::<Result<_>>()?;
+        Ok(ids.iter().map(|id| uploaded.contains(id)).collect())
     }
 
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>> {

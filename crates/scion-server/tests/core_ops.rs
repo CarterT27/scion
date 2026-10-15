@@ -179,6 +179,28 @@ async fn health_endpoints_reflect_dependencies() {
         "{text}"
     );
     assert!(text.contains("scion_policy_epoch_info"), "{text}");
+    let before = srv.storage.counters.snapshot();
+    let (_, _) = srv
+        .ctx()
+        .objects
+        .put_blob(Bytes::from_static(b"metrics blob"))
+        .await
+        .unwrap();
+    let expected = srv.storage.counters.snapshot();
+    let (_, text) = http_get(admin_addr, "/metrics").await;
+    assert!(
+        text.contains(&format!(
+            "scion_storage_access{{kind=\"object_puts\"}} {}",
+            expected.blob_puts
+        )),
+        "{text}"
+    );
+    assert!(expected.blob_puts > before.blob_puts);
+    assert_eq!(
+        srv.storage.counters.snapshot(),
+        expected,
+        "scraping must not access storage"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
