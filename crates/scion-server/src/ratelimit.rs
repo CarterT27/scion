@@ -29,10 +29,16 @@ use tower_service::Service;
 /// How many limiter checks happen between purges of idle per-principal state.
 const RETAIN_EVERY: u64 = 4096;
 
+/// Ids one extra rate-limit token buys in a multi-id call (GetObjects, HasObjects): the call
+/// itself paid one token at the RPC layer, and every further `IDS_PER_TOKEN` ids cost one
+/// more, so a request for millions of ids cannot ride on a single token.
+pub(crate) const IDS_PER_TOKEN: usize = 1000;
+
 /// Shared limits of one server: the in-flight semaphore and the per-principal limiter.
 pub struct Limits {
     inflight: Arc<Semaphore>,
     limiter: Option<DefaultKeyedRateLimiter<String>>,
+    burst: NonZeroU32,
     checks: AtomicU64,
 }
 
@@ -40,15 +46,29 @@ impl Limits {
     /// Limits from `[rate_limit]` (SPEC 10.5, PLAN 6.11). A zero `per_principal_rps` disables
     /// the per-principal limiter; a zero burst is treated as 1.
     pub fn new(cfg: &scion_config::RateLimitSection) -> Arc<Self> {
-        let limiter = NonZeroU32::new(cfg.per_principal_rps).map(|rps| {
-            let burst = NonZeroU32::new(cfg.burst).unwrap_or(NonZeroU32::MIN);
-            RateLimiter::keyed(Quota::per_second(rps).allow_burst(burst))
-        });
+        let burst = NonZeroU32::new(cfg.burst).unwrap_or(NonZeroU32::MIN);
+        let limiter = NonZeroU32::new(cfg.per_principal_rps)
+            .map(|rps| RateLimiter::keyed(Quota::per_second(rps).allow_burst(burst)));
         Arc::new(Limits {
             inflight: Arc::new(Semaphore::new(cfg.max_inflight.min(Semaphore::MAX_PERMITS))),
             limiter,
+            burst,
             checks: AtomicU64::new(0),
         })
+    }
+
+    /// Charge `key` for a multi-id call of `ids` ids beyond the one token the call already
+    /// paid: one token per [`IDS_PER_TOKEN`] ids, capped at the burst (a larger charge could
+    /// never succeed). False when the principal is over its rate (SPEC 10.5).
+    pub fn charge_ids(&self, key: &str, ids: usize) -> bool {
+        let Some(l) = &self.limiter else {
+            return true;
+        };
+        let extra = u32::try_from(ids / IDS_PER_TOKEN).unwrap_or(u32::MAX);
+        let Some(n) = NonZeroU32::new(extra.min(self.burst.get())) else {
+            return true;
+        };
+        matches!(l.check_key_n(&key.to_owned(), n), Ok(Ok(())))
     }
 
     /// Whether a call keyed by `key` is within its rate (SPEC 10.5).
@@ -312,6 +332,18 @@ mod tests {
         assert!(limits.check("a"));
         assert!(!limits.check("a"));
         assert!(limits.check("b"));
+        // Multi-id calls pay one more token per IDS_PER_TOKEN ids, capped at the burst.
+        let by_ids = Limits::new(&RateLimitSection {
+            per_principal_rps: 1,
+            burst: 3,
+            max_inflight: 10,
+        });
+        assert!(by_ids.charge_ids("c", IDS_PER_TOKEN - 1));
+        assert!(by_ids.charge_ids("c", 2 * IDS_PER_TOKEN));
+        assert!(!by_ids.charge_ids("c", 2 * IDS_PER_TOKEN));
+        assert!(by_ids.charge_ids("c", IDS_PER_TOKEN));
+        assert!(by_ids.charge_ids("d", 1_000_000 * IDS_PER_TOKEN));
+        assert!(!by_ids.check("d"));
         let svc = GovernorService::new(slow_service(Duration::ZERO), limits.clone());
         // Anonymous key (no peer info) shares one bucket.
         let r1 = svc.clone().oneshot(req()).await.unwrap();

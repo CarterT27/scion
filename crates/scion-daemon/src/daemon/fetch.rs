@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 pub(crate) const STATUS_OK: i32 = v1::ItemStatus::Ok as i32;
 pub(crate) const STATUS_DENIED: i32 = v1::ItemStatus::Denied as i32;
+/// Upstream objects verified and cached concurrently while one GetObjects stream flows.
+const VERIFY_CONCURRENCY: usize = 16;
 pub(crate) const CLASS_ROOT: i32 = v1::AccessClass::Root as i32;
 
 /// One object as answered upstream (or read from the cache when `principal` is empty).
@@ -133,7 +135,7 @@ fn verify_and_insert(
         // Learned redacted meanwhile: never cache it (SPEC 13.3).
         return Ok(content);
     }
-    if let Err(e) = inner.cache.insert(id, payload) {
+    if let Err(e) = inner.cache.insert_verified(id, payload) {
         tracing::warn!(object = %id, error = %e, "could not cache a verified object");
     }
     // A redaction applied between the check above and the insert: the poll that applied it
@@ -207,6 +209,47 @@ impl Inner {
         out
     }
 
+    /// Record one verified (or rejected) upstream object in `out`.
+    fn finish_item(
+        &self,
+        done: std::result::Result<(ObjectId, i32, Result<Bytes>), tokio::task::JoinError>,
+        caller: &Caller,
+        principal: &Arc<str>,
+        out: &mut HashMap<ObjectId, ItemResult>,
+    ) {
+        let (id, class, verified) = match done {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "verify task failed");
+                return;
+            }
+        };
+        match verified {
+            Ok(content) => {
+                self.record_allowed(&caller.principal, id, class);
+                out.insert(
+                    id,
+                    Ok(FetchItem {
+                        principal: principal.clone(),
+                        status: STATUS_OK,
+                        access_class: class,
+                        total_size: content.len() as u64,
+                        content: Some(content),
+                    }),
+                );
+            }
+            Err(e) => {
+                if e.code == ErrorCode::Integrity {
+                    tracing::warn!(
+                        object = %id,
+                        "upstream object failed digest verification; not cached"
+                    );
+                }
+                out.insert(id, Err(e));
+            }
+        }
+    }
+
     /// One upstream GetObjects; completed items go into `out`. Returns the error that ended
     /// the stream early, if any.
     async fn get_objects_once(
@@ -243,14 +286,18 @@ impl Inner {
         let mut partial: HashMap<ObjectId, Partial> = HashMap::new();
         let principal: Arc<str> = Arc::from(caller.principal.as_str());
         let mut stream = resp.into_inner();
-        loop {
+        // Completed objects are verified and cached on blocking threads while the stream
+        // keeps flowing; at most VERIFY_CONCURRENCY at a time.
+        let mut verifying: tokio::task::JoinSet<(ObjectId, i32, Result<Bytes>)> =
+            tokio::task::JoinSet::new();
+        let ended = loop {
             let chunk = match stream.message().await {
                 Ok(Some(c)) => c,
-                Ok(None) => break,
+                Ok(None) => break None,
                 Err(st) => {
                     self.observe_metadata(st.metadata());
                     self.reset_client_on(&st).await;
-                    return Some(error_from_status(&st));
+                    break Some(error_from_status(&st));
                 }
             };
             let Ok(id) = ObjectId::from_bytes(&chunk.id) else {
@@ -282,7 +329,7 @@ impl Inner {
                 data: Vec::new(),
             });
             if chunk.offset != p.data.len() as u64 {
-                return Some(ScionError::unavailable(
+                break Some(ScionError::unavailable(
                     subcode::UPSTREAM_UNAVAILABLE,
                     format!("upstream sent an out-of-order chunk for {id}"),
                 ));
@@ -295,40 +342,20 @@ impl Inner {
                 continue;
             };
             let me = self.clone();
-            let encoding = p.encoding;
-            let verified =
-                tokio::task::spawn_blocking(move || verify_and_insert(&me, &id, encoding, p.data))
-                    .await
-                    .unwrap_or_else(|e| {
-                        Err(ScionError::new(
-                            ErrorCode::Unavailable,
-                            format!("verify task: {e}"),
-                        ))
-                    });
-            match verified {
-                Ok(content) => {
-                    self.record_allowed(&caller.principal, id, p.access_class);
-                    out.insert(
-                        id,
-                        Ok(FetchItem {
-                            principal: principal.clone(),
-                            status: STATUS_OK,
-                            access_class: p.access_class,
-                            total_size: content.len() as u64,
-                            content: Some(content),
-                        }),
-                    );
-                }
-                Err(e) => {
-                    if e.code == ErrorCode::Integrity {
-                        tracing::warn!(
-                            object = %id,
-                            "upstream object failed digest verification; not cached"
-                        );
-                    }
-                    out.insert(id, Err(e));
-                }
+            let (encoding, class) = (p.encoding, p.access_class);
+            verifying
+                .spawn_blocking(move || (id, class, verify_and_insert(&me, &id, encoding, p.data)));
+            if verifying.len() >= VERIFY_CONCURRENCY
+                && let Some(done) = verifying.join_next().await
+            {
+                self.finish_item(done, caller, &principal, out);
             }
+        };
+        while let Some(done) = verifying.join_next().await {
+            self.finish_item(done, caller, &principal, out);
+        }
+        if ended.is_some() {
+            return ended;
         }
         if let Ok(Some(t)) = stream.trailers().await {
             self.observe_metadata(&t);

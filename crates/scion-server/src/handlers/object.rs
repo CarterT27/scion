@@ -378,6 +378,7 @@ pub async fn get_objects(
     let c = caller(&req)?;
     let r = req.into_inner();
     let ids = parse_ids(&r.ids, "ids").map_status()?;
+    charge_ids(ctx, &c.principal, ids.len())?;
     let (tx, rx) = mpsc::channel(STREAM_BUFFER);
     tokio::spawn(produce(
         ctx.clone(),
@@ -390,6 +391,17 @@ pub async fn get_objects(
     let stream: BoxStream<v1::ObjectChunk> =
         Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx));
     Ok(Response::new(stream))
+}
+
+/// SPEC 10.5: a multi-id call pays for its ids beyond the token its RPC already took.
+fn charge_ids(ctx: &AppContext, p: &Principal, ids: usize) -> Result<(), Status> {
+    if ctx.rate_limits.charge_ids(&p.id_string(), ids) {
+        Ok(())
+    } else {
+        Err(to_status(&ScionError::resource_exhausted(
+            "per-principal rate limit exceeded",
+        )))
+    }
 }
 
 /// SPEC 12.5 HasObjects for one id: `true` only when the object is readable by `p` or `p`
@@ -412,6 +424,7 @@ pub async fn has_objects(
 ) -> Result<Response<v1::HasObjectsResponse>, Status> {
     let c = caller(&req)?;
     let ids = parse_ids(&req.get_ref().ids, "ids").map_status()?;
+    charge_ids(ctx, &c.principal, ids.len())?;
     let mut present = Vec::with_capacity(ids.len());
     for ids in ids.chunks(1000) {
         let blobs: Vec<_> = ids

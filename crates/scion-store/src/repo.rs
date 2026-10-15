@@ -340,19 +340,45 @@ impl ObjectRepo {
         kind: Kind,
         canonical: Vec<Bytes>,
     ) -> Result<Vec<(ObjectId, InsertOutcome)>> {
-        let mut ids = Vec::with_capacity(canonical.len());
-        for c in &canonical {
+        let mut items = Vec::with_capacity(canonical.len());
+        for c in canonical {
             self.check_size(c.len())?;
-            Self::validate_decoded(kind, c)?;
-            ids.push(ObjectId::hash_encoded(kind, c));
+            Self::validate_decoded(kind, &c)?;
+            items.push((ObjectId::hash_encoded(kind, &c), c));
         }
-        if ids.len() < 2 {
+        self.store_many(kind, items).await
+    }
+
+    /// [`ObjectRepo::put_encoded_many`] for canonical encodings the caller built itself
+    /// (for example the trees of `apply_delta`), with their ids: the bytes are neither decoded
+    /// again nor re-hashed (each id must be `ObjectId::hash_encoded(kind, bytes)`).
+    pub async fn put_encoded_many_prehashed(
+        &self,
+        kind: Kind,
+        items: Vec<(ObjectId, Bytes)>,
+    ) -> Result<Vec<(ObjectId, InsertOutcome)>> {
+        for (id, c) in &items {
+            self.check_size(c.len())?;
+            debug_assert_eq!(*id, ObjectId::hash_encoded(kind, c));
+        }
+        self.store_many(kind, items).await
+    }
+
+    /// Store validated `(id, canonical bytes)` pairs of one kind: one strong existence and
+    /// redaction read and one `insert_objects` call.
+    async fn store_many(
+        &self,
+        kind: Kind,
+        items: Vec<(ObjectId, Bytes)>,
+    ) -> Result<Vec<(ObjectId, InsertOutcome)>> {
+        if items.len() < 2 {
             let mut out = Vec::with_capacity(1);
-            for c in canonical {
-                out.push(self.put_encoded(kind, c).await?);
+            for (id, c) in items {
+                out.push((id, self.store(id, c).await?));
             }
             return Ok(out);
         }
+        let (ids, canonical): (Vec<ObjectId>, Vec<Bytes>) = items.into_iter().unzip();
         // Strong: re-introduction blocking must not trust a stale `live` row (SPEC 5.4, 13.6).
         let existing = self
             .storage

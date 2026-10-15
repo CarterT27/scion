@@ -17,7 +17,57 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 /// Entries of a directory being rebuilt, keyed by name bytes (bytewise order, SPEC 4.3.2).
-type Entries = BTreeMap<Vec<u8>, TreeEntry>;
+/// One directory being rebuilt: its `T1` entries (strictly ascending by bytewise name, the
+/// canonical order) plus the edits so far. Lookups see the edits; [`DirEdit::finish`] merges
+/// them in one pass, so a large directory costs O(entries + edits log edits) and no per-entry
+/// key is allocated.
+struct DirEdit<'a> {
+    base: &'a [TreeEntry],
+    edits: BTreeMap<Vec<u8>, Option<TreeEntry>>,
+}
+
+impl<'a> DirEdit<'a> {
+    fn new(base: &'a [TreeEntry]) -> Self {
+        DirEdit {
+            base,
+            edits: BTreeMap::new(),
+        }
+    }
+
+    fn get(&self, name: &[u8]) -> Option<&TreeEntry> {
+        match self.edits.get(name) {
+            Some(edit) => edit.as_ref(),
+            None => self
+                .base
+                .binary_search_by(|e| e.name.as_bytes().cmp(name))
+                .ok()
+                .and_then(|i| self.base.get(i)),
+        }
+    }
+
+    fn insert(&mut self, e: TreeEntry) {
+        self.edits.insert(e.name.as_bytes().to_vec(), Some(e));
+    }
+
+    fn remove(&mut self, name: &[u8]) {
+        self.edits.insert(name.to_vec(), None);
+    }
+
+    /// The resulting entries, still strictly ascending.
+    fn finish(self) -> Vec<TreeEntry> {
+        let mut out = Vec::with_capacity(self.base.len() + self.edits.len());
+        let mut base = self.base.iter().peekable();
+        for (name, edit) in self.edits {
+            while let Some(b) = base.next_if(|b| b.name.as_bytes() < name.as_slice()) {
+                out.push(b.clone());
+            }
+            base.next_if(|b| b.name.as_bytes() == name.as_slice());
+            out.extend(edit);
+        }
+        out.extend(base.cloned());
+        out
+    }
+}
 
 fn fail(code: &str, i: usize, what: &str) -> ScionError {
     // Messages name the delta entry index, never the raw path (implementation-defined 6.9).
@@ -56,9 +106,9 @@ pub(crate) fn check_delta_order(delta: &[DeltaEntry]) -> Result<()> {
 }
 
 /// Encode a rebuilt directory (fresh tree, no extensions; SPEC 18.2 `Tree(sorted(entries))`).
-fn build_tree(entries: Entries) -> (ObjectId, Bytes) {
+fn build_tree(entries: Vec<TreeEntry>) -> (ObjectId, Bytes) {
     let tree = Tree {
-        entries: entries.into_values().collect(),
+        entries,
         extensions: Extensions::new(),
     };
     let bytes = tree.encode();
@@ -130,15 +180,8 @@ impl History {
         let mut root = *t1;
         let no_entries: Vec<usize> = Vec::new();
         for dir in order {
-            let mut entries: Entries = t1_trees
-                .get(dir)
-                .map(|t| {
-                    t.entries
-                        .iter()
-                        .map(|e| (e.name.as_bytes().to_vec(), e.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let base: &[TreeEntry] = t1_trees.get(dir).map_or(&[], |t| t.entries.as_slice());
+            let mut entries = DirEdit::new(base);
             let idxs = by_dir.get(dir).unwrap_or(&no_entries);
 
             // 1. Deletes.
@@ -182,15 +225,12 @@ impl History {
                 }
                 match built.get(child).copied().flatten() {
                     Some(id) => {
-                        entries.insert(
-                            name.as_bytes().to_vec(),
-                            TreeEntry {
-                                name,
-                                mode: Mode::Tree,
-                                id,
-                                size: 0,
-                            },
-                        );
+                        entries.insert(TreeEntry {
+                            name,
+                            mode: Mode::Tree,
+                            id,
+                            size: 0,
+                        });
                     }
                     None => {
                         entries.remove(name.as_bytes());
@@ -220,17 +260,15 @@ impl History {
                     }
                     _ => {}
                 }
-                entries.insert(
-                    name.as_bytes().to_vec(),
-                    TreeEntry {
-                        name,
-                        mode: *mode,
-                        id: *id,
-                        size: *size,
-                    },
-                );
+                entries.insert(TreeEntry {
+                    name,
+                    mode: *mode,
+                    id: *id,
+                    size: *size,
+                });
             }
 
+            let entries = entries.finish();
             if entries.is_empty() && !dir.is_root() {
                 built.insert(dir, None);
                 continue;

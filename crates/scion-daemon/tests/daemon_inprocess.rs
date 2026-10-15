@@ -87,3 +87,38 @@ async fn socket_path_takeover_rules() {
     assert_eq!(e.code, scion_core::ErrorCode::InvalidArgument);
     assert_eq!(std::fs::read(&cfg.socket).unwrap(), b"keep");
 }
+
+/// `GET path` against the admin listener; returns the raw HTTP response.
+async fn http_get(addr: std::net::SocketAddr, path: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    s.write_all(format!("GET {path} HTTP/1.0\r\nHost: x\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).await.unwrap();
+    out
+}
+
+/// `metrics_listen` serves the daemon's registry (the same one `daemon_metrics_move` checks
+/// for cache hits and misses) plus health
+/// endpoints; without it no listener is bound.
+#[tokio::test(flavor = "multi_thread")]
+async fn metrics_listen_serves_the_daemon_registry() {
+    let keyring = scion_auth::Keyring::generate_for_tests(1);
+    let up = FakeUpstream::start(upstream_opts(&keyring)).await;
+    let plain = InProcessDaemon::start(up.endpoint(), up.tls(), |_| {}).await;
+    assert!(plain.handle.metrics_addr().is_none());
+    let d = InProcessDaemon::start(up.endpoint(), up.tls(), |c| {
+        c.metrics_listen = Some("127.0.0.1:0".parse().unwrap());
+    })
+    .await;
+    let addr = d.handle.metrics_addr().unwrap();
+    let metrics = http_get(addr, "/metrics").await;
+    assert!(metrics.starts_with("HTTP/1.0 200") || metrics.starts_with("HTTP/1.1 200"));
+    assert!(metrics.contains("scion_cache_bytes"), "{metrics}");
+    assert!(http_get(addr, "/healthz").await.contains(" 200 "));
+    assert!(http_get(addr, "/readyz").await.contains(" 200 "));
+    d.handle.shutdown().await;
+    assert!(tokio::net::TcpStream::connect(addr).await.is_err());
+}

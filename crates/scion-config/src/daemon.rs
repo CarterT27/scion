@@ -48,6 +48,10 @@ pub struct DaemonConfig {
     /// (+) Optional CA path for the upstream TLS connection.
     #[serde(default)]
     pub upstream_ca: Option<PathBuf>,
+    /// (+) Optional TCP address serving `/metrics`, `/healthz` and `/readyz` (SPEC 15.2,
+    /// 15.3), e.g. `127.0.0.1:9101`; no listener when omitted.
+    #[serde(default)]
+    pub metrics_listen: Option<std::net::SocketAddr>,
 }
 
 fn default_max_cache_bytes() -> u64 {
@@ -150,6 +154,7 @@ impl DaemonConfig {
             upstream_max_concurrency: default_upstream_max_concurrency(),
             upstream_queue: default_upstream_queue(),
             upstream_ca: None,
+            metrics_listen: None,
         }
     }
 }

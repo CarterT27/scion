@@ -110,6 +110,8 @@ pub struct AppContext {
     pub config: ServerConfig,
     /// Object read authorization (SPEC 18.6).
     pub authz: ObjectAuthorizer,
+    /// Per-principal limits, also charged per id by multi-id calls (SPEC 10.5).
+    pub(crate) rate_limits: Arc<Limits>,
 }
 
 impl EpochSource for AppContext {
@@ -361,6 +363,7 @@ impl ServerApp {
             metrics: metrics.clone(),
             config,
             authz,
+            rate_limits: limits.clone(),
         });
         let mut tasks = vec![redactions.spawn_refresher(propagation_bound)];
         tasks.extend(crate::reload::spawn(&ctx.policy, metrics, reload));

@@ -502,14 +502,21 @@ impl DiskCache {
     /// never exceeds `max_bytes`. A payload larger than `max_bytes` is verified but not cached.
     /// Inserting an id that is already cached is a no-op.
     pub fn insert(&self, id: &ObjectId, p: Payload) -> Result<()> {
-        self.insert_inner(id, p, InsertStop::Complete)
-    }
-
-    fn insert_inner(&self, id: &ObjectId, p: Payload, stop: InsertStop) -> Result<()> {
         if !payload_matches(id, &p) {
             tracing::warn!(object = %id, "disk cache: rejected an insert whose digest does not match");
             return Err(ScionError::integrity(id));
         }
+        self.insert_inner(id, p, InsertStop::Complete)
+    }
+
+    /// [`DiskCache::insert`] for a payload whose decompressed content the caller has just
+    /// verified against `id` (SPEC 10.2 requires one verification before the rename), so the
+    /// content is not decompressed and hashed a second time.
+    pub fn insert_verified(&self, id: &ObjectId, p: Payload) -> Result<()> {
+        self.insert_inner(id, p, InsertStop::Complete)
+    }
+
+    fn insert_inner(&self, id: &ObjectId, p: Payload, stop: InsertStop) -> Result<()> {
         let (header, body) = match &p {
             Payload::Raw(b) => (HEADER_RAW, b),
             Payload::Zstd(b) => (HEADER_ZSTD, b),
@@ -576,16 +583,9 @@ impl DiskCache {
                 .map_err(|e| io_err("rename into", &path, e.error))?;
             idx.add(key, size);
         }
-        // Make the rename durable. The entry is already complete and verified, so a failure
-        // here is only logged.
-        match fs::File::open(&shard) {
-            Ok(d) => {
-                if let Err(e) = fsync_file(&d, &shard) {
-                    tracing::warn!(error = %e, "disk cache: directory fsync failed");
-                }
-            }
-            Err(e) => tracing::warn!(error = %e, "disk cache: directory open for fsync failed"),
-        }
+        // The directory is not fsynced: a rename lost in a crash only loses a cache entry
+        // (a later miss re-fetches it), while the file fsync above already guarantees that a
+        // surviving entry is complete.
         Ok(())
     }
 

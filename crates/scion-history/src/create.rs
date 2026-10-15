@@ -462,16 +462,18 @@ impl History {
 
         // SPEC 5.3 step 2: write new trees (an empty root is the empty tree object), in one
         // existence read and one insert.
-        let mut tree_bytes: Vec<Bytes> = applied
+        // The trees come from apply_delta, which encodes and hashes them, so they are not
+        // decoded or hashed again.
+        let mut trees: Vec<(ObjectId, Bytes)> = applied
             .new_trees
             .iter()
-            .map(|(_, _, b)| b.clone())
+            .map(|(_, id, b)| (*id, b.clone()))
             .collect();
         if applied.root == empty_tree_id() {
-            tree_bytes.push(Bytes::from(Tree::empty().encode()));
+            trees.push((empty_tree_id(), Bytes::from(Tree::empty().encode())));
         }
         self.objects
-            .put_encoded_many(Kind::Tree, tree_bytes)
+            .put_encoded_many_prehashed(Kind::Tree, trees)
             .await?;
         faults.check(points::CREATE_AFTER_TREES).await?;
         if let Some(bytes) = meta_bytes {

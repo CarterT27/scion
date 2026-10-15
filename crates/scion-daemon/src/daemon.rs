@@ -100,6 +100,21 @@ impl Daemon {
         // Before touching the cache: opening it deletes temp files, which would break a live
         // daemon's in-progress inserts.
         refuse_live_socket(&cfg.socket)?;
+        // Admin listener before anything else, so a bind failure leaves nothing running.
+        let admin = match cfg.metrics_listen {
+            Some(addr) => {
+                let router = scion_obs::health_router(metrics.clone(), Arc::new(AlwaysReady));
+                let (local, task) = scion_obs::serve_admin(addr, router).await.map_err(|e| {
+                    ScionError::new(
+                        ErrorCode::Unavailable,
+                        format!("daemon metrics listener on {addr}: {e}"),
+                    )
+                })?;
+                tracing::info!(addr = %local, "scion-daemon metrics listening");
+                Some((local, task))
+            }
+            None => None,
+        };
         let (dir, max, low, verify) = (
             cfg.cache_dir.clone(),
             cfg.max_cache_bytes,
@@ -160,6 +175,8 @@ impl Daemon {
             upstream,
             clock,
             metrics,
+            admin_addr: admin.as_ref().map(|(a, _)| *a),
+            admin: parking_lot::Mutex::new(admin.map(|(_, t)| t)),
             tasks: parking_lot::Mutex::new(Some((server, poller))),
         })
     }
@@ -173,7 +190,18 @@ pub struct DaemonHandle {
     upstream: Arc<dyn UpstreamConnector>,
     clock: Arc<dyn Clock>,
     metrics: Arc<Metrics>,
+    admin_addr: Option<std::net::SocketAddr>,
+    admin: parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>,
     tasks: parking_lot::Mutex<Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>>,
+}
+
+/// The daemon is ready as soon as it serves its socket (the upstream is dialed lazily).
+struct AlwaysReady;
+
+impl scion_obs::Readiness for AlwaysReady {
+    fn check(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
 }
 
 impl DaemonHandle {
@@ -229,10 +257,18 @@ impl DaemonHandle {
         self.metrics.clone()
     }
 
+    /// The bound address of the `metrics_listen` admin listener, when configured.
+    pub fn metrics_addr(&self) -> Option<std::net::SocketAddr> {
+        self.admin_addr
+    }
+
     /// Stop serving (in-flight calls get a grace period), stop polling and remove the
     /// socket. Idempotent; the cache directory stays valid (SPEC 16.1 class 6).
     pub(crate) async fn stop(&self) {
         self.inner.shutdown.cancel();
+        if let Some(admin) = self.admin.lock().take() {
+            admin.abort();
+        }
         let tasks = self.tasks.lock().take();
         if let Some((server, poller)) = tasks {
             poller.abort();
@@ -254,6 +290,9 @@ impl DaemonHandle {
 
 impl Drop for DaemonHandle {
     fn drop(&mut self) {
+        if let Some(admin) = self.admin.lock().take() {
+            admin.abort();
+        }
         if let Some((server, poller)) = self.tasks.lock().take() {
             self.inner.shutdown.cancel();
             server.abort();
