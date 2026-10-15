@@ -35,6 +35,9 @@ const BATCH_ROWS: usize = 1000;
 const TEST_POOL_SIZE: usize = 32;
 /// Repository name used by [`CrdbMetaStore::connect_fresh_for_tests`] (as `MemOptions`).
 const TEST_REPO_NAME: &str = "test";
+/// Session option set on every metadata connection (see `from_pg_config`). The variable
+/// exists from CockroachDB 23.1; SPEC 3.5 requires 23.2 or later.
+const NO_FORECASTS: &str = "-c optimizer_use_forecasts=off";
 
 /// The follower-read clause used for [`Consistency::Stale`] (storage-semantics 1.7, 3).
 macro_rules! stale_variant {
@@ -372,6 +375,15 @@ impl CrdbMetaStore {
         if pg.get_connect_timeout().is_none() {
             pg.connect_timeout(Duration::from_secs(10));
         }
+        // Statistics forecasts can predict an empty `repo_id` span on these single-repository
+        // tables, turning ON CONFLICT arbiters into anti-joins over the whole repository: a
+        // 6-row object_paths insert read 150k rows and serialized concurrent changeset
+        // creation. Hot-path writes must stay point lookups whatever the forecast says.
+        let options = match pg.get_options() {
+            Some(o) => format!("{o} {NO_FORECASTS}"),
+            None => NO_FORECASTS.to_owned(),
+        };
+        pg.options(&options);
         let database = pg.get_dbname().map(str::to_owned);
         let mcfg = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
@@ -1598,6 +1610,20 @@ mod tests {
                 strong
             );
         }
+    }
+
+    #[tokio::test]
+    async fn pooled_sessions_ignore_statistics_forecasts() {
+        let Some(url) = crate::config::test_url() else {
+            return;
+        };
+        let store = CrdbMetaStore::connect_fresh_for_tests(&url).await.unwrap();
+        let c = store.inner.pool.get().await.unwrap();
+        let row = c
+            .query_one("SHOW optimizer_use_forecasts", &[])
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, String>(0), "off");
     }
 
     #[test]
