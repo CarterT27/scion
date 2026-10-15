@@ -25,7 +25,7 @@ mod refs;
 mod tree;
 
 pub use config::{HistoryConfig, LandConfig};
-pub use graph_compute::compute_commit_graph;
+pub use graph_compute::{compute_commit_graph, compute_fp_merges};
 pub use history::History;
 pub use hooks::{
     AllowAll, EagerHook, EagerInput, LandAttemptOutcome, LandAuthorizer, LandAuthorizerSource,

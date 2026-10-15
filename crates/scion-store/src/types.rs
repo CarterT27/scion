@@ -90,6 +90,10 @@ pub struct ChangesetRow {
     pub generation: u64,
     /// Skip pointers: first-parent ancestors at distance 2^k.
     pub skip: Vec<ObjectId>,
+    /// Merge changesets (more than one parent) on the first-parent chain from this changeset
+    /// to its root, inclusive; `None` when unknown (rows written before the column existed,
+    /// or below such a row). Lets graph walks skip merge-free first-parent spans.
+    pub fp_merges: Option<u64>,
     /// Change id.
     pub change_id: ChangeId,
     /// Creating principal id string.

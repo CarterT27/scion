@@ -50,6 +50,7 @@ async fn repo(n: u64) -> (Storage, ObjectId, ObjectId) {
                 encoded: Bytes::from_static(b"fake changeset"),
                 generation: 2,
                 skip: Vec::new(),
+                fp_merges: None,
                 change_id: ChangeId([7; 16]),
                 created_by: "github:alice".into(),
                 created_at: SystemTime::UNIX_EPOCH,

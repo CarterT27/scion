@@ -225,6 +225,7 @@ async fn load_fixture(backend: Backend, files: u64) -> Fixture {
                 encoded,
                 generation: 1,
                 skip: Vec::new(),
+                fp_merges: None,
                 change_id: cs.change_id,
                 created_by: "service:fixture".to_owned(),
                 created_at: SystemTime::UNIX_EPOCH,

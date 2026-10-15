@@ -43,7 +43,7 @@ The authoritative DDL is `scion_store_crdb::MIGRATIONS`. Shape (all `PRIMARY KEY
 | `objects` | `(repo_id, object_id)` | `kind INT2`, `size`, `stored_size`, `inline_data BYTES NULL`, `state STRING ('live'/'quarantined'/'purged')`, `created_at` |
 | `object_uploads` | `(repo_id, object_id, principal)` | `at` |
 | `object_paths` | `(repo_id, object_id, path)` | `first_changeset`, `at` |
-| `changesets` | `(repo_id, changeset_id)` | `encoded`, `generation`, `skip BYTES[]`, `change_id`, `created_by`, `created_at` |
+| `changesets` | `(repo_id, changeset_id)` | `encoded`, `generation`, `skip BYTES[]`, `change_id`, `created_by`, `created_at`, `fp_merges INT8 NULL` |
 | `changeset_children` | `(repo_id, parent_id, child_id)` | |
 | `refs` | `(repo_id, name)` | `target`, `version`, `updated_at` |
 | `ref_log` | `(repo_id, name, version)` | `old_target NULL`, `new_target NULL`, `principal`, `at`, `landed BYTES` (canonical list of `(change_id 16, source 34, result 34)`) |

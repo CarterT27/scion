@@ -11,7 +11,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use scion_core::test_support::{full_mode, proptest_cases};
 use scion_core::{ChangeId, ErrorCode, Kind, ObjectId, SystemClock, empty_tree_id};
-use scion_history::{History, HistoryConfig, NoEager, compute_commit_graph};
+use scion_history::{History, HistoryConfig, NoEager, compute_commit_graph, compute_fp_merges};
 use scion_object::{Canonical, Changeset, Extensions};
 use scion_refmodel::{MRepo, MTree};
 use scion_store::{
@@ -82,6 +82,7 @@ impl Dag {
             encoded: Bytes::from(encoded),
             generation,
             skip,
+            fp_merges: compute_fp_merges(parent_rows.first(), parent_rows.len()),
             change_id: cs.change_id,
             created_by: "service:test".into(),
             created_at: SystemTime::UNIX_EPOCH,
@@ -776,6 +777,62 @@ async fn skip_pointer_queries_are_logarithmic() {
     let before = dag.changesets_read();
     assert!(!h.is_ancestor(&tip, &dag.id(root)).await.unwrap());
     assert!(dag.changesets_read() - before <= 2);
+}
+
+/// IsAncestor and MergeBase cross merge-free first-parent spans with the skip pointers
+/// (`fp_merges`): on a 4096-long linear main with a short branch, both cost O(log gap +
+/// branch length) reads instead of O(gap), for hits and misses.
+#[tokio::test]
+async fn ancestry_and_merge_base_skip_linear_gaps() {
+    let mut dag = Dag::new(8);
+    let mut main = vec![dag.add(&[]).await];
+    for _ in 0..4095 {
+        let prev = *main.last().unwrap();
+        main.push(dag.add(&[prev]).await);
+    }
+    let fork = main[1000];
+    let mut branch = vec![dag.add(&[fork]).await];
+    for _ in 0..9 {
+        let prev = *branch.last().unwrap();
+        branch.push(dag.add(&[prev]).await);
+    }
+    let tip = *main.last().unwrap();
+    let btip = *branch.last().unwrap();
+    let h = &dag.history;
+
+    for (a, b) in [
+        (main[0], tip),
+        (main[3000], tip),
+        (fork, btip),
+        (branch[4], tip),
+        (btip, tip),
+        (tip, btip),
+    ] {
+        let before = dag.changesets_read();
+        let got = h.is_ancestor(&dag.id(a), &dag.id(b)).await.unwrap();
+        let reads = dag.changesets_read() - before;
+        assert_eq!(got, dag.model.is_ancestor(a, b), "is_ancestor({a}, {b})");
+        assert!(reads <= 40, "is_ancestor({a}, {b}) read {reads} changesets");
+    }
+    for (a, b) in [
+        (tip, btip),
+        (btip, tip),
+        (tip, main[10]),
+        (main[2000], btip),
+    ] {
+        let before = dag.changesets_read();
+        let got = h.merge_bases(&dag.id(a), &dag.id(b)).await.unwrap();
+        let reads = dag.changesets_read() - before;
+        let mut want: Vec<ObjectId> = dag
+            .model
+            .merge_bases(a, b)
+            .into_iter()
+            .map(|i| dag.id(i))
+            .collect();
+        want.sort();
+        assert_eq!(got, want, "merge_bases({a}, {b})");
+        assert!(reads <= 80, "merge_bases({a}, {b}) read {reads} changesets");
+    }
 }
 
 /// First-parent ancestry stays logarithmic when merges make generations jump by more than one

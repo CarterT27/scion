@@ -182,6 +182,12 @@ impl Fx {
             encoded: Bytes::from(encoded),
             generation,
             skip: self.skip_for(parent_ids.first()),
+            fp_merges: match parents.first() {
+                Some(p) => self.rows[p]
+                    .fp_merges
+                    .map(|m| m + u64::from(parents.len() > 1)),
+                None => Some(0),
+            },
             change_id: cs.change_id,
             created_by: "service:test".to_owned(),
             created_at: t(1),
@@ -604,6 +610,7 @@ async fn missing_eager() {
         encoded: Bytes::from(enc2),
         generation: 4,
         skip: vec![fx.id("c2"), fx.id("c1")],
+        fp_merges: None,
         change_id: cs2.change_id,
         created_by: "service:test".to_owned(),
         created_at: t(1),
@@ -666,6 +673,23 @@ async fn bad_graph() {
             changeset: fx.id("c3")
         }]
     );
+    // A wrong known `fp_merges` is a violation; an unknown one is not.
+    let fx = Fx::build().await;
+    let mut row = fx.rows["m"].clone();
+    assert_eq!(row.fp_merges, Some(1));
+    row.fp_merges = Some(0);
+    fx.h.meta.put_changeset_row_raw(row);
+    assert_eq!(
+        fx.check(false).await,
+        vec![Violation::BadGraph {
+            changeset: fx.id("m")
+        }]
+    );
+    let fx = Fx::build().await;
+    let mut row = fx.rows["m"].clone();
+    row.fp_merges = None;
+    fx.h.meta.put_changeset_row_raw(row);
+    assert!(fx.check(false).await.is_empty());
 }
 
 #[tokio::test]

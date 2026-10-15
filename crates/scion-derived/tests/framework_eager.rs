@@ -356,6 +356,7 @@ async fn store_ctx_trees_changesets_and_stored_values() {
         encoded: Bytes::from(cs.encode()),
         generation: 1,
         skip: vec![],
+        fp_merges: None,
         change_id: cs.change_id,
         created_by: "github:alice".into(),
         created_at: SystemTime::UNIX_EPOCH,

@@ -33,6 +33,7 @@ struct GraphNode {
     generation: u64,
     parents: Vec<ObjectId>,
     skip: Vec<ObjectId>,
+    fp_merges: Option<u64>,
 }
 
 /// Per-query memo over [`scion_store::ObjectRepo::get_changeset`].
@@ -60,6 +61,7 @@ impl<'a> Walker<'a> {
             generation: row.generation,
             parents: cs.parents.clone(),
             skip: row.skip,
+            fp_merges: row.fp_merges,
         });
         self.memo.insert(*id, n.clone());
         Ok(n)
@@ -85,10 +87,52 @@ impl<'a> Walker<'a> {
                     generation: row.generation,
                     parents: cs.parents.clone(),
                     skip: row.skip,
+                    fp_merges: row.fp_merges,
                 }),
             );
         }
         Ok(())
+    }
+
+    /// The deepest first-parent ancestor `y` of `id` (inclusive) with generation
+    /// `>= min_gen`, when the chain from `id` down to `y` (both included) holds no merge. The
+    /// chain nodes are then the only ancestors of `id` with generation `>= min_gen`, and `y`'s
+    /// parent (at most one) lies below `min_gen`. `None` when the span holds a merge, a
+    /// `fp_merges` count is unknown, or `generation(id) < min_gen`.
+    ///
+    /// Follows the skip pointers like [`History::is_first_parent_ancestor`]: O(log n) reads.
+    /// `fp_merges` never increases going down a first-parent chain, so the first jump target
+    /// whose count differs from `id`'s already proves a merge.
+    async fn merge_free_span(
+        &mut self,
+        id: &ObjectId,
+        n: &Arc<GraphNode>,
+        min_gen: u64,
+    ) -> Result<Option<(ObjectId, Arc<GraphNode>)>> {
+        let Some(top) = n.fp_merges else {
+            return Ok(None);
+        };
+        if n.generation < min_gen {
+            return Ok(None);
+        }
+        let (mut c, mut cn) = (*id, n.clone());
+        let mut limit = usize::MAX;
+        loop {
+            let mut next = None;
+            for (k, s) in cn.skip.iter().enumerate().take(limit).rev() {
+                let sn = self.node(s).await?;
+                if sn.generation >= min_gen {
+                    next = Some((k, *s, sn));
+                    break;
+                }
+            }
+            let Some((k, s, sn)) = next else { break };
+            if sn.fp_merges != Some(top) {
+                return Ok(None);
+            }
+            (limit, c, cn) = (k, s, sn);
+        }
+        Ok((cn.fp_merges == Some(top) && cn.parents.len() <= 1).then_some((c, cn)))
     }
 }
 
@@ -170,7 +214,9 @@ impl History {
     ///
     /// Generation-pruned depth-first search from `b` over all parents (SPEC 9.2 `commit_graph`):
     /// a changeset whose generation is `<= generation(a)` cannot have `a` as a proper ancestor,
-    /// so the search does not expand it. `a` is an ancestor of itself.
+    /// so the search does not expand it. `a` is an ancestor of itself. A merge-free
+    /// first-parent span (SPEC 9.2 `fp_merges`) is crossed with the skip pointers, so a linear
+    /// gap costs O(log n) reads.
     ///
     /// Errors: NOT_FOUND when `a` or `b` (or a stored parent) is missing; INVALID_ARGUMENT /
     /// `invalid_kind` for a non-changeset id.
@@ -195,6 +241,14 @@ impl History {
             }
             let n = w.node(&c).await?;
             if n.generation <= ga {
+                continue;
+            }
+            // A merge-free first-parent span holds every ancestor of `c` down to
+            // generation(a): jump over it (O(log n) reads) instead of walking it.
+            if let Some((y, _)) = w.merge_free_span(&c, &n, ga).await? {
+                if y == *a {
+                    return Ok(true);
+                }
                 continue;
             }
             w.prefetch(&n.parents).await?;
@@ -255,7 +309,9 @@ impl History {
     /// generation-ordered paint walk: nodes are visited newest first by `(generation, id)`, so
     /// each node's reachability flags are final when it is visited; a node reachable from both
     /// sides and not below another common ancestor is a result, and everything below it is
-    /// marked stale. The walk stops as soon as only stale nodes remain queued. Returns an empty
+    /// marked stale. The walk stops as soon as only stale nodes remain queued. A merge-free
+    /// first-parent span above every other queued node is crossed with the skip pointers
+    /// (SPEC 9.2 `fp_merges`), so a long linear side costs O(log n) reads. Returns an empty
     /// list for unrelated histories (e.g. two imported roots); a criss-cross yields two bases.
     pub async fn merge_bases(&self, a: &ObjectId, b: &ObjectId) -> Result<Vec<ObjectId>> {
         let mut w = Walker::new(self);
@@ -286,7 +342,18 @@ impl History {
             }
             let n = w.node(&id).await?;
             w.prefetch(&n.parents).await?;
-            for p in &n.parents {
+            let mut paint = n.parents.clone();
+            // Every other queued node is older than `floor`, so the first-parent chain below
+            // `n` down to `floor` is reachable from `n` only: when it holds no merge, it would
+            // only be painted with `down` and never become a result. Paint below it instead.
+            if let [p] = n.parents.as_slice() {
+                let floor = heap.peek().map_or(0, |(g, _)| *g) + 1;
+                let pn = w.node(p).await?;
+                if let Some((_, y)) = w.merge_free_span(p, &pn, floor).await? {
+                    paint = y.parents.clone();
+                }
+            }
+            for p in &paint {
                 let old = flags.get(p).copied();
                 let new = old.unwrap_or(0) | down;
                 if old == Some(new) {

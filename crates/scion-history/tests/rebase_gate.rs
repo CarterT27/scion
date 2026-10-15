@@ -76,6 +76,7 @@ async fn rebase_counters(files: u64) -> (u32, CounterSnapshot) {
                 encoded,
                 generation: 1,
                 skip: Vec::new(),
+                fp_merges: None,
                 change_id: base.change_id,
                 created_by: "service:fixture".to_owned(),
                 created_at: std::time::SystemTime::UNIX_EPOCH,

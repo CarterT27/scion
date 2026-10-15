@@ -122,6 +122,7 @@ fn cs_row(encoded: &[u8], generation: u64, skip: Vec<ObjectId>) -> ChangesetRow 
         encoded: Bytes::copy_from_slice(encoded),
         generation,
         skip,
+        fp_merges: Some(0),
         change_id: ChangeId(cid),
         created_by: "service:conformance".to_owned(),
         created_at: t(3),

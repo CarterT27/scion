@@ -806,6 +806,10 @@ Requirements:
 1. `commit_graph` (Eager)
    - `generation = 1 + max(parent generations)` (root = 1).
    - `skip[k]` = first-parent ancestor at distance `2^k`, for `k` while it exists.
+   - `fp_merges` = merges (changesets with more than one parent) on the first-parent chain from
+     the changeset to its root, inclusive; unknown (NULL) when the first parent's count is
+     unknown. Two chain nodes with equal counts bound a merge-free span, which `IsAncestor` and
+     `MergeBase` cross with the skip pointers in O(log n) reads.
    - Stored on the `changesets` row.
    - Used by `IsAncestor`, `MergeBase`, `Log`, and land stack detection.
 

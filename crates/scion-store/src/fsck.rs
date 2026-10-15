@@ -18,7 +18,8 @@
 //!   for every `Put` of the delta and every new tree (a tree of the root tree that differs from
 //!   `T1` at its directory path, including the root tree at the empty path; SPEC 9.2), and
 //!   `git_mapping` (import only) is not required.
-//! - `BadGraph`: `generation != 1 + max(parent generations)` or wrong skip pointers
+//! - `BadGraph`: `generation != 1 + max(parent generations)`, wrong skip pointers, or a known
+//!   `fp_merges` that is not the first parent's known count plus one for a merge
 //!   (`skip[k]` = first-parent ancestor at distance `2^k`, SPEC 9.2).
 //! - `RefTargetMissing`: a ref whose target changeset row is absent.
 //!
@@ -79,7 +80,7 @@ pub enum Violation {
         /// The type name.
         ty: String,
     },
-    /// Generation or skip pointers are inconsistent.
+    /// Generation, skip pointers or `fp_merges` are inconsistent.
     BadGraph {
         /// The changeset.
         changeset: ObjectId,
@@ -454,7 +455,19 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if row.generation != generation || row.skip != skip {
+        // A known `fp_merges` is the first parent's known count plus one for a merge; unknown
+        // (rows written before the column existed) is always consistent.
+        let fp_merges_ok = match row.fp_merges {
+            None => true,
+            Some(m) => {
+                let below = match parent_rows.first() {
+                    Some(fp) => fp.fp_merges,
+                    None => Some(0),
+                };
+                below.map(|b| b + u64::from(cs.parents.len() > 1)) == Some(m)
+            }
+        };
+        if row.generation != generation || row.skip != skip || !fp_merges_ok {
             self.push(Violation::BadGraph { changeset: *id });
         }
         Ok(())

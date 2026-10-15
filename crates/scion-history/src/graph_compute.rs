@@ -40,6 +40,17 @@ pub fn compute_commit_graph(
     (generation, skip)
 }
 
+/// SPEC 9.2 `fp_merges` of a new changeset with `n_parents` parents whose first parent's row is
+/// `first_parent` (`None` for a root): the parent's count plus one for a merge. Unknown when
+/// the first parent's count is unknown.
+pub fn compute_fp_merges(first_parent: Option<&ChangesetRow>, n_parents: usize) -> Option<u64> {
+    let below = match first_parent {
+        Some(fp) => fp.fp_merges?,
+        None => 0,
+    };
+    Some(below + u64::from(n_parents > 1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +69,7 @@ mod tests {
             encoded: Bytes::new(),
             generation,
             skip,
+            fp_merges: None,
             change_id: ChangeId([0; 16]),
             created_by: "service:test".into(),
             created_at: SystemTime::UNIX_EPOCH,

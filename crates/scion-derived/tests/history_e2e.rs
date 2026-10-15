@@ -228,6 +228,7 @@ async fn fsck_reports_a_missing_history_row() {
                 encoded,
                 generation: 1,
                 skip: Vec::new(),
+                fp_merges: None,
                 change_id: cs.change_id,
                 created_by: "service:test".to_owned(),
                 created_at: std::time::SystemTime::UNIX_EPOCH,

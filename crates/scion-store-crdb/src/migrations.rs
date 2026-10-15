@@ -151,4 +151,12 @@ CREATE INDEX IF NOT EXISTS redactions_by_purge_after ON redactions (repo_id, pur
 CREATE INDEX IF NOT EXISTS changesets_roots ON changesets (repo_id) WHERE generation = 1;
 "#,
     ),
+    (
+        // SPEC 9.2 `fp_merges`: NULL for rows written before the column existed (unknown, so
+        // graph walks do not skip across them).
+        "0004_changeset_fp_merges",
+        r#"
+ALTER TABLE changesets ADD COLUMN IF NOT EXISTS fp_merges INT8 NULL;
+"#,
+    ),
 ];

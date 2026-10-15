@@ -143,7 +143,8 @@ pub(crate) fn object_row(r: &Row) -> Result<ObjectRow> {
     })
 }
 
-/// Columns: `changeset_id, encoded, generation, skip, change_id, created_by, created_at`.
+/// Columns: `changeset_id, encoded, generation, skip, change_id, created_by, created_at,
+/// fp_merges`.
 pub(crate) fn changeset_row(r: &Row) -> Result<ChangesetRow> {
     let skip: Vec<Vec<u8>> = col(r, 3)?;
     Ok(ChangesetRow {
@@ -154,6 +155,9 @@ pub(crate) fn changeset_row(r: &Row) -> Result<ChangesetRow> {
         change_id: change_id_of(&col::<Vec<u8>>(r, 4)?)?,
         created_by: col(r, 5)?,
         created_at: col(r, 6)?,
+        fp_merges: col::<Option<i64>>(r, 7)?
+            .map(|m| to_u64(m, "fp_merges"))
+            .transpose()?,
     })
 }
 

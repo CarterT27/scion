@@ -57,7 +57,7 @@ const GET_OBJECTS: (&str, &str) = stale_variant!(
 );
 /// `(strong, stale)` SQL for `get_changesets`.
 const GET_CHANGESETS: (&str, &str) = stale_variant!(
-    "SELECT changeset_id, encoded, generation, skip, change_id, created_by, created_at FROM changesets",
+    "SELECT changeset_id, encoded, generation, skip, change_id, created_by, created_at, fp_merges FROM changesets",
     "WHERE repo_id = $1 AND changeset_id = ANY($2)"
 );
 /// `(strong, stale)` SQL for `get_derived`.
@@ -790,6 +790,7 @@ impl MetaStore for CrdbMetaStore {
         let change_id = row.change_id.0.as_slice();
         let created_by = row.created_by.as_str();
         let created_at = row.created_at;
+        let fp_merges = row.fp_merges.map(|m| to_i64(m, "fp_merges")).transpose()?;
         let parents = ids_bytes(&b.parents);
         let p_objects: Vec<&[u8]> = b
             .object_paths
@@ -811,7 +812,8 @@ impl MetaStore for CrdbMetaStore {
             let n = execute(
                 &tx,
                 "INSERT INTO changesets (repo_id, changeset_id, encoded, generation, skip, \
-                 change_id, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+                 change_id, created_by, created_at, fp_merges) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
                  ON CONFLICT (repo_id, changeset_id) DO NOTHING",
                 &[
                     &rid,
@@ -822,6 +824,7 @@ impl MetaStore for CrdbMetaStore {
                     &change_id,
                     &created_by,
                     &created_at,
+                    &fp_merges,
                 ],
             )
             .await?;

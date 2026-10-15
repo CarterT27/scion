@@ -102,6 +102,7 @@ async fn measure(files: u64) -> Gate {
                 encoded,
                 generation: 1,
                 skip: Vec::new(),
+                fp_merges: None,
                 change_id: base.change_id,
                 created_by: "service:fixture".to_owned(),
                 created_at: SystemTime::UNIX_EPOCH,

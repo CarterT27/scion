@@ -26,10 +26,10 @@
 //! derived rows. Every write is idempotent, so identical requests return the same identifier
 //! and never error, sequentially or concurrently.
 
-use crate::compute_commit_graph;
 use crate::history::History;
 use crate::hooks::{EagerInput, WriteAuthorizer};
 use crate::types::{Applied, CreateRequest, Created, MetaFields, MetaSource};
+use crate::{compute_commit_graph, compute_fp_merges};
 use bytes::Bytes;
 use scion_core::{
     ChangeId, ErrorCode, Kind, ObjectId, Principal, Result, ScionError, empty_tree_id, points,
@@ -519,6 +519,7 @@ impl History {
         let (generation, skip) = compute_commit_graph(parent_rows.first(), &parent_rows, |c, j| {
             rows.get(c).and_then(|r| r.skip.get(j).copied())
         });
+        let fp_merges = compute_fp_merges(parent_rows.first(), parent_rows.len());
 
         // path_index (SPEC 9.2): every Put blob at its path, every new tree at its directory.
         let now = self.clock.now();
@@ -560,6 +561,7 @@ impl History {
                 encoded,
                 generation,
                 skip,
+                fp_merges,
                 change_id: changeset.change_id,
                 created_by,
                 created_at: now,

@@ -132,6 +132,7 @@ pub fn opaque_cs_row(encoded: &[u8], generation: u64) -> ChangesetRow {
         encoded: Bytes::copy_from_slice(encoded),
         generation,
         skip: vec![],
+        fp_merges: None,
         change_id: ChangeId([7; 16]),
         created_by: "service:test".to_owned(),
         created_at: t(0),
