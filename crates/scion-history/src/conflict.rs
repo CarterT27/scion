@@ -26,7 +26,7 @@ use scion_core::{
 use scion_merge::{EntryDecision, Merge3, classify, is_binary, merge_mode, merge3};
 use scion_object::{DeltaEntry, DeltaOp, RepoPath, Tree, TreeEntry};
 use scion_store::{Consistency, ObjectState};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// SPEC 8.3 entry equality: both absent, or equal `(mode, id)` (the size is not compared).
@@ -102,6 +102,41 @@ impl<'h> TreeReader<'h> {
         let t = self.h.tree(id).await?;
         self.cache.insert(*id, t.clone());
         Ok(t)
+    }
+
+    /// Load every directory that `probe(root, path)` would read, for every root and path,
+    /// level by level: one batched metadata read per directory depth instead of one per tree.
+    /// Best effort: a tree that fails to load is left for `probe` to report.
+    pub(crate) async fn prefetch(&mut self, roots: &[ObjectId], paths: &[&RepoPath]) -> Result<()> {
+        let comps: Vec<Vec<_>> = paths.iter().map(|p| p.components().collect()).collect();
+        let mut cur: BTreeSet<(ObjectId, usize)> = roots
+            .iter()
+            .flat_map(|r| (0..paths.len()).map(move |i| (*r, i)))
+            .filter(|(_, i)| !comps[*i].is_empty())
+            .collect();
+        let mut depth = 0;
+        while !cur.is_empty() {
+            let ids: BTreeSet<ObjectId> = cur.iter().map(|(t, _)| *t).collect();
+            let ids: Vec<ObjectId> = ids.into_iter().collect();
+            self.h.objects.prefetch_trees(&ids).await?;
+            let mut next = BTreeSet::new();
+            for (t, i) in &cur {
+                if depth + 1 >= comps[*i].len() {
+                    continue;
+                }
+                let Ok(tree) = self.tree(t).await else {
+                    continue;
+                };
+                if let Some(e) = tree.get(comps[*i][depth])
+                    && e.mode == Mode::Tree
+                {
+                    next.insert((e.id, *i));
+                }
+            }
+            cur = next;
+            depth += 1;
+        }
+        Ok(())
     }
 
     /// Walk `root` along `path`, reading only the directories on the way (SPEC 8.2).

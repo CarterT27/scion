@@ -19,6 +19,7 @@ use scion_core::{
     Clock, ErrorCode, Kind, ObjectId, Result, ScionError, SystemClock, points, subcode,
 };
 use scion_object::{Canonical, Changeset, HistoryNode, Meta, Tree};
+use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -329,6 +330,157 @@ impl ObjectRepo {
         let id = ObjectId::hash_encoded(kind, &canonical);
         let outcome = self.store(id, canonical).await?;
         Ok((id, outcome))
+    }
+
+    /// [`ObjectRepo::put_encoded`] for several objects of one kind with one strong existence
+    /// and redaction read and one `insert_objects` call (SPEC 5.3 step 2 for a changeset's new
+    /// trees). Results are in input order.
+    pub async fn put_encoded_many(
+        &self,
+        kind: Kind,
+        canonical: Vec<Bytes>,
+    ) -> Result<Vec<(ObjectId, InsertOutcome)>> {
+        let mut ids = Vec::with_capacity(canonical.len());
+        for c in &canonical {
+            self.check_size(c.len())?;
+            Self::validate_decoded(kind, c)?;
+            ids.push(ObjectId::hash_encoded(kind, c));
+        }
+        if ids.len() < 2 {
+            let mut out = Vec::with_capacity(1);
+            for c in canonical {
+                out.push(self.put_encoded(kind, c).await?);
+            }
+            return Ok(out);
+        }
+        // Strong: re-introduction blocking must not trust a stale `live` row (SPEC 5.4, 13.6).
+        let existing = self
+            .storage
+            .meta
+            .get_objects(&ids, Consistency::Strong)
+            .await?;
+        let mut out: Vec<(ObjectId, InsertOutcome)> = Vec::with_capacity(ids.len());
+        let mut rows = Vec::new();
+        let mut row_at = Vec::new();
+        let mut queued = BTreeSet::new();
+        for ((id, raw), row) in ids.iter().zip(canonical).zip(existing) {
+            match row.map(|r| r.state) {
+                Some(ObjectState::Live) => {
+                    out.push((*id, InsertOutcome::AlreadyExists));
+                    continue;
+                }
+                Some(_) => return Err(ScionError::redacted(id)),
+                None => {}
+            }
+            out.push((*id, InsertOutcome::AlreadyExists));
+            if !queued.insert(*id) {
+                continue;
+            }
+            let size = raw.len() as u64;
+            let (inline_data, stored_size) = if raw.len() <= self.cfg.inline_threshold_bytes {
+                (Some(raw), size)
+            } else {
+                let level = self.cfg.zstd_level;
+                let frame = maybe_blocking(raw.len(), move || zstd::bulk::compress(&raw, level))
+                    .await?
+                    .map_err(|e| store_error(format!("zstd compression failed: {e}")))?;
+                let stored = frame.len() as u64;
+                self.storage
+                    .blobs
+                    .put(&self.key(id, Area::Live), Bytes::from(frame))
+                    .await?;
+                (None, stored)
+            };
+            row_at.push(out.len() - 1);
+            rows.push(ObjectRow {
+                id: *id,
+                kind,
+                size,
+                stored_size,
+                inline_data,
+                state: ObjectState::Live,
+                created_at: self.clock.now(),
+            });
+        }
+        if rows.is_empty() {
+            return Ok(out);
+        }
+        self.storage
+            .faults
+            .check(points::UPLOAD_AFTER_BYTES)
+            .await?;
+        let outcomes = self.storage.meta.insert_objects(rows).await?;
+        self.storage.faults.check(points::UPLOAD_AFTER_ROW).await?;
+        let mut raced = Vec::new();
+        for (i, outcome) in row_at.into_iter().zip(outcomes) {
+            out[i].1 = outcome;
+            match outcome {
+                InsertOutcome::Inserted => self.storage.counters.record_object_write(kind),
+                InsertOutcome::AlreadyExists => raced.push(out[i].0),
+            }
+        }
+        if !raced.is_empty() {
+            // Raced with another writer or a redaction: never report a redacted id as stored.
+            let rows = self
+                .storage
+                .meta
+                .get_objects(&raced, Consistency::Strong)
+                .await?;
+            for (id, row) in raced.iter().zip(rows) {
+                if row.is_some_and(|r| r.state != ObjectState::Live) {
+                    return Err(ScionError::redacted(id));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Load every uncached tree of `ids` into the decoded-tree LRU with one metadata read
+    /// (stale first, strong for misses) so later [`ObjectRepo::get_tree`] calls hit the cache.
+    /// Best effort: an id that is absent, redacted or unreadable is left for `get_tree` to
+    /// report.
+    pub async fn prefetch_trees(&self, ids: &[ObjectId]) -> Result<()> {
+        let missing: Vec<ObjectId> = {
+            let cache = self.caches.trees.lock();
+            let mut seen = BTreeSet::new();
+            ids.iter()
+                .filter(|id| id.kind() == Kind::Tree && !cache.contains(id) && seen.insert(**id))
+                .copied()
+                .collect()
+        };
+        if missing.len() < 2 {
+            return Ok(());
+        }
+        let meta = &self.storage.meta;
+        let mut rows = meta.get_objects(&missing, Consistency::Stale).await?;
+        let misses: Vec<ObjectId> = missing
+            .iter()
+            .zip(&rows)
+            .filter(|(_, r)| r.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        if !misses.is_empty() {
+            let mut strong = meta
+                .get_objects(&misses, Consistency::Strong)
+                .await?
+                .into_iter();
+            for r in rows.iter_mut().filter(|r| r.is_none()) {
+                *r = strong.next().flatten();
+            }
+        }
+        let loads = missing.iter().zip(rows).filter_map(|(id, row)| {
+            row.map(|row| async move {
+                let (raw, _, _) = self.load_row_verified(id, row).await.ok()?;
+                let tree = Tree::decode(&raw).ok()?;
+                Some((*id, Arc::new(tree), raw.len() as u64))
+            })
+        });
+        let loaded = futures::future::join_all(loads).await;
+        let mut cache = self.caches.trees.lock();
+        for (id, tree, n) in loaded.into_iter().flatten() {
+            cache.put(id, (tree, n));
+        }
+        Ok(())
     }
 
     /// Store client-supplied data under a claimed id: INTEGRITY on mismatch, REDACTED when the

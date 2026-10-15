@@ -600,6 +600,77 @@ impl MetaStore for CrdbMetaStore {
         .await
     }
 
+    async fn insert_objects(&self, rows: Vec<ObjectRow>) -> Result<Vec<InsertOutcome>> {
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rid = self.rid();
+        let ids: Vec<&[u8]> = rows.iter().map(|r| r.id.as_bytes().as_slice()).collect();
+        let kinds: Vec<i16> = rows.iter().map(|r| i16::from(r.kind.byte())).collect();
+        let sizes = rows
+            .iter()
+            .map(|r| to_i64(r.size, "size"))
+            .collect::<Result<Vec<i64>>>()?;
+        let stored = rows
+            .iter()
+            .map(|r| to_i64(r.stored_size, "stored_size"))
+            .collect::<Result<Vec<i64>>>()?;
+        let inline: Vec<Option<&[u8]>> = rows.iter().map(|r| r.inline_data.as_deref()).collect();
+        let states: Vec<&str> = rows.iter().map(|r| object_state_str(r.state)).collect();
+        let ats: Vec<SystemTime> = rows.iter().map(|r| r.created_at).collect();
+        let cols = (&ids, &kinds, &sizes, &stored, &inline, &states, &ats);
+        let inserted: BTreeSet<ObjectId> = self
+            .txn("insert_objects", false, |mut c| async move {
+                let (ids, kinds, sizes, stored, inline, states, ats) = cols;
+                let tx = begin(&mut c).await?;
+                let mut inserted = BTreeSet::new();
+                let n = ids.len();
+                let mut start = 0;
+                while start < n {
+                    let end = (start + BATCH_ROWS).min(n);
+                    let r = start..end;
+                    let rows = query(
+                        &tx,
+                        "INSERT INTO objects (repo_id, object_id, kind, size, stored_size, \
+                         inline_data, state, created_at) \
+                         SELECT $1, u.id, u.k, u.s, u.st, u.i, u.state, u.at FROM UNNEST(\
+                         $2::BYTES[], $3::INT2[], $4::INT8[], $5::INT8[], $6::BYTES[], \
+                         $7::STRING[], $8::TIMESTAMPTZ[]) AS u(id, k, s, st, i, state, at) \
+                         ON CONFLICT (repo_id, object_id) DO NOTHING RETURNING object_id",
+                        &[
+                            &rid,
+                            &&ids[r.clone()],
+                            &&kinds[r.clone()],
+                            &&sizes[r.clone()],
+                            &&stored[r.clone()],
+                            &&inline[r.clone()],
+                            &&states[r.clone()],
+                            &&ats[r],
+                        ],
+                    )
+                    .await?;
+                    for row in &rows {
+                        inserted.insert(id_of(&col::<Vec<u8>>(row, 0)?)?);
+                    }
+                    start = end;
+                }
+                tx.commit().await?;
+                Ok(inserted)
+            })
+            .await?;
+        let mut first = BTreeSet::new();
+        Ok(rows
+            .iter()
+            .map(|r| {
+                if inserted.contains(&r.id) && first.insert(r.id) {
+                    InsertOutcome::Inserted
+                } else {
+                    InsertOutcome::AlreadyExists
+                }
+            })
+            .collect())
+    }
+
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()> {
         let rid = self.rid();
         let id = id.as_bytes().as_slice();

@@ -13,6 +13,7 @@ use crate::hooks::Rebaser;
 use crate::types::MetaSource;
 use async_trait::async_trait;
 use scion_core::{ErrorCode, ObjectId, Principal, Result, ScionError, subcode};
+use scion_object::RepoPath;
 
 impl History {
     /// SPEC 8.2 / 18.3: rebase `c` onto `onto`.
@@ -51,6 +52,8 @@ impl History {
         let (b_root, o_root) = (base.changeset.root_tree, x.changeset.root_tree);
 
         let mut reader = TreeReader::new(self);
+        let paths: Vec<&RepoPath> = cs.delta.iter().map(|e| &e.path).collect();
+        reader.prefetch(&[b_root, o_root], &paths).await?;
         let mut inputs = Vec::with_capacity(cs.delta.len());
         for e in &cs.delta {
             let t = op_entry(&e.op);

@@ -24,6 +24,15 @@ pub trait MetaStore: Send + Sync + 'static {
     -> Result<Vec<Option<ObjectRow>>>;
     /// Insert an objects row, ON CONFLICT DO NOTHING (SPEC 5.3 step 1).
     async fn insert_object(&self, row: ObjectRow) -> Result<InsertOutcome>;
+    /// [`MetaStore::insert_object`] for every row, in input order (a repeated id is
+    /// `AlreadyExists` after its first occurrence). Stores override this with one transaction.
+    async fn insert_objects(&self, rows: Vec<ObjectRow>) -> Result<Vec<InsertOutcome>> {
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(self.insert_object(row).await?);
+        }
+        Ok(out)
+    }
     /// Record that `principal` uploaded `id` (`object_uploads`, SPEC 12.5).
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()>;
     /// Record all uploads for one principal atomically, deduplicating existing records.
@@ -132,6 +141,9 @@ impl<T: MetaStore + ?Sized> MetaStore for Arc<T> {
     }
     async fn insert_object(&self, row: ObjectRow) -> Result<InsertOutcome> {
         (**self).insert_object(row).await
+    }
+    async fn insert_objects(&self, rows: Vec<ObjectRow>) -> Result<Vec<InsertOutcome>> {
+        (**self).insert_objects(rows).await
     }
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()> {
         (**self).record_upload(id, principal, at).await

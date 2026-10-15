@@ -229,6 +229,63 @@ fn tree_of_len(len: usize) -> Vec<u8> {
     enc
 }
 
+/// `put_encoded_many` stores like `put_encoded` (inline threshold, outcomes, duplicates) with
+/// one existence read and one insert, and refuses a redacted id.
+#[tokio::test]
+async fn put_encoded_many_matches_put_encoded() {
+    if skip_without_codec("put_encoded_many_matches_put_encoded") {
+        return;
+    }
+    const T: usize = 100;
+    let (repo, h) = repo_with(MemOptions::default(), cfg(T));
+    let small = Bytes::from(tree_of_len(T - 1));
+    let big = Bytes::from(tree_of_len(T + 1));
+    let before = repo.storage().counters.snapshot();
+    let got = repo
+        .put_encoded_many(Kind::Tree, vec![small.clone(), big.clone(), small.clone()])
+        .await
+        .unwrap();
+    let delta = repo.storage().counters.snapshot() - before;
+    assert_eq!(delta.meta_txns, 2, "one existence read and one insert");
+    let outcomes: Vec<InsertOutcome> = got.iter().map(|g| g.1).collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            InsertOutcome::Inserted,
+            InsertOutcome::Inserted,
+            InsertOutcome::AlreadyExists
+        ]
+    );
+    let (sid, bid) = (got[0].0, got[1].0);
+    assert_eq!(got[2].0, sid);
+    assert!(
+        repo.stat(&sid)
+            .await
+            .unwrap()
+            .unwrap()
+            .inline_data
+            .is_some()
+    );
+    assert!(h.blobs.raw(&repo.key(&bid, Area::Live)).is_some());
+    assert_eq!(repo.get(&sid).await.unwrap(), small);
+    assert_eq!(repo.get(&bid).await.unwrap(), big);
+    let again = repo
+        .put_encoded_many(Kind::Tree, vec![big.clone(), small.clone()])
+        .await
+        .unwrap();
+    assert!(again.iter().all(|g| g.1 == InsertOutcome::AlreadyExists));
+    // A quarantined id is never reported as stored.
+    let mut row = repo.stat(&sid).await.unwrap().unwrap();
+    row.state = ObjectState::Quarantined;
+    h.meta.put_object_row_raw(row);
+    let other = Bytes::from(tree_of_len(T - 2));
+    let e = repo
+        .put_encoded_many(Kind::Tree, vec![other, small])
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, scion_core::ErrorCode::Redacted);
+}
+
 #[tokio::test]
 async fn inline_threshold_boundaries_for_trees() {
     if skip_without_codec("inline_threshold_boundaries_for_trees") {

@@ -294,6 +294,14 @@ impl<M: MetaStore> MetaStore for InstrumentedMeta<M> {
             self.inner.insert_object(row)
         ))
     }
+    async fn insert_objects(&self, rows: Vec<ObjectRow>) -> Result<Vec<InsertOutcome>> {
+        // Keeps the single-row write fault checkpoints for batched writes too.
+        Ok(meta_call!(
+            self,
+            "insert_object",
+            self.inner.insert_objects(rows)
+        ))
+    }
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()> {
         meta_call!(
             self,

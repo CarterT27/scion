@@ -460,15 +460,19 @@ impl History {
         let faults = self.objects.storage().faults.clone();
         faults.check(points::CREATE_AFTER_VALIDATE).await?;
 
-        // SPEC 5.3 step 2: write new trees (an empty root is the empty tree object).
-        for (_, _, bytes) in &applied.new_trees {
-            self.objects.put_encoded(Kind::Tree, bytes.clone()).await?;
-        }
+        // SPEC 5.3 step 2: write new trees (an empty root is the empty tree object), in one
+        // existence read and one insert.
+        let mut tree_bytes: Vec<Bytes> = applied
+            .new_trees
+            .iter()
+            .map(|(_, _, b)| b.clone())
+            .collect();
         if applied.root == empty_tree_id() {
-            self.objects
-                .put_encoded(Kind::Tree, Bytes::from(Tree::empty().encode()))
-                .await?;
+            tree_bytes.push(Bytes::from(Tree::empty().encode()));
         }
+        self.objects
+            .put_encoded_many(Kind::Tree, tree_bytes)
+            .await?;
         faults.check(points::CREATE_AFTER_TREES).await?;
         if let Some(bytes) = meta_bytes {
             self.objects.put_encoded(Kind::Meta, bytes).await?;

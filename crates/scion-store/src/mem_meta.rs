@@ -379,6 +379,23 @@ impl MetaStore for MemMetaStore {
         })
     }
 
+    async fn insert_objects(&self, rows: Vec<ObjectRow>) -> Result<Vec<InsertOutcome>> {
+        self.write(|t| {
+            let mut changed = false;
+            let mut out = Vec::with_capacity(rows.len());
+            for row in rows {
+                if t.objects.contains_key(&row.id) {
+                    out.push(InsertOutcome::AlreadyExists);
+                } else {
+                    t.objects.insert(row.id, row);
+                    out.push(InsertOutcome::Inserted);
+                    changed = true;
+                }
+            }
+            Ok((out, changed))
+        })
+    }
+
     async fn record_upload(&self, id: &ObjectId, principal: &str, at: SystemTime) -> Result<()> {
         self.write(|t| {
             let k = (*id, principal.to_owned());

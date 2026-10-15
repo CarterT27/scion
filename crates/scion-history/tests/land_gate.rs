@@ -193,9 +193,10 @@ fn check(small: &Gate, large: &Gate) {
     assert_eq!(small.contended.meta_txns, large.contended.meta_txns);
     assert_eq!(small.contended_attempts, large.contended_attempts);
     assert_eq!(small.single.lease_calls + large.contended.lease_calls, 0);
-    // A small constant: ref read, landed read, the rebase write path, one CAS.
+    // A small constant: ref read, landed read, one tree read per directory level (base and
+    // onto together), one batched tree write, the changeset commit, one CAS.
     assert!(
-        small.single.meta_txns <= 32,
+        small.single.meta_txns <= 16,
         "single attempt used {} meta txns",
         small.single.meta_txns
     );

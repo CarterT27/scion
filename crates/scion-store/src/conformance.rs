@@ -217,6 +217,43 @@ async fn meta_basics(s: Arc<dyn MetaStore>) -> CaseResult {
     Ok(())
 }
 
+async fn meta_insert_objects(s: Arc<dyn MetaStore>) -> CaseResult {
+    let a = blob_row(b"batch a");
+    let b = inline_row(Kind::Tree, b"\x01\x00\x01");
+    let c = blob_row(b"batch c");
+    ensure_eq!(
+        ok(s.insert_object(a.clone()).await, "insert a")?,
+        InsertOutcome::Inserted,
+        "single insert"
+    );
+    let got = ok(
+        s.insert_objects(vec![b.clone(), a.clone(), b.clone(), c.clone()])
+            .await,
+        "insert_objects",
+    )?;
+    ensure_eq!(
+        got,
+        vec![
+            InsertOutcome::Inserted,
+            InsertOutcome::AlreadyExists,
+            InsertOutcome::AlreadyExists,
+            InsertOutcome::Inserted
+        ],
+        "batch outcomes in input order"
+    );
+    let rows = ok(
+        s.get_objects(&[b.id, c.id], Consistency::Strong).await,
+        "get_objects",
+    )?;
+    ensure_eq!(rows, vec![Some(b), Some(c)], "batch rows stored as given");
+    ensure_eq!(
+        ok(s.insert_objects(Vec::new()).await, "empty batch")?,
+        Vec::<InsertOutcome>::new(),
+        "empty batch"
+    );
+    Ok(())
+}
+
 async fn meta_objects(s: Arc<dyn MetaStore>) -> CaseResult {
     let a = blob_row(b"object a");
     let b = inline_row(Kind::Tree, b"\x01\x00\x00");
@@ -1464,6 +1501,7 @@ where
     let mut fails: Vec<String> = Vec::new();
     run_case!(fails, factory, "basics", meta_basics);
     run_case!(fails, factory, "objects", meta_objects);
+    run_case!(fails, factory, "insert_objects", meta_insert_objects);
     run_case!(fails, factory, "uploads", meta_uploads);
     run_case!(fails, factory, "changesets", meta_changesets);
     run_case!(fails, factory, "object_paths", meta_object_paths);
