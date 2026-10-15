@@ -117,6 +117,23 @@ async fn gate(n: u64) {
         (storage.counters.snapshot() - before).object_paths_rows_read,
         0
     );
+    // A batch decides exactly like per-id evaluation, in one metadata call for every uncached
+    // id, reading only those ids' rows.
+    let absent = ObjectId::hash_blob(b"absent");
+    let ids = [target, restricted, absent, target];
+    for p in [alice(), dave(), sec()] {
+        authz.clear_cache();
+        let mut want = Vec::new();
+        for id in &ids {
+            want.push(authz.evaluate(&p, id).await.unwrap());
+        }
+        authz.clear_cache();
+        let before = storage.counters.snapshot();
+        assert_eq!(authz.evaluate_many(&p, &ids).await.unwrap(), want);
+        let delta = storage.counters.snapshot() - before;
+        assert_eq!(delta.meta_txns, 1);
+        assert_eq!(delta.object_paths_rows_read, 3 + 1 + 3);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use scion_core::{Kind, ObjectId, Principal, Result};
 use scion_object::RepoPath;
 use scion_policy::Policy;
+use scion_store::ObjectPathRow;
 use std::num::NonZeroUsize;
 
 /// Capacity of the decision cache (entries).
@@ -80,6 +81,27 @@ fn class_of(policy: &Policy, path: &RepoPath) -> AccessClass {
     }
 }
 
+/// SPEC 12.5 decision over the `object_paths` rows of one object: `Allow` with the best
+/// class among readable rows, `Deny` otherwise; plus whether any row exists.
+fn decide(policy: &Policy, p: &Principal, rows: &[ObjectPathRow]) -> (ReadDecision, bool) {
+    let mut class = None;
+    for row in rows {
+        if !policy.can_read(p, &row.path) {
+            continue;
+        }
+        let c = class_of(policy, &row.path);
+        class = Some(c);
+        if c == AccessClass::Root {
+            break;
+        }
+    }
+    let decision = match class {
+        Some(c) => ReadDecision::Allow(c),
+        None => ReadDecision::Deny,
+    };
+    (decision, !rows.is_empty())
+}
+
 impl ObjectAuthorizer {
     /// SPEC 18.6 / 12.5: redacted first (`Redacted`), then the `(principal, id, policy_epoch)`
     /// decision cache, then the `object_paths` rows of this id only, evaluated against the
@@ -119,22 +141,7 @@ impl ObjectAuthorizer {
                 .meta
                 .object_paths(id, MAX_OBJECT_PATH_ROWS)
                 .await?;
-            let mut class = None;
-            for row in &rows {
-                if !policy.can_read(p, &row.path) {
-                    continue;
-                }
-                let c = class_of(&policy, &row.path);
-                class = Some(c);
-                if c == AccessClass::Root {
-                    break;
-                }
-            }
-            let decision = match class {
-                Some(c) => ReadDecision::Allow(c),
-                None => ReadDecision::Deny,
-            };
-            (decision, !rows.is_empty())
+            decide(&policy, p, &rows)
         };
         if let ReadDecision::Allow(class) = decision {
             self.state.cache.lock().put(key, class);
@@ -143,6 +150,65 @@ impl ObjectAuthorizer {
             decision,
             referenced,
         })
+    }
+
+    /// [`ObjectAuthorizer::evaluate`] for every id, in input order, against one policy
+    /// snapshot. Redaction and the decision cache are checked per id as in `evaluate`; the
+    /// `object_paths` rows of every remaining non-Meta id are read in ONE metadata call.
+    pub async fn evaluate_many(&self, p: &Principal, ids: &[ObjectId]) -> Result<Vec<Evaluation>> {
+        let policy = self.policy.current();
+        let epoch = policy.epoch();
+        let mut out = Vec::with_capacity(ids.len());
+        let mut lookup = Vec::new();
+        for id in ids {
+            let cached = if self.redactions.contains(id) {
+                Some(ReadDecision::Redacted)
+            } else {
+                let key: CacheKey = (p.clone(), *id, epoch);
+                self.state
+                    .cache
+                    .lock()
+                    .get(&key)
+                    .copied()
+                    .map(ReadDecision::Allow)
+            };
+            let ev = match cached {
+                Some(decision) => Evaluation {
+                    decision,
+                    referenced: true,
+                },
+                None if id.kind() == Kind::Meta => self.evaluate(p, id).await?,
+                None => {
+                    lookup.push((out.len(), *id));
+                    Evaluation {
+                        decision: ReadDecision::Deny,
+                        referenced: false,
+                    }
+                }
+            };
+            out.push(ev);
+        }
+        if lookup.is_empty() {
+            return Ok(out);
+        }
+        let lids: Vec<ObjectId> = lookup.iter().map(|(_, id)| *id).collect();
+        let rows = self
+            .storage
+            .meta
+            .object_paths_many(&lids, MAX_OBJECT_PATH_ROWS)
+            .await?;
+        let mut cache = self.state.cache.lock();
+        for ((i, id), rows) in lookup.into_iter().zip(rows) {
+            let (decision, referenced) = decide(&policy, p, &rows);
+            if let ReadDecision::Allow(class) = decision {
+                cache.put((p.clone(), id, epoch), class);
+            }
+            out[i] = Evaluation {
+                decision,
+                referenced,
+            };
+        }
+        Ok(out)
     }
 
     /// SPEC 12.6: a Meta is visible to every repository reader (read on `/`). Metas are built

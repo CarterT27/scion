@@ -488,6 +488,21 @@ async fn meta_object_paths(s: Arc<dyn MetaStore>) -> CaseResult {
     let limited = ok(s.object_paths(&blob, 1).await, "object_paths limit")?;
     ensure_eq!(limited.len(), 1, "limit respected");
     ensure_eq!(limited[0].path, want[0], "limit keeps the smallest path");
+    let missing = ObjectId::hash_blob(b"no paths");
+    let many = ok(
+        s.object_paths_many(&[other, blob, missing, blob], 2).await,
+        "object_paths_many",
+    )?;
+    ensure_eq!(many.len(), 4, "one entry per input id");
+    ensure_eq!(many[0].len(), 1, "other's single row");
+    let many_paths: Vec<RepoPath> = many[1].iter().map(|r| r.path.clone()).collect();
+    ensure_eq!(
+        many_paths,
+        want[..2].to_vec(),
+        "per-id limit, ascending path"
+    );
+    ensure!(many[2].is_empty(), "no rows for an unreferenced id");
+    ensure_eq!(many[3], many[1], "duplicates repeat the rows");
     // A second changeset with the same (object, path) keeps the first row.
     let child = cs_row(b"paths child", 2, vec![root.id]);
     let mut b2 = bundle(child.clone(), vec![root.id]);

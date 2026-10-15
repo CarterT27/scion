@@ -35,6 +35,19 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn has_uploads(&self, ids: &[ObjectId], principal: &str) -> Result<Vec<bool>>;
     /// `object_paths` rows for this id only, ascending by path, at most `limit` (SPEC 12.5).
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>>;
+    /// [`MetaStore::object_paths`] for every id, in input order (including duplicates), at
+    /// most `limit` rows per id. Stores override this with one metadata call.
+    async fn object_paths_many(
+        &self,
+        ids: &[ObjectId],
+        limit: usize,
+    ) -> Result<Vec<Vec<ObjectPathRow>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            out.push(self.object_paths(id, limit).await?);
+        }
+        Ok(out)
+    }
     /// Changeset rows for `ids`, in order.
     async fn get_changesets(
         &self,
@@ -139,6 +152,13 @@ impl<T: MetaStore + ?Sized> MetaStore for Arc<T> {
     }
     async fn object_paths(&self, id: &ObjectId, limit: usize) -> Result<Vec<ObjectPathRow>> {
         (**self).object_paths(id, limit).await
+    }
+    async fn object_paths_many(
+        &self,
+        ids: &[ObjectId],
+        limit: usize,
+    ) -> Result<Vec<Vec<ObjectPathRow>>> {
+        (**self).object_paths_many(ids, limit).await
     }
     async fn get_changesets(
         &self,

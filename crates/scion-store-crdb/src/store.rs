@@ -707,6 +707,44 @@ impl MetaStore for CrdbMetaStore {
             .collect()
     }
 
+    async fn object_paths_many(
+        &self,
+        ids: &[ObjectId],
+        limit: usize,
+    ) -> Result<Vec<Vec<ObjectPathRow>>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rid = self.rid();
+        let idbs = ids_bytes(ids);
+        let lim = codec::limit(limit);
+        let rows = self
+            .read_strong(
+                "object_paths_many",
+                "SELECT object_id, path, first_changeset, at FROM (\
+                 SELECT object_id, path, first_changeset, at, \
+                 row_number() OVER (PARTITION BY object_id ORDER BY path) AS rn \
+                 FROM object_paths WHERE repo_id = $1 AND object_id = ANY($2)) \
+                 WHERE rn <= $3 ORDER BY object_id, path",
+                &[&rid, &idbs, &lim],
+            )
+            .await?;
+        let mut by_id: BTreeMap<ObjectId, Vec<ObjectPathRow>> = BTreeMap::new();
+        for r in &rows {
+            let row = ObjectPathRow {
+                object: id_of(&col::<Vec<u8>>(r, 0)?)?,
+                path: repo_path_of(&col::<Vec<u8>>(r, 1)?)?,
+                first_changeset: id_of(&col::<Vec<u8>>(r, 2)?)?,
+                at: col(r, 3)?,
+            };
+            by_id.entry(row.object).or_default().push(row);
+        }
+        Ok(ids
+            .iter()
+            .map(|id| by_id.get(id).cloned().unwrap_or_default())
+            .collect())
+    }
+
     async fn get_changesets(
         &self,
         ids: &[ObjectId],

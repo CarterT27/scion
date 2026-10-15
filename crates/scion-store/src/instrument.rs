@@ -332,6 +332,21 @@ impl<M: MetaStore> MetaStore for InstrumentedMeta<M> {
         bump(&self.counters.object_paths_rows_read, out.len() as u64);
         Ok(out)
     }
+    async fn object_paths_many(
+        &self,
+        ids: &[ObjectId],
+        limit: usize,
+    ) -> Result<Vec<Vec<ObjectPathRow>>> {
+        let out = meta_call!(
+            self,
+            "object_paths_many",
+            self.inner.object_paths_many(ids, limit)
+        );
+        let n: usize = out.iter().map(Vec::len).sum();
+        self.rows(n);
+        bump(&self.counters.object_paths_rows_read, n as u64);
+        Ok(out)
+    }
     async fn get_changesets(
         &self,
         ids: &[ObjectId],

@@ -674,3 +674,38 @@ async fn has_objects_batch_preflight_failures_fall_back() {
     assert_eq!(has(&c, &[live, live]).await, vec![true, true]);
     srv.mem.as_ref().unwrap().meta.set_fail_txn_every(None);
 }
+
+/// GetObjects authorizes and stats ids in batches: metadata transactions grow with the
+/// number of batches, not with the number of objects.
+#[tokio::test(flavor = "multi_thread")]
+async fn get_objects_batches_metadata_reads() {
+    let srv = start().await;
+    let names: Vec<String> = (0..600).map(|i| format!("d/f{i}.txt")).collect();
+    let contents: Vec<Vec<u8>> = (0..600)
+        .map(|i| format!("file {i}\n").into_bytes())
+        .collect();
+    let files: Vec<(&str, &[u8])> = names
+        .iter()
+        .zip(&contents)
+        .map(|(n, c)| (n.as_str(), c.as_slice()))
+        .collect();
+    let cs = commit(&srv, &files).await;
+    let ids: Vec<ObjectId> = names.iter().map(|n| cs.blobs[n.as_str()]).collect();
+    let c = srv.client(Some(&alice())).await;
+    srv.ctx().authz.clear_cache();
+    let before = srv.ctx().storage.counters.snapshot();
+    let (items, err) = get_objects(&c, &ids, None, None).await.unwrap();
+    let delta = srv.ctx().storage.counters.snapshot() - before;
+    assert!(err.is_none());
+    assert_eq!(items.len(), 600);
+    for (item, want) in items.iter().zip(&contents) {
+        assert_eq!(item.status, v1::ItemStatus::Ok);
+        assert_eq!(&item.content(), want);
+    }
+    // 3 batches of at most 256 ids: one `objects` read and one `object_paths` read each.
+    assert!(
+        delta.meta_txns <= 10,
+        "{} metadata transactions for 600 objects",
+        delta.meta_txns
+    );
+}

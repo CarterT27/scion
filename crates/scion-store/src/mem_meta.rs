@@ -433,6 +433,24 @@ impl MetaStore for MemMetaStore {
         })
     }
 
+    async fn object_paths_many(
+        &self,
+        ids: &[ObjectId],
+        limit: usize,
+    ) -> Result<Vec<Vec<ObjectPathRow>>> {
+        self.read(Consistency::Strong, |t| {
+            Ok(ids
+                .iter()
+                .map(|id| {
+                    t.object_paths
+                        .get(id)
+                        .map(|m| m.values().take(limit).cloned().collect())
+                        .unwrap_or_default()
+                })
+                .collect())
+        })
+    }
+
     async fn get_changesets(
         &self,
         ids: &[ObjectId],

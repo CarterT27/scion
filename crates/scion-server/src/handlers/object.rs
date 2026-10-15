@@ -1,7 +1,7 @@
 //! Handlers: GetObjects, HasObjects, ResolveRef (SPEC 7.3, 12.5) (P25).
 
 use crate::app::AppContext;
-use crate::authz::{AccessClass, ReadDecision};
+use crate::authz::{AccessClass, Evaluation, ReadDecision};
 use crate::context::caller;
 use crate::errors::{StatusExt, to_status};
 use crate::handlers::BoxStream;
@@ -11,7 +11,7 @@ use scion_core::{ErrorCode, Kind, ObjectId, Principal, Result, ScionError};
 use scion_object::RefName;
 use scion_proto::convert::{id_bytes, missing_field, parse_ids};
 use scion_proto::v1;
-use scion_store::{Consistency, ObjectState, StoredFrame};
+use scion_store::{Consistency, ObjectRow, ObjectState, StoredFrame};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
@@ -24,7 +24,9 @@ pub const CHUNK_BYTES: usize = 1 << 20;
 const STREAM_BUFFER: usize = 4;
 
 /// Bound both read concurrency and the stored + decoded bytes held during verification.
-const READ_CONCURRENCY: usize = 8;
+const READ_CONCURRENCY: usize = 32;
+/// Ids per batch: one strong `objects` read and one batched authorization serve them all.
+const ID_BATCH: usize = 256;
 const READ_BYTES: u64 = 64 << 20;
 
 /// Oversize or unknown objects are read alone, as in the serial implementation.
@@ -135,6 +137,19 @@ async fn serve_one(
     length: Option<u64>,
 ) -> Result<Served> {
     let eval = ctx.authz.evaluate(p, id).await?;
+    serve_prepared(ctx, id, offset, length, eval, None).await
+}
+
+/// Serve one id whose authorization `eval` is already decided. `row` is its `objects` row
+/// from a batch read, when there is one, so the content read makes no second lookup.
+async fn serve_prepared(
+    ctx: &AppContext,
+    id: &ObjectId,
+    offset: Option<u64>,
+    length: Option<u64>,
+    eval: Evaluation,
+    row: Option<ObjectRow>,
+) -> Result<Served> {
     let class = match eval.decision {
         ReadDecision::Redacted => {
             return Ok(Served::Status(status_chunk(id, v1::ItemStatus::Redacted)));
@@ -153,7 +168,11 @@ async fn serve_one(
     let loaded = if length == Some(0) {
         // A zero-length range is a status probe (SPEC 13.7 redaction refresh): answer from the
         // objects row without reading the content.
-        match ctx.objects.stat(id).await {
+        let stat = match row {
+            Some(row) => Ok(Some(row)),
+            None => ctx.objects.stat(id).await,
+        };
+        match stat {
             Ok(Some(row)) if row.state != ObjectState::Live => Err(ScionError::redacted(id)),
             Ok(Some(row)) => {
                 let total = usize::try_from(row.size).unwrap_or(usize::MAX);
@@ -175,13 +194,14 @@ async fn serve_one(
             )
         })
     } else {
-        ctx.objects
-            .get_frame(id)
-            .await
-            .map(|(frame, row)| match frame {
-                StoredFrame::Zstd(b) => (v1::Encoding::Zstd, b, 0, row.size),
-                StoredFrame::Raw(b) => (v1::Encoding::Raw, b, 0, row.size),
-            })
+        let frame = match row {
+            Some(row) => ctx.objects.get_frame_with_row(id, row).await,
+            None => ctx.objects.get_frame(id).await,
+        };
+        frame.map(|(frame, row)| match frame {
+            StoredFrame::Zstd(b) => (v1::Encoding::Zstd, b, 0, row.size),
+            StoredFrame::Raw(b) => (v1::Encoding::Raw, b, 0, row.size),
+        })
     };
     let (encoding, data, base, total) = match loaded {
         Ok(v) => v,
@@ -222,37 +242,60 @@ async fn produce(
 ) {
     let work = async {
         let mut integrity: Option<ScionError> = None;
+        // Preflight rows may carry inline data: bound what one batch holds by READ_BYTES.
         let inline_bytes = ctx.objects.config().inline_threshold_bytes.max(1) as u64;
-        let candidates_per_batch = (READ_BYTES / inline_bytes).clamp(1, READ_CONCURRENCY as u64);
-        for candidates in ids.chunks(candidates_per_batch as usize) {
-            // Sizes only schedule reads; serve_one still authorizes and verifies every id.
-            // A failed preflight retains the original per-item failure semantics.
-            let weights: Vec<u64> = if candidates.len() == 1 {
-                vec![READ_BYTES]
+        let batch = (READ_BYTES / inline_bytes).clamp(1, ID_BATCH as u64) as usize;
+        for candidates in ids.chunks(batch) {
+            // Captured before authorizing: prefetched decisions must not outlive a policy or
+            // redaction change (re-checked per item below).
+            let epochs = (ctx.policy.epoch(), ctx.redactions.epoch());
+            // One strong `objects` read and one batched authorization for the whole batch.
+            // Rows only schedule and shortcut reads (the content is still verified); a failed
+            // preflight falls back to the per-item path with its original failure semantics.
+            let (rows, evals) = if candidates.len() == 1 {
+                (None, None)
             } else {
-                match ctx
+                let rows = ctx
                     .storage
                     .meta
                     .get_objects(candidates, Consistency::Strong)
                     .await
-                {
-                    Ok(rows) => rows
-                        .into_iter()
-                        .map(|row| {
-                            row.map_or(READ_BYTES, |r| r.size.saturating_add(r.stored_size).max(1))
-                        })
-                        .collect(),
-                    Err(_) => vec![READ_BYTES; candidates.len()],
-                }
+                    .ok();
+                let evals = ctx.authz.evaluate_many(&p, candidates).await.ok();
+                (rows, evals)
+            };
+            let weights: Vec<u64> = match &rows {
+                Some(rows) => rows
+                    .iter()
+                    .map(|row| {
+                        row.as_ref()
+                            .map_or(READ_BYTES, |r| r.size.saturating_add(r.stored_size).max(1))
+                    })
+                    .collect(),
+                None => vec![READ_BYTES; candidates.len()],
             };
             let mut start = 0;
             while start < candidates.len() {
                 let count = read_window(&weights[start..]);
                 let ctx = &ctx;
                 let p = &p;
-                let epochs = (ctx.policy.epoch(), ctx.redactions.epoch());
-                let mut reads = stream::iter(candidates[start..start + count].iter().copied())
-                    .map(|id| async move { serve_one(ctx, p, &id, offset, length).await })
+                let window: Vec<(ObjectId, Option<Evaluation>, Option<ObjectRow>)> = (start
+                    ..start + count)
+                    .map(|i| {
+                        (
+                            candidates[i],
+                            evals.as_ref().map(|e| e[i]),
+                            rows.as_ref().and_then(|r| r[i].clone()),
+                        )
+                    })
+                    .collect();
+                let mut reads = stream::iter(window)
+                    .map(|(id, eval, row)| async move {
+                        match eval {
+                            Some(eval) => serve_prepared(ctx, &id, offset, length, eval, row).await,
+                            None => serve_one(ctx, p, &id, offset, length).await,
+                        }
+                    })
                     .buffered(READ_CONCURRENCY);
                 while let Some(mut served) = reads.next().await {
                     // Prefetch must not retain permission across policy or redaction changes.
@@ -502,7 +545,7 @@ mod tests {
 
     #[test]
     fn read_windows_bound_bytes_and_isolate_unknown_or_oversize_objects() {
-        assert_eq!(read_window(&[1; 20]), READ_CONCURRENCY);
+        assert_eq!(read_window(&[1; READ_CONCURRENCY + 5]), READ_CONCURRENCY);
         assert_eq!(read_window(&[READ_BYTES / 2; 8]), 2);
         assert_eq!(read_window(&[READ_BYTES + 1, 1]), 1);
         assert_eq!(read_window(&[1, READ_BYTES, 1]), 1);

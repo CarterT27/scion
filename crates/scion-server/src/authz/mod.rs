@@ -6,6 +6,7 @@
 mod object;
 mod policy_adapters;
 
+pub use object::Evaluation;
 pub use policy_adapters::{PolicyLandAuthzSource, PolicyWriteAuthz};
 
 use crate::redaction_set::RedactionSet;

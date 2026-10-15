@@ -430,6 +430,16 @@ impl ObjectRepo {
             ));
         }
         let row = self.stat(id).await?.ok_or_else(|| not_found(id))?;
+        self.load_row_verified(id, row).await
+    }
+
+    /// [`ObjectRepo::load_verified`] for a non-changeset object whose `objects` row the caller
+    /// already read.
+    async fn load_row_verified(
+        &self,
+        id: &ObjectId,
+        row: ObjectRow,
+    ) -> Result<(Bytes, StoredFrame, ObjectRow)> {
         if row.state != ObjectState::Live {
             return Err(ScionError::redacted(id));
         }
@@ -474,6 +484,24 @@ impl ObjectRepo {
     /// Verified, then returned exactly as stored.
     pub async fn get_frame(&self, id: &ObjectId) -> Result<(StoredFrame, ObjectRow)> {
         let (raw, frame, row) = self.load_verified(id).await?;
+        self.storage
+            .counters
+            .record_object_read(id.kind(), raw.len() as u64);
+        Ok((frame, row))
+    }
+
+    /// [`ObjectRepo::get_frame`] reusing an `objects` row the caller just read (for example
+    /// one strong batch read for many ids), so no second metadata lookup is made. Changeset
+    /// ids have no `objects` row and take the [`ObjectRepo::get_frame`] path.
+    pub async fn get_frame_with_row(
+        &self,
+        id: &ObjectId,
+        row: ObjectRow,
+    ) -> Result<(StoredFrame, ObjectRow)> {
+        if id.kind() == Kind::Changeset || row.id != *id {
+            return self.get_frame(id).await;
+        }
+        let (raw, frame, row) = self.load_row_verified(id, row).await?;
         self.storage
             .counters
             .record_object_read(id.kind(), raw.len() as u64);
