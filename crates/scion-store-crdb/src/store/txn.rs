@@ -58,12 +58,15 @@ pub(crate) fn is_unique_violation(e: &tokio_postgres::Error) -> bool {
 }
 
 /// True when a follower read failed because the schema did not exist yet at the follower-read
-/// timestamp (a freshly created database or table). The caller falls back to a strong read,
-/// which is always a valid answer to a stale read (storage-semantics 1.7).
+/// timestamp (a freshly created database, table or column, e.g. right after migration 0004).
+/// The caller falls back to a strong read, which is always a valid answer to a stale read
+/// (storage-semantics 1.7).
 pub(crate) fn is_schema_too_new(e: &tokio_postgres::Error) -> bool {
     matches!(
         e.code(),
-        Some(s) if *s == SqlState::UNDEFINED_TABLE || *s == SqlState::INVALID_CATALOG_NAME
+        Some(s) if *s == SqlState::UNDEFINED_TABLE
+            || *s == SqlState::INVALID_CATALOG_NAME
+            || *s == SqlState::UNDEFINED_COLUMN
     )
 }
 
