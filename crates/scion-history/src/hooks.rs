@@ -49,6 +49,14 @@ impl EagerHook for NoEager {
 pub trait WriteAuthorizer: Send + Sync {
     /// May the caller write `path`?
     fn can_write(&self, path: &RepoPath) -> bool;
+    /// May the caller read `path`? A Put may reference a blob the caller did not upload only
+    /// when one of the blob's `object_paths` rows is readable (SPEC 8.1 step 3, 12.5).
+    fn can_read(&self, path: &RepoPath) -> bool;
+    /// Must every Put blob be one the caller uploaded or can read (SPEC 8.1 step 3, 12.5)?
+    /// Only test authorizers that store blobs directly turn this off.
+    fn checks_blob_access(&self) -> bool {
+        true
+    }
     /// May the caller use import mode (PLAN 6.4: admin.refs and write on `/`)?
     fn can_import(&self) -> bool;
 }
@@ -60,6 +68,14 @@ pub struct AllowAll;
 impl WriteAuthorizer for AllowAll {
     fn can_write(&self, _path: &RepoPath) -> bool {
         true
+    }
+
+    fn can_read(&self, _path: &RepoPath) -> bool {
+        true
+    }
+
+    fn checks_blob_access(&self) -> bool {
+        false
     }
 
     fn can_import(&self) -> bool {

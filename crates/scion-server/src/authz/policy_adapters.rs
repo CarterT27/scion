@@ -34,6 +34,11 @@ impl WriteAuthorizer for PolicyWriteAuthz {
         self.policy.can_write(&self.who, path)
     }
 
+    /// SPEC 6.2, 12.5: the longest matching `read` rule for `path` grants the principal.
+    fn can_read(&self, path: &RepoPath) -> bool {
+        self.policy.can_read(&self.who, path)
+    }
+
     /// PLAN 6.4 (SPEC 14): `import_mode` requires `admin.refs` AND write on `/`.
     fn can_import(&self) -> bool {
         self.policy.can_admin(&self.who, AdminPerm::Refs)

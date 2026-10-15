@@ -665,7 +665,8 @@ Validation, in order (first failure returns `INVALID_ARGUMENT` with subcode):
 1. `parents` exist, are unique, count within `limits.max_parents`; empty only if the repository has
    no root changeset yet (or by importer, Section 14).
 2. `delta` sorted, unique, within `limits.max_delta_entries`, paths valid (Section 4.4).
-3. Each `Put` blob exists and is `live`; its `size` matches the stored size.
+3. Each `Put` blob exists and is `live`; its `size` matches the stored size. A blob the caller
+   neither uploaded nor can read (12.5) is treated as missing.
 4. No `Put` references a redacted object (`REDACTED`).
 5. Each `Delete` path is a file in `T1`; each `Put` differs from `T1` at that path.
 6. File/directory consistency: a `Put` whose ancestor is a file in `T1` requires a `Delete` of that
@@ -1010,6 +1011,9 @@ Objects are path-independent, so authorization uses `object_paths`:
   the current policy. This makes policy changes take effect immediately and retroactively without
   reindexing.
 - `access_class = root` if some row's path is governed by the `/` rule, else `restricted`.
+- `CreateChangeset` adds an `object_paths` row for every `Put`, so it MUST NOT let a caller
+  reference a blob the caller neither uploaded nor can read: such a `Put` fails `missing_blob`,
+  exactly like an absent blob, so the error reveals neither existence nor size (8.1 step 3).
 - Unreferenced uploaded objects (no `object_paths` rows) are not readable by anyone through
   `GetObjects`.
 - `HasObjects` returns `true` only if the object exists and is readable by the caller, or the caller
@@ -1212,6 +1216,8 @@ function create_changeset(principal, req):
   for e in req.delta:
     if e.op == Put:
       obj = objects.get(e.id) or fail(INVALID_ARGUMENT, "missing_blob")
+      if not (uploaded_by(e.id, principal) or can_read_object(principal, e.id)):
+        fail(INVALID_ARGUMENT, "missing_blob")       # 12.5: no copy-by-id of unreadable blobs
       if obj.state != live: fail(REDACTED)
       if obj.size != e.size: fail(INVALID_ARGUMENT, "size_mismatch")
     require policy.can_write(principal, e.path)

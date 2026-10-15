@@ -11,7 +11,7 @@ use scion_core::{ErrorCode, Kind, ObjectId, Principal, Result, ScionError};
 use scion_object::RefName;
 use scion_proto::convert::{id_bytes, missing_field, parse_ids};
 use scion_proto::v1;
-use scion_store::{Consistency, StoredFrame};
+use scion_store::{Consistency, ObjectState, StoredFrame};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
@@ -150,7 +150,20 @@ async fn serve_one(
         ReadDecision::Allow(c) => c,
     };
     let ranged = offset.is_some() || length.is_some();
-    let loaded = if ranged {
+    let loaded = if length == Some(0) {
+        // A zero-length range is a status probe (SPEC 13.7 redaction refresh): answer from the
+        // objects row without reading the content.
+        match ctx.objects.stat(id).await {
+            Ok(Some(row)) if row.state != ObjectState::Live => Err(ScionError::redacted(id)),
+            Ok(Some(row)) => {
+                let total = usize::try_from(row.size).unwrap_or(usize::MAX);
+                let (start, _) = clamp_range(offset, length, total);
+                Ok((v1::Encoding::Raw, Bytes::new(), start as u64, row.size))
+            }
+            Ok(None) => Err(ScionError::not_found(format!("object {id} not found"))),
+            Err(e) => Err(e),
+        }
+    } else if ranged {
         ctx.objects.get(id).await.map(|raw| {
             let (start, end) = clamp_range(offset, length, raw.len());
             let total = raw.len() as u64;

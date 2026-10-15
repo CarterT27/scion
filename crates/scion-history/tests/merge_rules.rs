@@ -202,6 +202,12 @@ impl WriteAuthorizer for DenyBelow {
     fn can_write(&self, path: &RepoPath) -> bool {
         !(self.0 == *path || self.0.is_ancestor_of(path))
     }
+    fn can_read(&self, _path: &RepoPath) -> bool {
+        true
+    }
+    fn checks_blob_access(&self) -> bool {
+        false
+    }
     fn can_import(&self) -> bool {
         false
     }

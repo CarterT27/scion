@@ -1,6 +1,7 @@
 //! SPEC 19.2 / 19.7 / 19.12 via RPC: CreateChangeset (P26).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod object_support;
 mod write_support;
 
 use scion_core::{ErrorCode, ErrorPayload, ObjectId, subcode};
@@ -475,6 +476,62 @@ async fn unwritable_paths_are_rejected() {
         .await
         .write()
         .create_changeset(create_req(&[r], vec![put_entry("secrets/key", &b, n)], 4))
+        .await
+        .unwrap();
+}
+
+/// SPEC 12.5: a Put may reference only a blob the caller uploaded or can read at some path;
+/// otherwise the new `object_paths` row would make an unreadable blob readable at the Put's
+/// path. The rejection looks exactly like a missing blob, so it reveals neither existence nor
+/// size.
+#[tokio::test(flavor = "multi_thread")]
+async fn put_cannot_reference_an_unreadable_blob() {
+    use object_support::{status_of, upload_blob};
+    let srv = InProcessServer::start(opts_with_acl(RESTRICTED_ACL)).await;
+    let r = root(&srv).await;
+    let secret: &[u8] = b"prod key\n";
+    let n = secret.len() as u64;
+    let admin_c = srv.client(Some(&admin())).await;
+    let (b, _) = upload_blob(&admin_c, secret).await;
+    let (p, _) = upload_blob(&admin_c, b"public\n").await;
+    admin_c
+        .write()
+        .create_changeset(create_req(
+            &[r],
+            vec![put_entry("pub/a", &p, 7), put_entry("secrets/key", &b, n)],
+            1,
+        ))
+        .await
+        .unwrap();
+    let alice_c = srv.client(Some(&alice())).await;
+    assert_eq!(status_of(&alice_c, &b).await, v1::ItemStatus::Denied);
+
+    for (size, change) in [(n, 2), (n + 1, 3)] {
+        let e = alice_c
+            .write()
+            .create_changeset(create_req(
+                &[r],
+                vec![put_entry("alice/copy", &b, size)],
+                change,
+            ))
+            .await
+            .unwrap_err();
+        expect_err(&e, ErrorCode::InvalidArgument, Some(subcode::MISSING_BLOB));
+    }
+    assert_eq!(status_of(&alice_c, &b).await, v1::ItemStatus::Denied);
+
+    // A blob readable at some path may be copied without uploading it.
+    alice_c
+        .write()
+        .create_changeset(create_req(&[r], vec![put_entry("pub/b", &p, 7)], 4))
+        .await
+        .unwrap();
+    // Uploading identical content proves the caller holds it.
+    let (up, _) = upload_blob(&alice_c, secret).await;
+    assert_eq!(up, b);
+    alice_c
+        .write()
+        .create_changeset(create_req(&[r], vec![put_entry("alice/copy", &b, n)], 5))
         .await
         .unwrap();
 }

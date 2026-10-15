@@ -121,7 +121,8 @@ pub fn meta(msg: &str) -> v1::MetaFields {
 }
 
 /// Store `content` as a blob directly through the server's object facade (UploadObjects is
-/// another package's RPC). Returns the id and size.
+/// another package's RPC) and record an upload by every test principal, as a client would
+/// before CreateChangeset (SPEC 12.5). Returns the id and size.
 pub async fn blob(srv: &InProcessServer, content: &[u8]) -> (ObjectId, u64) {
     let (id, _) = srv
         .ctx()
@@ -129,6 +130,14 @@ pub async fn blob(srv: &InProcessServer, content: &[u8]) -> (ObjectId, u64) {
         .put_blob(Bytes::copy_from_slice(content))
         .await
         .unwrap();
+    for who in [alice(), bob(), admin(), mallory(), ci(), gh("reader")] {
+        srv.ctx()
+            .storage
+            .meta
+            .record_upload(&id, &who.id_string(), std::time::SystemTime::now())
+            .await
+            .unwrap();
+    }
     (id, content.len() as u64)
 }
 

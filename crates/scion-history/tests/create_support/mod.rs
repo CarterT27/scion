@@ -150,6 +150,14 @@ impl WriteAuthorizer for Deny {
         }
     }
 
+    fn can_read(&self, _path: &RepoPath) -> bool {
+        true
+    }
+
+    fn checks_blob_access(&self) -> bool {
+        false
+    }
+
     fn can_import(&self) -> bool {
         self.import
     }

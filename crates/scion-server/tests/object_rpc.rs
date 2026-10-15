@@ -123,8 +123,18 @@ async fn get_objects_range_reads_and_large_objects() {
     assert_eq!(items[0].status, v1::ItemStatus::Ok);
     assert!(items[0].data.is_empty());
 
-    // A multi-megabyte object spans several chunks and reassembles exactly.
+    // A zero-length probe answers from the objects row without reading content.
     let blob = cs.blobs["big.bin"];
+    let before = srv.ctx().storage.counters.snapshot();
+    let (items, _) = get_objects(&c, &[blob], None, Some(0)).await.unwrap();
+    let after = srv.ctx().storage.counters.snapshot();
+    assert_eq!(items[0].status, v1::ItemStatus::Ok);
+    assert!(items[0].data.is_empty());
+    assert_eq!(items[0].total_size, big.len() as u64);
+    assert_eq!(after.blob_gets, before.blob_gets);
+    assert_eq!(after.blob_bytes_read, before.blob_bytes_read);
+
+    // A multi-megabyte object spans several chunks and reassembles exactly.
     let (items, _) = get_objects(&c, &[blob, small], Some(0), None)
         .await
         .unwrap();

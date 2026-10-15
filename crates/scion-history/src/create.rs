@@ -7,7 +7,10 @@
 //!    changeset (parentless_not_allowed), or in import mode with `can_import()`
 //!    (PERMISSION_DENIED otherwise);
 //! 2. delta shape: sorted, unique, `limits.max_delta_entries`, path rules;
-//! 3. every Put blob exists (missing_blob) with the stored size (size_mismatch);
+//! 3. every Put blob exists (missing_blob) with the stored size (size_mismatch); with client
+//!    authorization, a blob the caller neither uploaded nor can read at some `object_paths` row
+//!    is reported missing_blob too, so referencing it at a readable path cannot leak it and the
+//!    error reveals neither its existence nor its size (SPEC 12.5);
 //! 4. no Put references a quarantined or purged blob (REDACTED); entries carried over unchanged
 //!    from the first parent are not in the delta and need no check (SPEC 13.6);
 //! 5. and 6. deletes and puts against `T1` via SPEC 18.2 apply_delta (delete_absent,
@@ -33,8 +36,13 @@ use scion_core::{
     subcode,
 };
 use scion_object::{Canonical, Changeset, DeltaEntry, DeltaOp, Extensions, Meta, RepoPath, Tree};
-use scion_store::{ChangesetBundle, ChangesetRow, Consistency, ObjectPathRow, ObjectState};
+use scion_store::{
+    ChangesetBundle, ChangesetRow, Consistency, ObjectPathRow, ObjectRow, ObjectState,
+};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// The most `object_paths` rows read when deciding whether a Put may reference a blob.
+const MAX_REFERENCE_PATH_ROWS: usize = 100_000;
 
 /// One creation, client facing (`authz` set) or internal (`authz` = `None`).
 pub(crate) struct Spec<'a> {
@@ -187,6 +195,32 @@ impl History {
         self.persist(prepared?).await
     }
 
+    /// Per id: may `who` reference this blob in a Put (SPEC 12.5)? True when they uploaded it or
+    /// one of its `object_paths` rows is readable; otherwise the new row would make an
+    /// unreadable blob readable at the Put's path. Absent blobs are true (step 3 reports them).
+    async fn referenceable(
+        &self,
+        authz: &dyn WriteAuthorizer,
+        who: &Principal,
+        ids: &[ObjectId],
+        rows: &[Option<ObjectRow>],
+    ) -> Result<Vec<bool>> {
+        let uploaded = self.meta().has_uploads(ids, &who.id_string()).await?;
+        let mut out = Vec::with_capacity(ids.len());
+        for ((id, row), uploaded) in ids.iter().zip(rows).zip(uploaded) {
+            let ok = uploaded
+                || row.is_none()
+                || self
+                    .meta()
+                    .object_paths(id, MAX_REFERENCE_PATH_ROWS)
+                    .await?
+                    .iter()
+                    .any(|r| authz.can_read(&r.path));
+            out.push(ok);
+        }
+        Ok(out)
+    }
+
     /// SPEC 8.1 validation, tree construction (SPEC 18.2), the Meta and the identifier; no
     /// writes. A violated parentless rule sets `parentless_denied` instead of failing.
     async fn prepare(&self, spec: Spec<'_>, parentless_denied: &mut bool) -> Result<Prepared> {
@@ -258,8 +292,20 @@ impl History {
         if !puts.is_empty() {
             let ids: Vec<ObjectId> = puts.iter().map(|p| p.1).collect();
             let rows = self.meta().get_objects(&ids, Consistency::Strong).await?;
-            for ((i, _, size), row) in puts.iter().zip(&rows) {
+            let referenceable = match authz {
+                Some(a) if a.checks_blob_access() => {
+                    self.referenceable(a, who, &ids, &rows).await?
+                }
+                _ => vec![true; ids.len()],
+            };
+            for (((i, _, size), row), ok) in puts.iter().zip(&rows).zip(referenceable) {
                 match row {
+                    Some(_) if !ok => {
+                        return Err(ScionError::invalid(
+                            subcode::MISSING_BLOB,
+                            format!("delta entry {i}: blob does not exist"),
+                        ));
+                    }
                     None => {
                         return Err(ScionError::invalid(
                             subcode::MISSING_BLOB,
