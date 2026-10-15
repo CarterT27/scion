@@ -7,6 +7,7 @@ Scion uses direct access and optionally one shared, prewarmed node daemon.
 All setup needed by each checkout job is timed; fixture/service setup and validation are not.
 """
 import argparse
+import collections
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -15,6 +16,7 @@ import os
 from pathlib import Path
 import platform
 import random
+import re
 import runpy
 import shutil
 import statistics
@@ -40,7 +42,15 @@ def snapshot(url):
     with urllib.request.urlopen(url, timeout=10) as response:
         return {line.rsplit(" ", 1)[0]: float(line.rsplit(" ", 1)[1])
                 for line in response.read().decode().splitlines()
-                if line.startswith(("scion_storage_", "scion_cache_requests_total", "scion_upstream_requests_total", "scion_object_bytes_served_total", "scion_rpc_duration_seconds_count"))}
+                if line.startswith(("scion_storage_", "scion_cache_requests_total", "scion_upstream_requests_total", "scion_object_bytes_served_total", "scion_rpc_duration_seconds_count",
+                                    "scion_land_attempts", "scion_ref_cas_failures_total"))}
+
+
+def hit_ratio(delta):
+    """Daemon cache hit ratio by request count from a `scion_cache_requests_total` delta."""
+    hits = sum(v for k, v in delta.items() if k.startswith("scion_cache_requests_total") and 'result="hit"' in k)
+    misses = sum(v for k, v in delta.items() if k.startswith("scion_cache_requests_total") and 'result="miss"' in k)
+    return hits / (hits + misses) if hits + misses else None
 
 
 def container_values(names):
@@ -58,12 +68,19 @@ def summarize(waves):
             "median_jobs_per_second": statistics.median(len(w["jobs"]) / w["seconds"] for w in waves),
             "job_p50_seconds": statistics.median(latencies), "job_p95_seconds": percentile(latencies, .95),
             "median_accounted_cpu_seconds": statistics.median(w["accounted_cpu_seconds"] for w in waves) if all(w.get("accounted_cpu_seconds") is not None for w in waves) else None,
-            "wave_range_seconds": [min(w["seconds"] for w in waves), max(w["seconds"] for w in waves)]}
+            "wave_range_seconds": [min(w["seconds"] for w in waves), max(w["seconds"] for w in waves)],
+            **({"median_daemon_hit_ratio": statistics.median(w["daemon_hit_ratio"] for w in waves)}
+               if all(w.get("daemon_hit_ratio") is not None for w in waves) else {}),
+            **({"median_push_retries_per_job": statistics.median(j.get("push_retries", 0) for w in waves for j in w["jobs"])}
+               if any("push_retries" in j for w in waves for j in w["jobs"]) else {})}
 
 
 def self_test():
     assert percentile([4, 1, 3, 2], .95) == 4
     assert summarize([{"seconds": 2, "jobs": [{"seconds": 1}, {"seconds": 2}]}])["median_jobs_per_second"] == 1
+    assert hit_ratio({'scion_cache_requests_total{tier="daemon",kind="blob",result="hit"}': 3,
+                      'scion_cache_requests_total{tier="daemon",kind="blob",result="miss"}': 1}) == .75
+    assert hit_ratio({}) is None
     print("scaling benchmark checks passed")
 
 
@@ -79,6 +96,8 @@ def main():
     p.add_argument("--work-dir", type=Path)
     p.add_argument("--output", type=Path)
     p.add_argument("--metrics-url", default="http://127.0.0.1:19465/metrics")
+    p.add_argument("--daemon-metrics-url", help="Daemon /metrics, for the cache hit ratio of daemon waves.")
+    p.add_argument("--loadgen", type=Path, help="scion-conformance loadgen example; required by land and history.")
     p.add_argument("--server-pid", type=int)
     p.add_argument("--daemon-pid", type=int)
     p.add_argument("--cache-dir", type=Path)
@@ -87,7 +106,7 @@ def main():
     p.add_argument("--scopes", default="apps/web/src/lib,apps/web")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmups", type=int, default=2)
-    p.add_argument("--workloads", default="checkout,query,commit")
+    p.add_argument("--workloads", default="checkout,query,history,commit,land")
     p.add_argument("--skip-partial", action="store_true")
     a = p.parse_args()
     if a.self_test:
@@ -104,8 +123,10 @@ def main():
         p.error("positive runs and concurrency in 1..64 required")
     if any(not s or s.startswith("/") or any(c in ("", ".", "..") for c in s.split("/")) for s in scopes):
         p.error("scopes must be repository-relative directories")
-    if set(workloads) - {"checkout", "query", "commit"}:
-        p.error("workloads: checkout,query,commit")
+    if set(workloads) - {"checkout", "query", "history", "commit", "land"}:
+        p.error("workloads: checkout,query,history,commit,land")
+    if {"history", "land"} & set(workloads) and a.loadgen is None:
+        p.error("--loadgen is required by the history and land workloads")
     ensure_idle()
     repo, binary, work = a.repo.resolve(), a.scion.resolve(), a.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=False)
@@ -135,14 +156,17 @@ def main():
                   "Git shared-clone jobs borrow objects from a ready local mirror; partial clones transfer their own objects.",
                   "git-sparse-index uses cone mode and includes ancestor-directory files; its extra files and bytes are reported.",
                   "Git commits use default durability and push private refs into a disposable local receiver; Scion retains production durability.",
-                  "Scion commits remain in the configured server as unreferenced changesets; main is never changed."]}
+                  "Scion commits remain in the configured server as unreferenced changesets; main is never changed.",
+                  "Land waves land on a fresh per-wave ref (Scion) or branch (Git receiver) created at the pinned commit; each job changes a distinct file, so Git retries are push races, not content conflicts.",
+                  "Git land jobs retry rejected pushes with fetch + rebase onto the shared branch; Scion lands server-side with its own lock-free retries.",
+                  "History queries run against a ready Git mirror and the Scion server or daemon; the Scion side spawns one loadgen process per query."]}
     roots = set()
     mirror = work / "receiver.git"
 
     def save():
         a.output.write_text(json.dumps(result, indent=2) + "\n")
 
-    def command(args, mode="git-mirror", measured=False, resources=None):
+    def command(args, mode="git-mirror", measured=False, resources=None, check=True):
         cmd = [str(x) for x in args]
         local = env.copy()
         if mode in endpoints:
@@ -156,6 +180,8 @@ def main():
         if resource is not None and resources is not None:
             for k, v in helpers["resource_values"](resource.read_text()).items():
                 resources[k] = max(resources.get(k, 0), v) if "rss" in k else resources.get(k, 0) + v
+        if not check:
+            return done
         if done.returncode:
             raise RuntimeError(f"{args}: {done.returncode}: {done.stderr.decode(errors='replace')}")
         return done.stdout
@@ -232,23 +258,87 @@ def main():
     def process_snapshot():
         return {name: helpers["process_values"](pid) for name, pid in [("server", a.server_pid), ("daemon", a.daemon_pid)] if pid}
 
+    hist = {}
+
+    def history_setup():
+        """Pick the history queries once and compute Git's answers (untimed)."""
+        def git_out(*args):
+            return command(["git", "--git-dir", repo, *args]).decode(errors="replace")
+        def scion_id(git_sha):
+            return json.loads(command([binary, "--json", "show", f"git:{git_sha}"], "direct"))["data"]["id"]
+        text = (".ts", ".tsx", ".js", ".json", ".md", ".css", ".yml", ".yaml", ".rs", ".py")
+        changes = collections.Counter(git_out("log", "--format=", "--name-only", "-n", "2000", sha).splitlines())
+        path = next(x for x, _ in changes.most_common() if x in expected and expected[x][0] == b"100644" and x.endswith(text))
+        content = command(["git", "--git-dir", repo, "show", f"{sha}:{path}"])
+        porcelain = git_out("blame", "--porcelain", sha, "--", path)
+        old = git_out("rev-parse", f"{sha}~100").strip()
+        merge = git_out("rev-list", "--merges", "--first-parent", "-n", "1", sha).strip()
+        p1, p2 = git_out("rev-parse", f"{merge}^1", f"{merge}^2").split()
+        merge_base = git_out("merge-base", p1, p2).strip()
+        raw = git_out("diff", "--raw", "--no-renames", old, sha)
+        hist.update({
+            "blame_path": path,
+            "blame_lines": content.count(b"\n") + (1 if content and not content.endswith(b"\n") else 0),
+            "git_blame_origins": len({x.split()[0] for x in porcelain.splitlines() if re.match(r"^[0-9a-f]{40} ", x)}),
+            "diff_range": [old, sha],
+            "diff_paths": sorted(x.split("\t", 1)[1] for x in raw.splitlines()
+                                 if x.startswith(":") and "160000" not in x[1:].split()[:2]),
+            "merge": merge, "merge_base": merge_base, "merge_base_scion": scion_id(merge_base),
+            "scion": [("blame", ["blame", base, path]), ("diff", ["diff", scion_id(old), base]),
+                      ("merge_base", ["merge-base", scion_id(p1), scion_id(p2)])],
+            "git": [("blame", ["blame", "--porcelain", sha, "--", path]), ("diff", ["diff", "--raw", "--no-renames", old, sha]),
+                    ("merge_base", ["merge-base", p1, p2])],
+        })
+        result["setup"]["history_queries"] = {k: v for k, v in hist.items() if k not in ("scion", "git", "diff_paths")}
+        result["setup"]["history_queries"]["diff_paths"] = len(hist["diff_paths"])
+
+    def check_history(mode, outs):
+        if mode in endpoints:
+            blame, diff, merge_base = outs
+            assert blame["lines"] == hist["blame_lines"], ("blame line count", blame["lines"], hist["blame_lines"])
+            result["validation"].setdefault("history_blame_origins", {})[mode] = {"scion": len(blame["origins"]), "git": hist["git_blame_origins"]}
+            assert sorted(diff["paths"]) == hist["diff_paths"], "diff paths differ from git"
+            assert merge_base["bases"] == [hist["merge_base_scion"]], "merge base differs from git"
+        else:
+            blame, diff, merge_base = (x.decode(errors="replace") for x in outs)
+            assert sum(1 for x in blame.splitlines() if x.startswith("\t")) == hist["blame_lines"]
+            assert merge_base.strip() == hist["merge_base"]
+
     def wave(mode, workload, scope, concurrency, trial):
         ensure_idle()
         paths = [work / f"job-{workload}-{mode}-{trial}-{concurrency}-{i}" for i in range(concurrency)]
         roots.update((root, mode) for root in paths)
         edit = next(x for x, (m, _) in expected.items() if x.startswith(scope + "/") and m == b"100644")
+        edits = {root: edit for root in paths}
         changed = None
-        if workload == "commit":
+        land_ref = None
+        if workload in ("commit", "land"):
+            if workload == "land":
+                # Distinct files: concurrent landings are independent changes, as most are.
+                files = sorted(x for x, (m, _) in expected.items() if x.startswith(scope + "/") and m == b"100644")
+                assert len(files) >= concurrency, "scope has too few files for land concurrency"
+                edits = dict(zip(paths, files))
+                land_ref = (f"bench/land-{trial}-c{concurrency}-{mode}" if mode in endpoints
+                            else f"refs/heads/bench-land-{trial}-c{concurrency}-{mode}")
             def prepare(root):
                 checkout(mode, root, scope)
                 validate(root, scope, mode == "git-sparse-index")
+                if workload == "land" and mode == "git-mirror":
+                    # Keep later rebases inside the same exact-directory sparse pattern.
+                    command(git(root, "config", "core.sparseCheckout", "true"))
+                    command(git(root, "config", "core.sparseCheckoutCone", "false"))
             with ThreadPoolExecutor(max_workers=min(concurrency, 8)) as pool:
                 list(pool.map(prepare, paths))
-            original = (paths[0] / edit).read_bytes()
             nonce = os.urandom(16).hex()
-            changed = {root: original + f"\nbenchmark {nonce} {i:04d}\n".encode() for i, root in enumerate(paths)}
+            changed = {root: (root / edits[root]).read_bytes() + f"\nbenchmark {nonce} {i:04d}\n".encode()
+                       for i, root in enumerate(paths)}
             for root, content in changed.items():
-                (root / edit).write_bytes(content)
+                (root / edits[root]).write_bytes(content)
+            if workload == "land":
+                if mode in endpoints:
+                    command([a.loadgen, "ref-reset", land_ref, base], "direct")
+                else:
+                    command(["git", "--git-dir", mirror, "update-ref", land_ref, sha])
         query_path = "README.md"
         query_bytes = command(["git", "--git-dir", repo, "show", f"{sha}:{query_path}"])
         query_log_args = ["log", "--first-parent", "-n", "100", "--format=%B%x00", sha]
@@ -272,6 +362,36 @@ def main():
                     content = command(["git", "--git-dir", mirror, "show", f"{sha}:{query_path}"], mode, True, resources)
                     log = command(["git", "--git-dir", mirror, *query_log_args], mode, True, resources)
                     out = content, [m.strip(b"\n").decode() for m in log.split(b"\0")[:-1]]
+            elif workload == "history":
+                outs = []
+                for name, args in hist["scion" if mode in endpoints else "git"]:
+                    started = time.perf_counter()
+                    if mode in endpoints:
+                        outs.append(json.loads(command([a.loadgen, "query", *args], mode, True, resources)))
+                    else:
+                        outs.append(command(["git", "--git-dir", mirror, *args], mode, True, resources))
+                    resources[f"{name}_seconds"] = time.perf_counter() - started
+                out = outs
+            elif workload == "land":
+                started = time.perf_counter()
+                if mode in endpoints:
+                    command([binary, "-C", root, "--json", "commit", "-m", "benchmark landed change"], mode, True, resources)
+                    resources["commit_seconds"] = time.perf_counter() - started
+                    out = command([binary, "-C", root, "--json", "land", "--ref", land_ref], mode, True, resources)
+                else:
+                    command(git(root, "-c", "core.sparseCheckout=true", "commit", "-a", "-q", "-m", "benchmark landed change"), mode, True, resources)
+                    resources["commit_seconds"] = time.perf_counter() - started
+                    retries = 0
+                    # Without a merge queue, Git writers race: fetch + rebase and push again until accepted.
+                    while command(git(root, "push", "-q", str(mirror), f"HEAD:{land_ref}"), mode, True, resources, check=False).returncode:
+                        retries += 1
+                        if retries > 200:
+                            raise RuntimeError("git push kept being rejected")
+                        command(git(root, "fetch", "-q", str(mirror), land_ref), mode, True, resources)
+                        command(git(root, "-c", "core.sparseCheckout=true", "rebase", "-q", "FETCH_HEAD"), mode, True, resources)
+                    resources["push_retries"] = retries
+                    out = None
+                resources["publish_seconds"] = time.perf_counter() - started - resources["commit_seconds"]
             elif mode in endpoints:
                 out = command([binary, "-C", root, "--json", "commit", "-m", "benchmark one-file change"], mode, True, resources)
             else:
@@ -280,6 +400,8 @@ def main():
                 command(git(root, "push", str(mirror), f"HEAD:{ref}"), mode, True, resources)
                 out = ref
             return {"seconds": time.perf_counter() - start, **resources}, out
+        daemon_metrics = mode == "daemon" and a.daemon_metrics_url
+        daemon_before = snapshot(a.daemon_metrics_url) if daemon_metrics else None
         before = snapshot(a.metrics_url)
         backends = container_values(containers)
         processes = process_snapshot()
@@ -302,6 +424,7 @@ def main():
             if processes:
                 watcher.join()
         after = snapshot(a.metrics_url)
+        daemon_after = snapshot(a.daemon_metrics_url) if daemon_metrics else None
         ensure_idle()
         last = process_snapshot()
         backend_last = container_values(containers)
@@ -318,6 +441,23 @@ def main():
         if any("client_user_seconds" not in j for j, _ in completed):
             measured["accounted_cpu_seconds"] = None
         assert all(v >= 0 for v in measured["server_metrics_delta"].values()), "counter reset"
+        if daemon_metrics:
+            measured["daemon_metrics_delta"] = {k: v - daemon_before.get(k, 0) for k, v in daemon_after.items()}
+            measured["daemon_hit_ratio"] = hit_ratio(measured["daemon_metrics_delta"])
+        if workload == "land":
+            # Every job's change is on the ref exactly once, in a linear chain from the base.
+            if mode in endpoints:
+                entries = json.loads(command([binary, "--json", "log", "--rev", land_ref, "--first-parent",
+                                              "--limit", str(concurrency + 1)], "direct"))["data"]["entries"]
+                assert len(entries) == concurrency + 1 and entries[-1]["id"] == base, "landed history is not linear from the base"
+                for root, content in changed.items():
+                    assert command([binary, "cat", f"{land_ref}:{edits[root]}"], "direct") == content, "a landed change is missing"
+                command([a.loadgen, "ref-delete", land_ref], "direct")
+            else:
+                assert int(command(["git", "--git-dir", mirror, "rev-list", "--count", f"{sha}..{land_ref}"])) == concurrency
+                for root, content in changed.items():
+                    assert command(["git", "--git-dir", mirror, "show", f"{land_ref}:{edits[root]}"]) == content, "a pushed change is missing"
+                command(["git", "--git-dir", mirror, "update-ref", "-d", land_ref])
         for root, (_, out) in zip(paths, completed):
             if workload == "checkout":
                 result["validation"][f"{mode}:{scope}:files"] = validate(root, scope, mode == "git-sparse-index")
@@ -326,6 +466,10 @@ def main():
                     measured.setdefault("received_pack_bytes", []).append(sum(x.stat().st_size for x in (root / ".git/objects/pack").glob("*.pack")))
             elif workload == "query":
                 assert out == (query_bytes, query_messages), "file bytes or first-parent history differ"
+            elif workload == "history":
+                check_history(mode, out)
+            elif workload == "land":
+                pass
             elif mode in endpoints:
                 report = json.loads(out)["data"]
                 assert report["parents"] == [base] and len(report["delta"]) == 1 and report["delta"][0]["path"] == edit
@@ -339,6 +483,8 @@ def main():
         return measured
 
     try:
+        if "history" in workloads:
+            history_setup()
         for scope in scopes:
             if a.daemon_endpoint:
                 root = work / "prime"
@@ -349,10 +495,10 @@ def main():
                 validate(root, scope)
                 cleanup(root, "daemon")
             for workload in workloads:
-                if workload == "query" and scope != scopes[0]:
+                if workload in ("query", "history") and scope != scopes[0]:
                     continue
                 active = modes if workload == "checkout" else [m for m in modes if m not in ("git-partial", "git-shallow")]
-                if workload == "query":
+                if workload in ("query", "history"):
                     active = [m for m in active if m != "git-sparse-index"]
                 for mode in active:
                     for warmup in range(a.warmups):
