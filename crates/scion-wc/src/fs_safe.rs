@@ -87,6 +87,16 @@ impl SafeRoot {
         self.write_file_atomic_raw(p.as_bytes(), data, mode)
     }
 
+    /// Return the post-rename stat without walking the same parents a second time.
+    pub(crate) fn write_file_atomic_with_stat(
+        &self,
+        p: &RepoPath,
+        data: &[u8],
+        mode: Mode,
+    ) -> Result<StatTuple> {
+        self.write_file_with_stat(p.as_bytes(), data, mode)
+    }
+
     /// Create (or atomically replace) a symlink with the given target (SPEC 11.3).
     pub fn symlink(&self, p: &RepoPath, target: &[u8]) -> Result<()> {
         self.symlink_raw(p.as_bytes(), target)
@@ -152,10 +162,14 @@ impl SafeRoot {
     }
 
     pub(crate) fn write_file_atomic_raw(&self, p: &[u8], data: &[u8], mode: Mode) -> Result<()> {
+        self.write_file_with_stat(p, data, mode).map(|_| ())
+    }
+
+    fn write_file_with_stat(&self, p: &[u8], data: &[u8], mode: Mode) -> Result<StatTuple> {
         let perm: u16 = match mode {
             Mode::File => 0o644,
             Mode::Executable => 0o755,
-            Mode::Symlink => return self.symlink_raw(p, data),
+            Mode::Symlink => return self.symlink_with_stat(p, data),
             Mode::Tree => {
                 return Err(ScionError::invalid(
                     subcode::INVALID_MODE,
@@ -166,16 +180,17 @@ impl SafeRoot {
         let (chain, leaf) = self.parents_for_write(p)?;
         let dir = chain.last().map(|f| f.as_fd()).unwrap_or(self.fd.as_fd());
         let (tmp, fd) = create_temp(dir, perm)?;
-        let result = (|| -> Result<()> {
+        let result = (|| -> Result<StatTuple> {
             let mut file = std::fs::File::from(fd);
             file.write_all(data)
                 .map_err(|e| io_error("write temporary file", e))?;
             // The creation mode is filtered by the umask; set the exact bits.
             rustix::fs::fchmod(&file, fs_mode(perm))
                 .map_err(|e| errno_plain("set file mode", e))?;
-            drop(file);
             rustix::fs::renameat(dir, tmp.as_slice(), dir, leaf)
-                .map_err(|e| rename_error(e, "file"))
+                .map_err(|e| rename_error(e, "file"))?;
+            let stat = rustix::fs::fstat(&file).map_err(|e| errno_plain("stat written file", e))?;
+            Ok(tuple_from_stat(&stat))
         })();
         if result.is_err() {
             let _ = rustix::fs::unlinkat(dir, tmp.as_slice(), AtFlags::empty());
@@ -184,6 +199,10 @@ impl SafeRoot {
     }
 
     pub(crate) fn symlink_raw(&self, p: &[u8], target: &[u8]) -> Result<()> {
+        self.symlink_with_stat(p, target).map(|_| ())
+    }
+
+    fn symlink_with_stat(&self, p: &[u8], target: &[u8]) -> Result<StatTuple> {
         if target.is_empty() || target.contains(&0) {
             return Err(ScionError::invalid(
                 subcode::INVALID_PATH,
@@ -211,7 +230,12 @@ impl SafeRoot {
             ));
         };
         let result = rustix::fs::renameat(dir, tmp.as_slice(), dir, leaf)
-            .map_err(|e| rename_error(e, "symlink"));
+            .map_err(|e| rename_error(e, "symlink"))
+            .and_then(|()| {
+                stat_at(dir, leaf)?
+                    .map(|st| tuple_from_stat(&st))
+                    .ok_or_else(|| ScionError::not_found("written symlink disappeared"))
+            });
         if result.is_err() {
             let _ = rustix::fs::unlinkat(dir, tmp.as_slice(), AtFlags::empty());
         }
@@ -702,6 +726,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let r = SafeRoot::open(dir.path()).unwrap();
         (dir, r)
+    }
+
+    #[test]
+    fn atomic_write_returns_the_post_rename_stat_for_each_mode() {
+        let (_dir, root) = root();
+        let path = RepoPath::parse(b"nested/file").unwrap();
+        for mode in [Mode::File, Mode::Executable, Mode::Symlink, Mode::File] {
+            let written = root
+                .write_file_atomic_with_stat(&path, b"target", mode)
+                .unwrap();
+            assert_eq!(Some(written), root.stat(&path).unwrap());
+        }
+        let blocked = RepoPath::parse(b"nested/file/escape").unwrap();
+        assert!(
+            root.write_file_atomic_with_stat(&blocked, b"no", Mode::File)
+                .is_err()
+        );
     }
 
     #[test]

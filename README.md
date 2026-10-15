@@ -128,6 +128,91 @@ python3 scripts/benchmark-git.py \
 The work directory must not exist. Omit `--daemon-endpoint` when testing only direct access;
 `--importer` adds local full-history Git clones and no-change synchronization checks.
 
+### Concurrent CI workloads
+
+[`scripts/benchmark-scaling.py`](scripts/benchmark-scaling.py) measures shared-cache job
+throughput, p50/p95 job latency, and one-file commit publication as concurrency increases.
+It runs each implementation's waves separately in randomized order, with two explicit
+warmups and three measured waves by default. Checkout bootstrap is inside the timer;
+fixture creation, service startup, cache priming, and correctness checks are separate.
+
+Git baselines include independent shared clones borrowing objects from a ready mirror
+containing only the default branch, with a reachable commit graph prepared outside the timers,
+cone-mode sparse-index clients, fresh shallow filtered clones, and fresh filtered clones
+with default-branch history. Cone mode also includes files in ancestor directories; the
+runner validates and reports those additional files. Query jobs read a file and the first
+100 first-parent repository history entries using the ready Git mirror directly, without charging a
+clone. Commit workloads change one file from a pinned parent, with distinct fresh content
+per job and run:
+Git commits and pushes a private ref into a disposable receiver, while Scion creates a
+server-visible changeset without updating `main`. Git keeps its default durability;
+Scion keeps production authorization, integrity verification, and durability.
+
+```sh
+python3 scripts/benchmark-scaling.py --self-test
+python3 scripts/benchmark-scaling.py \
+  --repo /path/to/repo.git --scion target/release/scion \
+  --endpoint https://127.0.0.1:18444 --metrics-url http://127.0.0.1:19465/metrics \
+  --daemon-endpoint unix:///path/to/daemon.sock \
+  --ca-file /path/to/ca.pem --token-file /path/to/raw-scion-token \
+  --server-pid SERVER_PID --daemon-pid DAEMON_PID \
+  --containers COCKROACH_CONTAINER,MINIO_CONTAINER \
+  --concurrency 1,4,8 --scopes apps/web/src/lib,apps/web \
+  --work-dir /tmp/scion-scaling --output /tmp/scion-scaling.json
+```
+
+The output retains every wave and job sample, per-job client CPU/peak RSS on macOS,
+server/daemon CPU deltas and sampled RSS, authoritative storage/byte counters, received Git
+pack sizes, and materialized bytes. `--containers` adds dedicated backend CPU and memory
+from Docker cgroup v2 counters; without it, CPU accounting excludes the database and object
+store. Container memory includes page cache and is not directly comparable to host-process
+RSS; CPU snapshots include background work and observer overhead. Measured waves refuse
+to run alongside Cargo builds or workspace tests.
+Temporary Git repositories and job directories are removed; resource reports remain, and
+Scion's unreferenced benchmark changesets remain in the configured server. Use a disposable
+benchmark server. This is single-machine concurrency testing, not a demonstration of
+horizontal scaling, virtualized checkout, enormous-repository behavior, or full-fleet cost.
+
+On the same pinned `t3code` snapshot, the final matrix passed 897 measured jobs across
+concurrency 1, 4, and 8 and working sets of 107 and 1,521 files. A separate seven-wave
+confirmation passed another 504 jobs. The confirmation below uses the 107-file scope,
+a warmed shared daemon, and the fastest measured Git baseline for each row. Both final
+runs use a main-only Git receiver with a prepared commit graph. Times are median seconds
+per wave, including all jobs in that wave:
+
+| Workload | Concurrent jobs | Git | Scion | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Fresh sparse checkout | 1 | 0.102 | 0.044 | 2.34× |
+| Fresh sparse checkout | 8 | 0.333 | 0.216 | 1.54× |
+| One-file commit, published | 1 | 0.424 | 0.107 | 3.96× |
+| One-file commit, published | 8 | 1.059 | 0.220 | 4.82× |
+
+Every Scion wave in these four confirmation cases was faster than every corresponding Git
+wave. The eight-job checkout used 1.00 accounted CPU-seconds versus Git's 2.24; the eight-job
+write wave used 0.54 versus 8.33, including Scion's server, daemon, CockroachDB, and MinIO.
+Client CPU values are rounded to 0.01 seconds by the macOS observer, so reported zeroes
+for short commands do not mean zero work. Warm daemon checkout waves made zero origin
+object-storage reads. Commit provisioning is outside the commit timer on both sides;
+the timed operation includes scanning, committing, and making the change server-visible.
+
+Git still wins elsewhere: for eight 1,521-file checkouts, the final matrix measured 1.01
+seconds for shared-mirror Git versus 2.43 for Scion's daemon. An eight-job file/history
+query wave was 0.032 seconds versus 0.112. These results establish advantages for particular
+local job workloads, not a general replacement for Git or a reproduction of fleet-scale claims.
+
+The hill climb retained a checkout change that obtains the post-rename stat through the
+already-open descriptor, avoiding another parent-directory walk. Its isolated three-wave
+experiment reduced large-checkout time by 12–14%, with lower CPU at all three concurrency
+levels; the complete rerun showed a smaller gain at eight jobs. A second experiment that
+forwarded compressed frames from the node daemon was rejected: it did not improve on the
+retained variant over the local socket. Authorization, hashing, atomic replacement,
+journaling, and racy timestamp checks remain enabled.
+
+[Compact results and timing/CPU samples](benchmarks/t3code-scaling.json) include every final
+and confirmation case plus the selected hill-climb samples. Exploratory before/iteration
+runs inherited all Git refs and had no prepared commit graph; they assess only the Scion
+runtime change. The headline Git comparisons above use the corrected final fixtures.
+
 ## How it works
 
 ```text

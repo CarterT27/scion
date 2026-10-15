@@ -358,8 +358,8 @@ impl WorkingCopy {
         content: Option<&[u8]>,
     ) -> Result<()> {
         let redacted = content.is_none();
-        match content {
-            Some(data) => self.safe.write_file_atomic(path, data, e.mode)?,
+        let stat = match content {
+            Some(data) => self.safe.write_file_atomic_with_stat(path, data, e.mode)?,
             None => {
                 // SPEC 13.7 placeholder; a redacted symlink is materialized as a regular file.
                 let mode = if e.mode == Mode::Executable {
@@ -368,25 +368,18 @@ impl WorkingCopy {
                     Mode::File
                 };
                 self.safe
-                    .write_file_atomic(path, &placeholder_bytes(&e.id), mode)?;
+                    .write_file_atomic_with_stat(path, &placeholder_bytes(&e.id), mode)?
             }
-        }
-        match self.safe.stat(path)? {
-            Some(stat) => {
-                idx.entries.insert(
-                    path.clone(),
-                    IndexEntry {
-                        stat,
-                        id: e.id,
-                        mode: e.mode,
-                        redacted,
-                    },
-                );
-            }
-            None => {
-                idx.entries.remove(path);
-            }
-        }
+        };
+        idx.entries.insert(
+            path.clone(),
+            IndexEntry {
+                stat,
+                id: e.id,
+                mode: e.mode,
+                redacted,
+            },
+        );
         Ok(())
     }
 

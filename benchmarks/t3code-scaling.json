@@ -1,0 +1,6185 @@
+{
+  "recorded_at_utc": "2026-10-15T01:39:03.059079+00:00",
+  "headline_comparisons": {
+    "checkout:apps/web/src/lib:concurrency=1": {
+      "git_baseline": "git-mirror",
+      "git_seconds": 0.10199862498848233,
+      "scion_seconds": 0.043535624994547106,
+      "speedup": 2.3428772413685985,
+      "git_cpu_seconds": 0.07,
+      "scion_cpu_seconds": 0.051817000000110344,
+      "all_scion_waves_faster_than_all_git_waves": true,
+      "scion_p95_job_seconds": 0.04648454100242816,
+      "git_p95_job_seconds": 0.10818016600387637
+    },
+    "checkout:apps/web/src/lib:concurrency=8": {
+      "git_baseline": "git-mirror",
+      "git_seconds": 0.3333322499966016,
+      "scion_seconds": 0.2162981659930665,
+      "speedup": 1.5410775605341316,
+      "git_cpu_seconds": 2.2399999999999998,
+      "scion_cpu_seconds": 0.9972389999999675,
+      "all_scion_waves_faster_than_all_git_waves": true,
+      "scion_p95_job_seconds": 0.22148645798733924,
+      "git_p95_job_seconds": 0.5445205419964623
+    },
+    "commit:apps/web/src/lib:concurrency=1": {
+      "git_baseline": "git-mirror",
+      "git_seconds": 0.4242869159934344,
+      "scion_seconds": 0.10701470899221022,
+      "speedup": 3.9647532567165036,
+      "git_cpu_seconds": 0.41000000000000003,
+      "scion_cpu_seconds": 0.10746700000004239,
+      "all_scion_waves_faster_than_all_git_waves": true,
+      "scion_p95_job_seconds": 0.2122419160004938,
+      "git_p95_job_seconds": 0.5422577090066625
+    },
+    "commit:apps/web/src/lib:concurrency=8": {
+      "git_baseline": "git-sparse-index",
+      "git_seconds": 1.058796916011488,
+      "scion_seconds": 0.21954720800567884,
+      "speedup": 4.822638946900664,
+      "git_cpu_seconds": 8.33,
+      "scion_cpu_seconds": 0.5351830000000851,
+      "all_scion_waves_faster_than_all_git_waves": true,
+      "scion_p95_job_seconds": 0.22641358300461434,
+      "git_p95_job_seconds": 1.0893088330049068
+    }
+  },
+  "final": {
+    "method": "Concurrent CI workloads against a pinned Git mirror and a production Scion server.\n\nRuns sequential, randomized waves: implementations never compete with each other.\nGit uses a ready shared mirror (shared clones), plus fresh shallow/filtered clones.\nScion uses direct access and optionally one shared, prewarmed node daemon.\nAll setup needed by each checkout job is timed; fixture/service setup and validation are not.\n",
+    "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "concurrency": [
+      1,
+      4,
+      8
+    ],
+    "runs": 3,
+    "summary": {
+      "checkout:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.10738054200191982,
+          "median_jobs_per_second": 9.312674171286277,
+          "job_p50_seconds": 0.10716579199652188,
+          "job_p95_seconds": 0.12588158299331553,
+          "median_accounted_cpu_seconds": 0.08,
+          "wave_range_seconds": [
+            0.10666670800128486,
+            0.1262653329904424
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 0.21655058300530072,
+          "median_jobs_per_second": 4.617858728995072,
+          "job_p50_seconds": 0.21633220800140407,
+          "job_p95_seconds": 0.22015574999386445,
+          "median_accounted_cpu_seconds": 0.21000000000000002,
+          "wave_range_seconds": [
+            0.20823370799189433,
+            0.22038558400527108
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 0.6625705000042217,
+          "median_jobs_per_second": 1.509273352788312,
+          "job_p50_seconds": 0.6623608750087442,
+          "job_p95_seconds": 0.6771210000006249,
+          "median_accounted_cpu_seconds": 1.25,
+          "wave_range_seconds": [
+            0.6471489999967162,
+            0.6773499999981141
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.3497132079937728,
+          "median_jobs_per_second": 2.859485936309865,
+          "job_p50_seconds": 0.34945329099718947,
+          "job_p95_seconds": 0.39550749999762047,
+          "median_accounted_cpu_seconds": 0.32,
+          "wave_range_seconds": [
+            0.3284332499897573,
+            0.3957955420046346
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.11882541701197624,
+          "median_jobs_per_second": 8.415707894374243,
+          "job_p50_seconds": 0.11859395798819605,
+          "job_p95_seconds": 0.12336275000416208,
+          "median_accounted_cpu_seconds": 0.15783100000009087,
+          "wave_range_seconds": [
+            0.1186434170085704,
+            0.12360750000516418
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.04351225000573322,
+          "median_jobs_per_second": 22.982033792052558,
+          "job_p50_seconds": 0.04333220799162518,
+          "job_p95_seconds": 0.04564574999676552,
+          "median_accounted_cpu_seconds": 0.04906200000001924,
+          "wave_range_seconds": [
+            0.0431081249989802,
+            0.04588391700235661
+          ]
+        }
+      },
+      "checkout:apps/web/src/lib:concurrency=4": {
+        "git-mirror": {
+          "median_wave_seconds": 0.15094358300848398,
+          "median_jobs_per_second": 26.49996720811361,
+          "job_p50_seconds": 0.14985181301017292,
+          "job_p95_seconds": 0.1588044579984853,
+          "median_accounted_cpu_seconds": 0.43999999999999995,
+          "wave_range_seconds": [
+            0.146702957994421,
+            0.1591563749971101
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 0.2699483330070507,
+          "median_jobs_per_second": 14.817650309014969,
+          "job_p50_seconds": 0.2691798750020098,
+          "job_p95_seconds": 0.28729125000245403,
+          "median_accounted_cpu_seconds": 1.04,
+          "wave_range_seconds": [
+            0.26669904199661687,
+            0.2876851659966633
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 0.7768895829940448,
+          "median_jobs_per_second": 5.1487368186666265,
+          "job_p50_seconds": 0.7762672290045884,
+          "job_p95_seconds": 0.7948750409996137,
+          "median_accounted_cpu_seconds": 4.07,
+          "wave_range_seconds": [
+            0.7586717920057708,
+            0.7952783329965314
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.5386030419904273,
+          "median_jobs_per_second": 7.426619770318885,
+          "job_p50_seconds": 0.5367984790063929,
+          "job_p95_seconds": 0.6185799170052633,
+          "median_accounted_cpu_seconds": 1.96,
+          "wave_range_seconds": [
+            0.4835861669998849,
+            0.6211068749980768
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.18973466601164546,
+          "median_jobs_per_second": 21.082072581056376,
+          "job_p50_seconds": 0.1764834789937595,
+          "job_p95_seconds": 0.19028083299053833,
+          "median_accounted_cpu_seconds": 0.5290869999999904,
+          "wave_range_seconds": [
+            0.18826954200631008,
+            0.19394283399742562
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.08088412501092535,
+          "median_jobs_per_second": 49.45346196747141,
+          "job_p50_seconds": 0.07330560399714159,
+          "job_p95_seconds": 0.08035350000136532,
+          "median_accounted_cpu_seconds": 0.19233099999998948,
+          "wave_range_seconds": [
+            0.07965800000238232,
+            0.08175112500612158
+          ]
+        }
+      },
+      "checkout:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 0.32516287500038743,
+          "median_jobs_per_second": 24.603054699865314,
+          "job_p50_seconds": 0.3159880829989561,
+          "job_p95_seconds": 0.32503537498996593,
+          "median_accounted_cpu_seconds": 2.15,
+          "wave_range_seconds": [
+            0.3205265419965144,
+            0.33220074999553617
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 0.4193553749937564,
+          "median_jobs_per_second": 19.0768986807886,
+          "job_p50_seconds": 0.41262327050208114,
+          "job_p95_seconds": 0.5537489999987883,
+          "median_accounted_cpu_seconds": 3.1100000000000003,
+          "wave_range_seconds": [
+            0.4160365839925362,
+            0.6575598339986755
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 0.9931693750113482,
+          "median_jobs_per_second": 8.055020826541888,
+          "job_p50_seconds": 0.9221950209976058,
+          "job_p95_seconds": 1.0684107919951202,
+          "median_accounted_cpu_seconds": 7.609999999999999,
+          "wave_range_seconds": [
+            0.9815620419976767,
+            1.126752582989866
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 1.5959277500078315,
+          "median_jobs_per_second": 5.012758252972757,
+          "job_p50_seconds": 1.545879604498623,
+          "job_p95_seconds": 1.6664229169982718,
+          "median_accounted_cpu_seconds": 12.1,
+          "wave_range_seconds": [
+            1.5328639579965966,
+            1.6671952909964602
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.27188133299932815,
+          "median_jobs_per_second": 29.424601945804675,
+          "job_p50_seconds": 0.25212487499811687,
+          "job_p95_seconds": 0.2785040000017034,
+          "median_accounted_cpu_seconds": 1.051692999999998,
+          "wave_range_seconds": [
+            0.2645816660078708,
+            0.27936654099903535
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.22059983300277963,
+          "median_jobs_per_second": 36.264760000517306,
+          "job_p50_seconds": 0.1990291249967413,
+          "job_p95_seconds": 0.21892641601152718,
+          "median_accounted_cpu_seconds": 0.9603159999999235,
+          "wave_range_seconds": [
+            0.20653970800049137,
+            0.23307945800479501
+          ]
+        }
+      },
+      "query:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.022242749997531064,
+          "median_jobs_per_second": 44.958469618684724,
+          "job_p50_seconds": 0.022019083000486717,
+          "job_p95_seconds": 0.02281245899212081,
+          "median_accounted_cpu_seconds": 0.0,
+          "wave_range_seconds": [
+            0.021885167006985284,
+            0.02303891599876806
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.10626120799861383,
+          "median_jobs_per_second": 9.410771991346502,
+          "job_p50_seconds": 0.10598229200695641,
+          "job_p95_seconds": 0.114345082998625,
+          "median_accounted_cpu_seconds": 0.0566239999999425,
+          "wave_range_seconds": [
+            0.1039288750034757,
+            0.11457833400345407
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.07822295799269341,
+          "median_jobs_per_second": 12.783970661061005,
+          "job_p50_seconds": 0.07799308300309349,
+          "job_p95_seconds": 0.08271462499396876,
+          "median_accounted_cpu_seconds": 0.06355899999995529,
+          "wave_range_seconds": [
+            0.0778622079960769,
+            0.0829503749992
+          ]
+        }
+      },
+      "query:apps/web/src/lib:concurrency=4": {
+        "git-mirror": {
+          "median_wave_seconds": 0.024892958987038583,
+          "median_jobs_per_second": 160.6880082871122,
+          "job_p50_seconds": 0.023801333489245735,
+          "job_p95_seconds": 0.024955792003311217,
+          "median_accounted_cpu_seconds": 0.0,
+          "wave_range_seconds": [
+            0.024338041999726556,
+            0.025488833009148948
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.1251871660060715,
+          "median_jobs_per_second": 31.95215713890354,
+          "job_p50_seconds": 0.11935983350122115,
+          "job_p95_seconds": 0.1263662500132341,
+          "median_accounted_cpu_seconds": 0.16942999999994868,
+          "wave_range_seconds": [
+            0.11831604200415313,
+            0.12962020799750462
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.09756454099260736,
+          "median_jobs_per_second": 40.998501702612295,
+          "job_p50_seconds": 0.0950341869975091,
+          "job_p95_seconds": 0.10678124999685679,
+          "median_accounted_cpu_seconds": 0.15541799999995476,
+          "wave_range_seconds": [
+            0.0921510829939507,
+            0.10784187499666587
+          ]
+        }
+      },
+      "query:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 0.03238899999996647,
+          "median_jobs_per_second": 246.99743740184263,
+          "job_p50_seconds": 0.025822916999459267,
+          "job_p95_seconds": 0.03153187500720378,
+          "median_accounted_cpu_seconds": 0.0,
+          "wave_range_seconds": [
+            0.03225383401149884,
+            0.03352199999790173
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.15308004200051073,
+          "median_jobs_per_second": 52.26024173662893,
+          "job_p50_seconds": 0.14421670849696966,
+          "job_p95_seconds": 0.15239291699253954,
+          "median_accounted_cpu_seconds": 0.3103320000000025,
+          "wave_range_seconds": [
+            0.15035104200069327,
+            0.1583305410022149
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.11241495799913537,
+          "median_jobs_per_second": 71.16490672052318,
+          "job_p50_seconds": 0.10710491650388576,
+          "job_p95_seconds": 0.1303615409997292,
+          "median_accounted_cpu_seconds": 0.3024119999999275,
+          "wave_range_seconds": [
+            0.11015708299237303,
+            0.13259062499855645
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.42077320799580775,
+          "median_jobs_per_second": 2.376577170307771,
+          "job_p50_seconds": 0.420537083002273,
+          "job_p95_seconds": 0.612393624993274,
+          "median_accounted_cpu_seconds": 0.42000000000000004,
+          "wave_range_seconds": [
+            0.41678337499615736,
+            0.6126190829963889
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.43079783298890106,
+          "median_jobs_per_second": 2.321274443424983,
+          "job_p50_seconds": 0.4304349580052076,
+          "job_p95_seconds": 0.593144124999526,
+          "median_accounted_cpu_seconds": 0.42000000000000004,
+          "wave_range_seconds": [
+            0.41673387501214165,
+            0.5934435419912916
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.15569408300507348,
+          "median_jobs_per_second": 6.422851663331444,
+          "job_p50_seconds": 0.15543483399960678,
+          "job_p95_seconds": 0.26182008399337064,
+          "median_accounted_cpu_seconds": 0.162306000000072,
+          "wave_range_seconds": [
+            0.15514170899405144,
+            0.26215316700108815
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.11070083300000988,
+          "median_jobs_per_second": 9.03335569299565,
+          "job_p50_seconds": 0.11046420899219811,
+          "job_p95_seconds": 0.13375383299717214,
+          "median_accounted_cpu_seconds": 0.10304899999999861,
+          "wave_range_seconds": [
+            0.10290841700043529,
+            0.13400258299952839
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=4": {
+        "git-mirror": {
+          "median_wave_seconds": 0.605644499999471,
+          "median_jobs_per_second": 6.604534508285791,
+          "job_p50_seconds": 0.6048221039964119,
+          "job_p95_seconds": 0.6299764159921324,
+          "median_accounted_cpu_seconds": 2.4400000000000004,
+          "wave_range_seconds": [
+            0.5971962089970475,
+            0.6303672079957323
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.6184843329974683,
+          "median_jobs_per_second": 6.4674233227769955,
+          "job_p50_seconds": 0.6175557704991661,
+          "job_p95_seconds": 0.739026459006709,
+          "median_accounted_cpu_seconds": 2.4800000000000004,
+          "wave_range_seconds": [
+            0.6059139580029296,
+            0.7396584999951301
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.23956691699277144,
+          "median_jobs_per_second": 16.696796244703076,
+          "job_p50_seconds": 0.2312226255016867,
+          "job_p95_seconds": 0.28507304200320505,
+          "median_accounted_cpu_seconds": 0.656786000000082,
+          "wave_range_seconds": [
+            0.23315770900808275,
+            0.2863976660009939
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.14897641600691713,
+          "median_jobs_per_second": 26.84988743328525,
+          "job_p50_seconds": 0.14525464599137194,
+          "job_p95_seconds": 0.1610801249917131,
+          "median_accounted_cpu_seconds": 0.33804399999998846,
+          "wave_range_seconds": [
+            0.14348308400076348,
+            0.16281000000890344
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 1.0573132090066792,
+          "median_jobs_per_second": 7.566348298547988,
+          "job_p50_seconds": 1.048259291506838,
+          "job_p95_seconds": 1.0742577920027543,
+          "median_accounted_cpu_seconds": 8.440000000000001,
+          "wave_range_seconds": [
+            1.0338180830003694,
+            1.0767527499992866
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 1.071858750001411,
+          "median_jobs_per_second": 7.463670003150573,
+          "job_p50_seconds": 1.0653972504951525,
+          "job_p95_seconds": 1.094619709008839,
+          "median_accounted_cpu_seconds": 8.47,
+          "wave_range_seconds": [
+            1.054929459001869,
+            1.0967848330037668
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.32905808299256023,
+          "median_jobs_per_second": 24.311817315792464,
+          "job_p50_seconds": 0.31326631249976344,
+          "job_p95_seconds": 0.34623787499731407,
+          "median_accounted_cpu_seconds": 1.157753999999996,
+          "wave_range_seconds": [
+            0.31776595799601637,
+            0.3554126660019392
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.2324312090058811,
+          "median_jobs_per_second": 34.418785817173024,
+          "job_p50_seconds": 0.2172590414993465,
+          "job_p95_seconds": 0.23540562500420492,
+          "median_accounted_cpu_seconds": 0.5349259999999932,
+          "wave_range_seconds": [
+            0.22335916600422934,
+            0.2367625000042608
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.23450466599024367,
+          "median_jobs_per_second": 4.264307474554063,
+          "job_p50_seconds": 0.23425566700461786,
+          "job_p95_seconds": 0.2428191670041997,
+          "median_accounted_cpu_seconds": 0.2,
+          "wave_range_seconds": [
+            0.2301934999995865,
+            0.24304616700101178
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 0.695515790997888,
+          "median_jobs_per_second": 1.4377818777705316,
+          "job_p50_seconds": 0.6952738749969285,
+          "job_p95_seconds": 0.7031410420022439,
+          "median_accounted_cpu_seconds": 1.15,
+          "wave_range_seconds": [
+            0.6940081250068033,
+            0.7033660410088487
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 1.1476633329875767,
+          "median_jobs_per_second": 0.871335670711739,
+          "job_p50_seconds": 1.147454749996541,
+          "job_p95_seconds": 1.1499998340004822,
+          "median_accounted_cpu_seconds": 2.16,
+          "wave_range_seconds": [
+            1.1419053339923266,
+            1.1501909169892315
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.5829559580015484,
+          "median_jobs_per_second": 1.7153954535916138,
+          "job_p50_seconds": 0.582755333991372,
+          "job_p95_seconds": 0.5891042500006733,
+          "median_accounted_cpu_seconds": 0.55,
+          "wave_range_seconds": [
+            0.5806778750120429,
+            0.5893089579913067
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.8666809999995166,
+          "median_jobs_per_second": 1.1538270713221563,
+          "job_p50_seconds": 0.8664761660038494,
+          "job_p95_seconds": 0.8852973750035744,
+          "median_accounted_cpu_seconds": 1.6231889999999647,
+          "wave_range_seconds": [
+            0.8652975000004517,
+            0.8855022500065388
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.3586597499961499,
+          "median_jobs_per_second": 2.7881578571633274,
+          "job_p50_seconds": 0.35848695901222527,
+          "job_p95_seconds": 0.45579708300647326,
+          "median_accounted_cpu_seconds": 0.46769600000000233,
+          "wave_range_seconds": [
+            0.3575801250117365,
+            0.4560163339920109
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=4": {
+        "git-mirror": {
+          "median_wave_seconds": 0.43501504200685304,
+          "median_jobs_per_second": 9.195084339030709,
+          "job_p50_seconds": 0.43444187499699183,
+          "job_p95_seconds": 0.44735795800806955,
+          "median_accounted_cpu_seconds": 1.29,
+          "wave_range_seconds": [
+            0.4194249580032192,
+            0.44776487500348594
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 0.9849940419953782,
+          "median_jobs_per_second": 4.060938269125864,
+          "job_p50_seconds": 0.9782458954941831,
+          "job_p95_seconds": 1.0177297500049463,
+          "median_accounted_cpu_seconds": 5.28,
+          "wave_range_seconds": [
+            0.9571089999953983,
+            1.0183970840007532
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 1.5233385840110714,
+          "median_jobs_per_second": 2.6258115181903174,
+          "job_p50_seconds": 1.513170166494092,
+          "job_p95_seconds": 1.6787852919951547,
+          "median_accounted_cpu_seconds": 8.379999999999999,
+          "wave_range_seconds": [
+            1.5115232919924892,
+            1.6794054170022719
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.9939568749978207,
+          "median_jobs_per_second": 4.0243194655791985,
+          "job_p50_seconds": 0.9922385210011271,
+          "job_p95_seconds": 0.9981406250008149,
+          "median_accounted_cpu_seconds": 3.44,
+          "wave_range_seconds": [
+            0.9384045420010807,
+            0.9986519999947632
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 1.6156311669910792,
+          "median_jobs_per_second": 2.475812599882883,
+          "job_p50_seconds": 1.5878634580003563,
+          "job_p95_seconds": 1.6375735839974368,
+          "median_accounted_cpu_seconds": 7.755468999999994,
+          "wave_range_seconds": [
+            1.564297416000045,
+            1.6390522500005318
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.8749319589987863,
+          "median_jobs_per_second": 4.5717840785897605,
+          "job_p50_seconds": 0.8738237289944664,
+          "job_p95_seconds": 0.8895104580005864,
+          "median_accounted_cpu_seconds": 2.6328670000000223,
+          "wave_range_seconds": [
+            0.7052785420091823,
+            0.8898437920142896
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 1.0083617079944815,
+          "median_jobs_per_second": 7.933661043030981,
+          "job_p50_seconds": 0.9993695625016699,
+          "job_p95_seconds": 1.06372916699911,
+          "median_accounted_cpu_seconds": 6.3100000000000005,
+          "wave_range_seconds": [
+            0.9630424589995528,
+            1.0644771669904003
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 1.8102657919953344,
+          "median_jobs_per_second": 4.41924055316879,
+          "job_p50_seconds": 1.7901574585048365,
+          "job_p95_seconds": 1.9181680829933612,
+          "median_accounted_cpu_seconds": 14.040000000000001,
+          "wave_range_seconds": [
+            1.682531291997293,
+            1.9246022919978714
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 2.1829760419932427,
+          "median_jobs_per_second": 3.664721850403507,
+          "job_p50_seconds": 2.146428708001622,
+          "job_p95_seconds": 2.2996175000007497,
+          "median_accounted_cpu_seconds": 18.17,
+          "wave_range_seconds": [
+            2.1401410839898745,
+            2.30096966700512
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 2.241096625002683,
+          "median_jobs_per_second": 3.569680981510747,
+          "job_p50_seconds": 2.2270291875029216,
+          "job_p95_seconds": 2.2664268749940675,
+          "median_accounted_cpu_seconds": 15.99,
+          "wave_range_seconds": [
+            2.231674208000186,
+            2.2707598749984754
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 2.7213678330008406,
+          "median_jobs_per_second": 2.939698155827187,
+          "job_p50_seconds": 2.686910270997032,
+          "job_p95_seconds": 3.1185472500073956,
+          "median_accounted_cpu_seconds": 16.815795999999956,
+          "wave_range_seconds": [
+            2.695080457997392,
+            3.131906249996973
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 2.4268656249914784,
+          "median_jobs_per_second": 3.296433027695174,
+          "job_p50_seconds": 2.417859208508162,
+          "job_p95_seconds": 2.4910573749948526,
+          "median_accounted_cpu_seconds": 17.218039999999995,
+          "wave_range_seconds": [
+            2.3454344579949975,
+            2.4942839589930372
+          ]
+        }
+      },
+      "commit:apps/web:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.5666246250038967,
+          "median_jobs_per_second": 1.7648368176605862,
+          "job_p50_seconds": 0.5663812080019852,
+          "job_p95_seconds": 0.5671614589955425,
+          "median_accounted_cpu_seconds": 0.55,
+          "wave_range_seconds": [
+            0.45180416699440684,
+            0.5673826249985723
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.5778057919960702,
+          "median_jobs_per_second": 1.7306853165064868,
+          "job_p50_seconds": 0.5775704589905217,
+          "job_p95_seconds": 0.5834652500052471,
+          "median_accounted_cpu_seconds": 0.56,
+          "wave_range_seconds": [
+            0.5772487909998745,
+            0.5837007499940228
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.8816759170003934,
+          "median_jobs_per_second": 1.134203601026287,
+          "job_p50_seconds": 0.8814263329986716,
+          "job_p95_seconds": 0.9005707500036806,
+          "median_accounted_cpu_seconds": 1.3882749999999715,
+          "wave_range_seconds": [
+            0.8751138340012403,
+            0.9008358749997569
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.23274429199227598,
+          "median_jobs_per_second": 4.29656079399441,
+          "job_p50_seconds": 0.23248950000561308,
+          "job_p95_seconds": 0.2340829169988865,
+          "median_accounted_cpu_seconds": 0.26030299999989,
+          "wave_range_seconds": [
+            0.2315313330036588,
+            0.23431283299578354
+          ]
+        }
+      },
+      "commit:apps/web:concurrency=4": {
+        "git-mirror": {
+          "median_wave_seconds": 0.7913262500078417,
+          "median_jobs_per_second": 5.054805145109696,
+          "job_p50_seconds": 0.7903248959992197,
+          "job_p95_seconds": 0.8313416669989238,
+          "median_accounted_cpu_seconds": 2.99,
+          "wave_range_seconds": [
+            0.7434267090138746,
+            0.83257929199317
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.7666962090006564,
+          "median_jobs_per_second": 5.217190267855591,
+          "job_p50_seconds": 0.7658108960022219,
+          "job_p95_seconds": 0.7814875000040047,
+          "median_accounted_cpu_seconds": 3.1,
+          "wave_range_seconds": [
+            0.6861817500030156,
+            0.7818449159967713
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 1.6000937079952564,
+          "median_jobs_per_second": 2.499853589832289,
+          "job_p50_seconds": 1.592889687504794,
+          "job_p95_seconds": 1.9473070419917349,
+          "median_accounted_cpu_seconds": 6.94382100000008,
+          "wave_range_seconds": [
+            1.5329387079982553,
+            1.9504963330109604
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.3390091249893885,
+          "median_jobs_per_second": 11.79909242892859,
+          "job_p50_seconds": 0.33700352100277087,
+          "job_p95_seconds": 0.342330999992555,
+          "median_accounted_cpu_seconds": 1.2380720000000511,
+          "wave_range_seconds": [
+            0.33422245900146663,
+            0.3439221250009723
+          ]
+        }
+      },
+      "commit:apps/web:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 1.1186423750041286,
+          "median_jobs_per_second": 7.1515259735896155,
+          "job_p50_seconds": 1.116455062496243,
+          "job_p95_seconds": 1.2072004999936325,
+          "median_accounted_cpu_seconds": 8.41,
+          "wave_range_seconds": [
+            1.0110314160119742,
+            1.21898937500373
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 1.1571435839869082,
+          "median_jobs_per_second": 6.913575904241898,
+          "job_p50_seconds": 1.1304481670013047,
+          "job_p95_seconds": 1.2543759999971371,
+          "median_accounted_cpu_seconds": 9.15,
+          "wave_range_seconds": [
+            1.127172625012463,
+            1.255761459004134
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 2.692099292005878,
+          "median_jobs_per_second": 2.9716585951178702,
+          "job_p50_seconds": 2.6665649375063367,
+          "job_p95_seconds": 2.760596207997878,
+          "median_accounted_cpu_seconds": 15.159926000000025,
+          "wave_range_seconds": [
+            2.5696675409999443,
+            2.7645589590101736
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.6912529169931076,
+          "median_jobs_per_second": 11.57318805221008,
+          "job_p50_seconds": 0.6813924585003406,
+          "job_p95_seconds": 0.693049624998821,
+          "median_accounted_cpu_seconds": 4.6740200000000485,
+          "wave_range_seconds": [
+            0.6813250420091208,
+            0.6960575830016751
+          ]
+        }
+      }
+    },
+    "validation": {
+      "git-mirror:apps/web/src/lib:files": 107,
+      "git-shallow:apps/web/src/lib:files": 107,
+      "git-partial:apps/web/src/lib:files": 107,
+      "git-sparse-index:apps/web/src/lib:files": 314,
+      "direct:apps/web/src/lib:files": 107,
+      "daemon:apps/web/src/lib:files": 107,
+      "git-mirror:apps/web:files": 1521,
+      "git-shallow:apps/web:files": 1521,
+      "git-partial:apps/web:files": 1521,
+      "git-sparse-index:apps/web:files": 1538,
+      "direct:apps/web:files": 1521,
+      "daemon:apps/web:files": 1521,
+      "main_unchanged": true,
+      "all_waves_passed": true
+    },
+    "setup": {
+      "git_receiver_seconds": 0.06889791700814385,
+      "git_commit_graph": true,
+      "git_receiver_refs": 1,
+      "git_mirror_object_bytes": 1594959160,
+      "daemon_prime_seconds:apps/web/src/lib": 0.051983375000418164,
+      "daemon_prime_seconds:apps/web": 0.6285684580070665,
+      "daemon_cache_bytes_after": 123589111
+    },
+    "warmups": 2,
+    "client_sha256": "cd1b6bb894b331487d5058670809ee8e95e62cfa4d93390890d978f6be7cc7b3",
+    "workspace_revision_at_run": "8714571aaea62b5984514b1d6c19c80ad005e533",
+    "containers": [
+      "scion-t3code-sanity-cockroach-1",
+      "scion-t3code-sanity-minio-1"
+    ],
+    "limitations": [
+      "Single machine and one authoritative Scion server; concurrency scaling, not horizontal scaling.",
+      "Operating-system caches are warm; daemon priming is recorded separately, not called cold.",
+      "CPU includes Git child processes and Scion client/server/daemon; dedicated backend CPU is included only with --containers.",
+      "Container CPU snapshots include background work and small observer overhead; container memory includes page cache and is sampled only at wave boundaries.",
+      "RPC payload counters exclude transport framing and TLS; Git pack bytes are on-disk received sizes, not NIC bytes.",
+      "Git shared-clone jobs borrow objects from a ready local mirror; partial clones transfer their own objects.",
+      "git-sparse-index uses cone mode and includes ancestor-directory files; its extra files and bytes are reported.",
+      "Git commits use default durability and push private refs into a disposable local receiver; Scion retains production durability.",
+      "Scion commits remain in the configured server as unreferenced changesets; main is never changed."
+    ],
+    "snapshot": "bf8ffe81a63c82d3de5fbaa9991fd5f30034a452",
+    "commits": 5573,
+    "files": 28068,
+    "raw_waves": {
+      "checkout:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.10666670800128486,
+            0.1262653329904424,
+            0.10738054200191982
+          ],
+          "job_seconds": [
+            [
+              0.10644045799563173
+            ],
+            [
+              0.12588158299331553
+            ],
+            [
+              0.10716579199652188
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.08,
+            0.09,
+            0.08
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "git-shallow": {
+          "seconds": [
+            0.20823370799189433,
+            0.22038558400527108,
+            0.21655058300530072
+          ],
+          "job_seconds": [
+            [
+              0.20799754100153223
+            ],
+            [
+              0.22015574999386445
+            ],
+            [
+              0.21633220800140407
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.21000000000000002,
+            0.23000000000000004,
+            0.21000000000000002
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            1.0,
+            1.0
+          ]
+        },
+        "git-partial": {
+          "seconds": [
+            0.6471489999967162,
+            0.6773499999981141,
+            0.6625705000042217
+          ],
+          "job_seconds": [
+            [
+              0.6469381249917205
+            ],
+            [
+              0.6771210000006249
+            ],
+            [
+              0.6623608750087442
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.22,
+            1.25,
+            1.25
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.3284332499897573,
+            0.3957955420046346,
+            0.3497132079937728
+          ],
+          "job_seconds": [
+            [
+              0.3281879590067547
+            ],
+            [
+              0.39550749999762047
+            ],
+            [
+              0.34945329099718947
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.30000000000000004,
+            0.36,
+            0.32
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            1.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.1186434170085704,
+            0.12360750000516418,
+            0.11882541701197624
+          ],
+          "job_seconds": [
+            [
+              0.1184298750013113
+            ],
+            [
+              0.12336275000416208
+            ],
+            [
+              0.11859395798819605
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.1410469999999759,
+            0.16637499999999195,
+            0.15783100000009087
+          ],
+          "object_gets": [
+            107.0,
+            107.0,
+            107.0
+          ],
+          "metadata_calls": [
+            126.0,
+            127.0,
+            127.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.0431081249989802,
+            0.04351225000573322,
+            0.04588391700235661
+          ],
+          "job_seconds": [
+            [
+              0.04291987500619143
+            ],
+            [
+              0.04333220799162518
+            ],
+            [
+              0.04564574999676552
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.04458400000006123,
+            0.04906200000001924,
+            0.0628749999998761
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      "checkout:apps/web/src/lib:concurrency=4": {
+        "git-mirror": {
+          "seconds": [
+            0.146702957994421,
+            0.15094358300848398,
+            0.1591563749971101
+          ],
+          "job_seconds": [
+            [
+              0.14345662499545142,
+              0.1460054589988431,
+              0.14619491700432263,
+              0.14628095799707808
+            ],
+            [
+              0.15041529100562911,
+              0.14763687500089873,
+              0.14936404200852849,
+              0.15033958401181735
+            ],
+            [
+              0.1574102500017034,
+              0.15860541599977296,
+              0.15850912500172853,
+              0.1588044579984853
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.43999999999999995,
+            0.43999999999999995,
+            0.48
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        },
+        "git-shallow": {
+          "seconds": [
+            0.26669904199661687,
+            0.2876851659966633,
+            0.2699483330070507
+          ],
+          "job_seconds": [
+            [
+              0.2660920409980463,
+              0.2660859579918906,
+              0.2661541249981383,
+              0.26611470799252857
+            ],
+            [
+              0.2871174160100054,
+              0.2859185839915881,
+              0.28698462499596644,
+              0.28729125000245403
+            ],
+            [
+              0.26892458299698774,
+              0.26943516700703185,
+              0.26693983300356194,
+              0.26964804099407047
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.04,
+            1.04,
+            1.06
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "git-partial": {
+          "seconds": [
+            0.7952783329965314,
+            0.7768895829940448,
+            0.7586717920057708
+          ],
+          "job_seconds": [
+            [
+              0.7908627080032602,
+              0.7919662500062259,
+              0.7935956670116866,
+              0.7948750409996137
+            ],
+            [
+              0.7763112920074491,
+              0.7761917500029085,
+              0.7762231660017278,
+              0.776454749997356
+            ],
+            [
+              0.7582042920112144,
+              0.7580791250074981,
+              0.7571740409912309,
+              0.7581874169991352
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            4.24,
+            4.05,
+            4.07
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            3.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.4835861669998849,
+            0.6211068749980768,
+            0.5386030419904273
+          ],
+          "job_seconds": [
+            [
+              0.48290558300504927,
+              0.48303375000250526,
+              0.48100766699644737,
+              0.48314183299953584
+            ],
+            [
+              0.5918055829970399,
+              0.6185799170052633,
+              0.5932405829953495,
+              0.6017536250001285
+            ],
+            [
+              0.5344807500077877,
+              0.5366430420108372,
+              0.5369539160019485,
+              0.5381323750043521
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.7600000000000002,
+            2.02,
+            1.96
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.19394283399742562,
+            0.18973466601164546,
+            0.18826954200631008
+          ],
+          "job_seconds": [
+            [
+              0.18288216598739382,
+              0.17419854199397378,
+              0.19028083299053833,
+              0.1736931660125265
+            ],
+            [
+              0.1892624159954721,
+              0.18351212500419933,
+              0.15767608300666325,
+              0.17035670900077093
+            ],
+            [
+              0.1787684159935452,
+              0.16586679099418689,
+              0.16579149999597576,
+              0.18784745800076053
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.5290869999999904,
+            0.5049830000000544,
+            0.6748309999999605
+          ],
+          "object_gets": [
+            428.0,
+            428.0,
+            428.0
+          ],
+          "metadata_calls": [
+            505.0,
+            505.0,
+            504.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.07965800000238232,
+            0.08088412501092535,
+            0.08175112500612158
+          ],
+          "job_seconds": [
+            [
+              0.07746470799611416,
+              0.06066720800299663,
+              0.0778602909995243,
+              0.06185704100062139
+            ],
+            [
+              0.08035350000136532,
+              0.06152029099757783,
+              0.07393383300222922,
+              0.07437000000209082
+            ],
+            [
+              0.07267737499205396,
+              0.06580524999299087,
+              0.07819308301259298,
+              0.06589679200260434
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.19233099999998948,
+            0.23935699999994198,
+            0.1775770000000073
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      "checkout:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            0.32516287500038743,
+            0.33220074999553617,
+            0.3205265419965144
+          ],
+          "job_seconds": [
+            [
+              0.3244964999903459,
+              0.32323633300256915,
+              0.316145457996754,
+              0.32244645900209434,
+              0.3090190830116626,
+              0.31480579200433567,
+              0.3077411249978468,
+              0.2916333329922054
+            ],
+            [
+              0.3261549169983482,
+              0.2953917919949163,
+              0.32248454198997933,
+              0.32346412500191946,
+              0.30410908300837036,
+              0.32503537498996593,
+              0.3226355840015458,
+              0.32353670899465214
+            ],
+            [
+              0.3033945409988519,
+              0.2862279999972088,
+              0.31242845799715724,
+              0.3169528750004247,
+              0.3158307080011582,
+              0.28786816701176576,
+              0.31733266699302476,
+              0.28726933398866095
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.19,
+            2.0700000000000003,
+            2.15
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "git-shallow": {
+          "seconds": [
+            0.4193553749937564,
+            0.4160365839925362,
+            0.6575598339986755
+          ],
+          "job_seconds": [
+            [
+              0.36394004100293387,
+              0.3990297910058871,
+              0.41726495799957775,
+              0.41143562500656117,
+              0.3992130419937894,
+              0.41002675000345334,
+              0.4182541659974959,
+              0.41856862499844283
+            ],
+            [
+              0.4060787500056904,
+              0.4094849579996662,
+              0.412384416005807,
+              0.35160704200097825,
+              0.41297537500213366,
+              0.4128621249983553,
+              0.40743620799912605,
+              0.36040974999195896
+            ],
+            [
+              0.3890374999900814,
+              0.6547560829931172,
+              0.4336953750025714,
+              0.4538937920005992,
+              0.43797370900574606,
+              0.45152974998927675,
+              0.5537489999987883,
+              0.44770941699971445
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            3.1100000000000003,
+            2.97,
+            3.1300000000000003
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            2.0
+          ]
+        },
+        "git-partial": {
+          "seconds": [
+            1.126752582989866,
+            0.9931693750113482,
+            0.9815620419976767
+          ],
+          "job_seconds": [
+            [
+              1.0182259579887614,
+              1.1259848750050878,
+              1.0154060420027236,
+              0.9910469580063364,
+              0.9748007500020321,
+              0.9534237920015585,
+              1.0684107919951202,
+              0.9753436250030063
+            ],
+            [
+              0.8831731249956647,
+              0.8902983339939965,
+              0.8505262919934466,
+              0.9921789159998298,
+              0.9258580839959905,
+              0.9558667499950388,
+              0.860041124993586,
+              0.8975938340008724
+            ],
+            [
+              0.8623402920056833,
+              0.9807925829954911,
+              0.918531957999221,
+              0.8512288749916479,
+              0.9161502919887425,
+              0.899733832993661,
+              0.9002061670034891,
+              0.8992858340061503
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.45,
+            7.609999999999999,
+            7.4799999999999995
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            3.0,
+            2.0,
+            2.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            1.5959277500078315,
+            1.5328639579965966,
+            1.6671952909964602
+          ],
+          "job_seconds": [
+            [
+              1.558145166010945,
+              1.5951716249983292,
+              1.565796709008282,
+              1.5435689589940012,
+              1.5697319579921896,
+              1.5481902500032447,
+              1.537488250003662,
+              1.4780013329873327
+            ],
+            [
+              1.4836096669896506,
+              1.477184125003987,
+              1.4268520420009736,
+              1.532128125007148,
+              1.5288098750024801,
+              1.4481460839888314,
+              1.4444782500067959,
+              1.457097624996095
+            ],
+            [
+              1.629014999998617,
+              1.6663394159986638,
+              1.5407752500032075,
+              1.6121826250018785,
+              1.6664229169982718,
+              1.5847757500014268,
+              1.6663359160011169,
+              1.6666318330098875
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            12.1,
+            11.489999999999998,
+            12.68
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            4.0,
+            3.0,
+            4.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.2645816660078708,
+            0.27936654099903535,
+            0.27188133299932815
+          ],
+          "job_seconds": [
+            [
+              0.24906183399434667,
+              0.1776336250040913,
+              0.19102329199085943,
+              0.25173225000617094,
+              0.2029635840008268,
+              0.25381945799745154,
+              0.2525174999900628,
+              0.2639491660083877
+            ],
+            [
+              0.21059566699841525,
+              0.25454137499036733,
+              0.26770345799741335,
+              0.26575016700371634,
+              0.27875841700006276,
+              0.24923016599495895,
+              0.18613429099787027,
+              0.2785040000017034
+            ],
+            [
+              0.2567221659992356,
+              0.19585058400116395,
+              0.24274008300562855,
+              0.23110400000587106,
+              0.2676113329944201,
+              0.26687504099390935,
+              0.25682041700929403,
+              0.18712429200240877
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.014070000000022,
+            1.0820519999999805,
+            1.051692999999998
+          ],
+          "object_gets": [
+            856.0,
+            856.0,
+            856.0
+          ],
+          "metadata_calls": [
+            1009.0,
+            1008.0,
+            1009.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.20653970800049137,
+            0.23307945800479501,
+            0.22059983300277963
+          ],
+          "job_seconds": [
+            [
+              0.18744574999436736,
+              0.18805158299801406,
+              0.15961045800941065,
+              0.19717737499740906,
+              0.18406691699055955,
+              0.18748916700133123,
+              0.2012937499966938,
+              0.20088087499607354
+            ],
+            [
+              0.21892641601152718,
+              0.18717129100696184,
+              0.2148370830109343,
+              0.22414191698771901,
+              0.21878116599691566,
+              0.21885583299444988,
+              0.20270283399440814,
+              0.2144473329972243
+            ],
+            [
+              0.21715458399557974,
+              0.1759760420100065,
+              0.1923886250006035,
+              0.21856949999346398,
+              0.1933633330045268,
+              0.19425454099837225,
+              0.20854804199188948,
+              0.19504466699436307
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.0703050000000243,
+            0.9506459999999537,
+            0.9603159999999235
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      "query:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.02303891599876806,
+            0.021885167006985284,
+            0.022242749997531064
+          ],
+          "job_seconds": [
+            [
+              0.02281245899212081
+            ],
+            [
+              0.021645958011504263
+            ],
+            [
+              0.022019083000486717
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.1039288750034757,
+            0.10626120799861383,
+            0.11457833400345407
+          ],
+          "job_seconds": [
+            [
+              0.10371075000148267
+            ],
+            [
+              0.10598229200695641
+            ],
+            [
+              0.114345082998625
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.05436400000002095,
+            0.07791999999996335,
+            0.0566239999999425
+          ],
+          "object_gets": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "metadata_calls": [
+            101.0,
+            102.0,
+            101.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.0829503749992,
+            0.07822295799269341,
+            0.0778622079960769
+          ],
+          "job_seconds": [
+            [
+              0.08271462499396876
+            ],
+            [
+              0.07799308300309349
+            ],
+            [
+              0.0775057089922484
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.1256700000000226,
+            0.06355899999995529,
+            0.049090000000092004
+          ],
+          "object_gets": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "metadata_calls": [
+            102.0,
+            101.0,
+            102.0
+          ]
+        }
+      },
+      "query:apps/web/src/lib:concurrency=4": {
+        "git-mirror": {
+          "seconds": [
+            0.024892958987038583,
+            0.025488833009148948,
+            0.024338041999726556
+          ],
+          "job_seconds": [
+            [
+              0.02438891700876411,
+              0.02097912500903476,
+              0.022624666991760023,
+              0.02385337499435991
+            ],
+            [
+              0.02382616698741913,
+              0.024148583004716784,
+              0.024955792003311217,
+              0.023776499991072342
+            ],
+            [
+              0.023226666991831735,
+              0.023830082995118573,
+              0.022981874994002283,
+              0.023268041986739263
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.1251871660060715,
+            0.12962020799750462,
+            0.11831604200415313
+          ],
+          "job_seconds": [
+            [
+              0.11978100000123959,
+              0.12315904199203942,
+              0.12107649999961723,
+              0.11854233300255146
+            ],
+            [
+              0.12105816599796526,
+              0.12055366700224113,
+              0.1263662500132341,
+              0.1189386670012027
+            ],
+            [
+              0.1155587499961257,
+              0.11350395799672697,
+              0.11142362499958836,
+              0.11335066700121388
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.16942999999994868,
+            0.3155230000000131,
+            0.1675580000000707
+          ],
+          "object_gets": [
+            4.0,
+            4.0,
+            4.0
+          ],
+          "metadata_calls": [
+            405.0,
+            404.0,
+            405.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.09756454099260736,
+            0.10784187499666587,
+            0.0921510829939507
+          ],
+          "job_seconds": [
+            [
+              0.09428070799913257,
+              0.09576820900838356,
+              0.09443641599500552,
+              0.09563195800001267
+            ],
+            [
+              0.10561604201211594,
+              0.10578770899155643,
+              0.10629858299216721,
+              0.10678124999685679
+            ],
+            [
+              0.08899716699670535,
+              0.08943754198844545,
+              0.08873387500352692,
+              0.09136454100371338
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.15541799999995476,
+            0.25649500000003833,
+            0.1426479999999657
+          ],
+          "object_gets": [
+            4.0,
+            4.0,
+            4.0
+          ],
+          "metadata_calls": [
+            404.0,
+            404.0,
+            404.0
+          ]
+        }
+      },
+      "query:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            0.03238899999996647,
+            0.03225383401149884,
+            0.03352199999790173
+          ],
+          "job_seconds": [
+            [
+              0.024180459004128352,
+              0.021850250006536953,
+              0.023324541994952597,
+              0.026383292002719827,
+              0.023202750002383254,
+              0.02229441599047277,
+              0.027182790989172645,
+              0.027125207998324186
+            ],
+            [
+              0.02436016699357424,
+              0.028315333009231836,
+              0.03153187500720378,
+              0.02461375000711996,
+              0.028591875001438893,
+              0.02462033400661312,
+              0.02736558299511671,
+              0.027295917010633275
+            ],
+            [
+              0.03279666700109374,
+              0.025040583001100458,
+              0.029475374991307035,
+              0.022664750009425916,
+              0.025262541996198706,
+              0.029254915993078612,
+              0.02339229200151749,
+              0.02832775001297705
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.1583305410022149,
+            0.15035104200069327,
+            0.15308004200051073
+          ],
+          "job_seconds": [
+            [
+              0.15026154200313613,
+              0.15050108300056309,
+              0.15137629199307412,
+              0.14211429200076964,
+              0.14630654100619722,
+              0.1491003749979427,
+              0.15392995800357312,
+              0.14680116600356996
+            ],
+            [
+              0.14451758300128859,
+              0.13682137499563396,
+              0.1344768330018269,
+              0.1412064169999212,
+              0.13861237501259893,
+              0.13338854200264905,
+              0.140485500000068,
+              0.13761116699606646
+            ],
+            [
+              0.14968220799346454,
+              0.14123270800337195,
+              0.1501053329993738,
+              0.15239291699253954,
+              0.14399774999765214,
+              0.14443566699628718,
+              0.14260370800911915,
+              0.14261162499315105
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.3103320000000025,
+            0.3002360000000266,
+            0.3345969999999596
+          ],
+          "object_gets": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "metadata_calls": [
+            808.0,
+            808.0,
+            809.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.11241495799913537,
+            0.13259062499855645,
+            0.11015708299237303
+          ],
+          "job_seconds": [
+            [
+              0.10610683298727963,
+              0.10513312500552274,
+              0.10364162501355167,
+              0.10959533300774638,
+              0.10630629200022668,
+              0.10717187500267755,
+              0.10922887499327771,
+              0.10489287500968203
+            ],
+            [
+              0.12014524999540299,
+              0.12111866699706297,
+              0.12169133299903478,
+              0.12178304100234527,
+              0.11916550000023562,
+              0.13173329200071748,
+              0.1303615409997292,
+              0.12574312499782536
+            ],
+            [
+              0.1087157090078108,
+              0.10703795800509397,
+              0.10352874999807682,
+              0.10329104200354777,
+              0.10512512498826254,
+              0.10406858299393207,
+              0.10472537500027101,
+              0.10374070900434162
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.2968519999999817,
+            0.31963599999998316,
+            0.3024119999999275
+          ],
+          "object_gets": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "metadata_calls": [
+            809.0,
+            809.0,
+            808.0
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.42077320799580775,
+            0.6126190829963889,
+            0.41678337499615736
+          ],
+          "job_seconds": [
+            [
+              0.420537083002273
+            ],
+            [
+              0.612393624993274
+            ],
+            [
+              0.41655837500002235
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.42000000000000004,
+            0.51,
+            0.41000000000000003
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.41673387501214165,
+            0.5934435419912916,
+            0.43079783298890106
+          ],
+          "job_seconds": [
+            [
+              0.4164921250048792
+            ],
+            [
+              0.593144124999526
+            ],
+            [
+              0.4304349580052076
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.4,
+            0.52,
+            0.42000000000000004
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.15514170899405144,
+            0.26215316700108815,
+            0.15569408300507348
+          ],
+          "job_seconds": [
+            [
+              0.154918500003987
+            ],
+            [
+              0.26182008399337064
+            ],
+            [
+              0.15543483399960678
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.162306000000072,
+            0.45234800000000974,
+            0.15370200000002399
+          ],
+          "object_gets": [
+            107.0,
+            107.0,
+            107.0
+          ],
+          "metadata_calls": [
+            160.0,
+            161.0,
+            161.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.10290841700043529,
+            0.13400258299952839,
+            0.11070083300000988
+          ],
+          "job_seconds": [
+            [
+              0.10260412500065286
+            ],
+            [
+              0.13375383299717214
+            ],
+            [
+              0.11046420899219811
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.10504900000001705,
+            0.10304899999999861,
+            0.06991800000003856
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            39.0,
+            38.0,
+            40.0
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=4": {
+        "git-mirror": {
+          "seconds": [
+            0.5971962089970475,
+            0.605644499999471,
+            0.6303672079957323
+          ],
+          "job_seconds": [
+            [
+              0.5951377089950256,
+              0.593780458002584,
+              0.5961777920019813,
+              0.5968195419991389
+            ],
+            [
+              0.6046002079965547,
+              0.6051480419992004,
+              0.6047027909953613,
+              0.6049414169974625
+            ],
+            [
+              0.6292549589998089,
+              0.6291514589975122,
+              0.6290857499989215,
+              0.6299764159921324
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.4000000000000004,
+            2.4400000000000004,
+            2.5100000000000007
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            2.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.6059139580029296,
+            0.6184843329974683,
+            0.7396584999951301
+          ],
+          "job_seconds": [
+            [
+              0.6025879170047119,
+              0.6045268750021933,
+              0.6024744589958573,
+              0.6051220410008682
+            ],
+            [
+              0.617573291005101,
+              0.6175382499932311,
+              0.6142688750114758,
+              0.6181097079970641
+            ],
+            [
+              0.7364102079882286,
+              0.7389372920006281,
+              0.739026459006709,
+              0.7389036669919733
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.4300000000000006,
+            2.4800000000000004,
+            2.83
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            3.0,
+            2.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.23315770900808275,
+            0.23956691699277144,
+            0.2863976660009939
+          ],
+          "job_seconds": [
+            [
+              0.22132412499922793,
+              0.22659608299727552,
+              0.22906145900196861,
+              0.22745295900676865
+            ],
+            [
+              0.22503599998890422,
+              0.23905624999315478,
+              0.2241708329966059,
+              0.2333837920014048
+            ],
+            [
+              0.28247633400314953,
+              0.28303612500894815,
+              0.28507012501358986,
+              0.28507304200320505
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.488241999999957,
+            0.656786000000082,
+            0.729241000000024
+          ],
+          "object_gets": [
+            428.0,
+            428.0,
+            428.0
+          ],
+          "metadata_calls": [
+            638.0,
+            637.0,
+            642.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.14348308400076348,
+            0.14897641600691713,
+            0.16281000000890344
+          ],
+          "job_seconds": [
+            [
+              0.140325833010138,
+              0.13907637499505654,
+              0.13684749999083579,
+              0.13278541699401103
+            ],
+            [
+              0.1397058750008,
+              0.1475516670034267,
+              0.1460001669911435,
+              0.1445091249916004
+            ],
+            [
+              0.15640612499555573,
+              0.15889837499707937,
+              0.1610801249917131,
+              0.1561301669862587
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.33804399999998846,
+            0.2412960000000561,
+            0.41459100000000415
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            155.0,
+            155.0,
+            155.0
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            1.0767527499992866,
+            1.0338180830003694,
+            1.0573132090066792
+          ],
+          "job_seconds": [
+            [
+              1.0681987499992829,
+              1.0742577920027543,
+              1.0569033749925438,
+              1.0635562499955995,
+              1.0525002500071423,
+              1.0524052499968093,
+              1.072512333994382,
+              1.0760329170007026
+            ],
+            [
+              1.0328848750068573,
+              1.0104890410002554,
+              1.017246333998628,
+              1.0096392919949722,
+              1.0319856660062214,
+              1.0218258750101086,
+              1.008622707988252,
+              1.0241301249916432
+            ],
+            [
+              1.0482252080109902,
+              1.0495605420001084,
+              1.0441671659937128,
+              1.0458247079950524,
+              1.0487494580011116,
+              1.048293375002686,
+              1.0466508329991484,
+              1.0506930410047062
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.63,
+            8.11,
+            8.440000000000001
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            3.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            1.0967848330037668,
+            1.071858750001411,
+            1.054929459001869
+          ],
+          "job_seconds": [
+            [
+              1.0944470829999773,
+              1.0945694169931812,
+              1.094153333993745,
+              1.0889856249996228,
+              1.094619709008839,
+              1.091012500008219,
+              1.093188916987856,
+              1.0960390420077601
+            ],
+            [
+              1.0710325830004876,
+              1.064680708994274,
+              1.0663801669870736,
+              1.062189790987759,
+              1.066235250007594,
+              1.0621979580027983,
+              1.066113791996031,
+              1.064670332998503
+            ],
+            [
+              1.042164792001131,
+              1.042026666997117,
+              1.0426431660016533,
+              1.0286604580032872,
+              1.0483919589896686,
+              1.0501811249996535,
+              1.015204041992547,
+              1.042380917002447
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.780000000000001,
+            8.47,
+            8.26
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            3.0,
+            2.0,
+            2.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.3554126660019392,
+            0.32905808299256023,
+            0.31776595799601637
+          ],
+          "job_seconds": [
+            [
+              0.34623787499731407,
+              0.3184122500097146,
+              0.3486249159905128,
+              0.33477220800705254,
+              0.344001625009696,
+              0.32704691600520164,
+              0.3363774169993121,
+              0.32890291599323973
+            ],
+            [
+              0.29366000001027714,
+              0.313438249999308,
+              0.3243968750030035,
+              0.31309437500021886,
+              0.3173420000093756,
+              0.31452762499975506,
+              0.2981576669990318,
+              0.31162545799452346
+            ],
+            [
+              0.3125072090042522,
+              0.30646783400152344,
+              0.2935837499971967,
+              0.2874930420075543,
+              0.3015456669963896,
+              0.3097562500042841,
+              0.30626762499741744,
+              0.2875717090064427
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.2721790000000295,
+            1.065624999999996,
+            1.157753999999996
+          ],
+          "object_gets": [
+            856.0,
+            856.0,
+            856.0
+          ],
+          "metadata_calls": [
+            1274.0,
+            1274.0,
+            1274.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.2324312090058811,
+            0.2367625000042608,
+            0.22335916600422934
+          ],
+          "job_seconds": [
+            [
+              0.218121957994299,
+              0.2010325000010198,
+              0.21635395799239632,
+              0.21296645801339764,
+              0.22326008300296962,
+              0.2255022919998737,
+              0.22696558300231118,
+              0.22370125001179986
+            ],
+            [
+              0.22286237501248252,
+              0.22348554099153262,
+              0.22901045900653116,
+              0.23332316700543743,
+              0.2127967910055304,
+              0.23540562500420492,
+              0.19870116699894425,
+              0.23615266699925996
+            ],
+            [
+              0.2109959160006838,
+              0.18010783300269395,
+              0.19236600000294857,
+              0.2189110420003999,
+              0.21639612500439398,
+              0.21037354199506808,
+              0.21610291600518394,
+              0.192216625000583
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.5319129999998714,
+            0.5752019999999711,
+            0.5349259999999932
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            308.0,
+            305.0,
+            306.0
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.23450466599024367,
+            0.24304616700101178,
+            0.2301934999995865
+          ],
+          "job_seconds": [
+            [
+              0.23425566700461786
+            ],
+            [
+              0.2428191670041997
+            ],
+            [
+              0.22999049999634735
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.2,
+            0.21000000000000002,
+            0.2
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        },
+        "git-shallow": {
+          "seconds": [
+            0.6940081250068033,
+            0.7033660410088487,
+            0.695515790997888
+          ],
+          "job_seconds": [
+            [
+              0.6937918340117903
+            ],
+            [
+              0.7031410420022439
+            ],
+            [
+              0.6952738749969285
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.15,
+            1.16,
+            1.15
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            1.0
+          ]
+        },
+        "git-partial": {
+          "seconds": [
+            1.1419053339923266,
+            1.1501909169892315,
+            1.1476633329875767
+          ],
+          "job_seconds": [
+            [
+              1.1416777089907555
+            ],
+            [
+              1.1499998340004822
+            ],
+            [
+              1.147454749996541
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.14,
+            2.16,
+            2.18
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            3.0,
+            3.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.5893089579913067,
+            0.5806778750120429,
+            0.5829559580015484
+          ],
+          "job_seconds": [
+            [
+              0.5891042500006733
+            ],
+            [
+              0.580460375000257
+            ],
+            [
+              0.582755333991372
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.56,
+            0.55,
+            0.55
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.8652975000004517,
+            0.8666809999995166,
+            0.8855022500065388
+          ],
+          "job_seconds": [
+            [
+              0.8650712079979712
+            ],
+            [
+              0.8664761660038494
+            ],
+            [
+              0.8852973750035744
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.594717999999931,
+            1.6231889999999647,
+            1.713506000000001
+          ],
+          "object_gets": [
+            1521.0,
+            1521.0,
+            1521.0
+          ],
+          "metadata_calls": [
+            1769.0,
+            1769.0,
+            1770.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.3586597499961499,
+            0.3575801250117365,
+            0.4560163339920109
+          ],
+          "job_seconds": [
+            [
+              0.35848695901222527
+            ],
+            [
+              0.357366208001622
+            ],
+            [
+              0.45579708300647326
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.4773360000000513,
+            0.44824399999993547,
+            0.46769600000000233
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=4": {
+        "git-mirror": {
+          "seconds": [
+            0.44776487500348594,
+            0.43501504200685304,
+            0.4194249580032192
+          ],
+          "job_seconds": [
+            [
+              0.44581483300135005,
+              0.4457850420003524,
+              0.4459916659980081,
+              0.44735795800806955
+            ],
+            [
+              0.4345422909973422,
+              0.43434145899664145,
+              0.430804250005167,
+              0.4346157090039924
+            ],
+            [
+              0.4161443339980906,
+              0.4186819160095183,
+              0.416148999996949,
+              0.41894679100369103
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.4,
+            1.27,
+            1.29
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "git-shallow": {
+          "seconds": [
+            0.9571089999953983,
+            0.9849940419953782,
+            1.0183970840007532
+          ],
+          "job_seconds": [
+            [
+              0.9409337499964749,
+              0.9422602500126231,
+              0.9553039169986732,
+              0.9387667499977397
+            ],
+            [
+              0.9844443329930073,
+              0.9827257920114789,
+              0.9802289159997599,
+              0.9829648330050986
+            ],
+            [
+              0.9649417500040727,
+              0.9762628749886062,
+              1.0177297500049463,
+              1.007011749999947
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            5.220000000000001,
+            5.28,
+            5.430000000000001
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        },
+        "git-partial": {
+          "seconds": [
+            1.6794054170022719,
+            1.5233385840110714,
+            1.5115232919924892
+          ],
+          "job_seconds": [
+            [
+              1.6787852919951547,
+              1.676998334005475,
+              1.6781213329959428,
+              1.6008731670008274
+            ],
+            [
+              1.5151876249874476,
+              1.4881030000105966,
+              1.522725957998773,
+              1.4883105409971904
+            ],
+            [
+              1.4930457919981563,
+              1.5020205839973642,
+              1.5078554999927292,
+              1.5111527080007363
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.45,
+            8.34,
+            8.379999999999999
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            5.0,
+            4.0,
+            3.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.9986519999947632,
+            0.9939568749978207,
+            0.9384045420010807
+          ],
+          "job_seconds": [
+            [
+              0.9980880420043832,
+              0.9943129169987515,
+              0.9947375409974484,
+              0.9981406250008149
+            ],
+            [
+              0.9906364580092486,
+              0.9911431249929592,
+              0.993333917009295,
+              0.9934145000006538
+            ],
+            [
+              0.8947037920006551,
+              0.9378538750024745,
+              0.8949629999988247,
+              0.8974754999944707
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            3.5599999999999996,
+            3.44,
+            3.19
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            3.0,
+            3.0,
+            2.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            1.6156311669910792,
+            1.564297416000045,
+            1.6390522500005318
+          ],
+          "job_seconds": [
+            [
+              1.5935323750018142,
+              1.5898681249964284,
+              1.5858587910042843,
+              1.615185417002067
+            ],
+            [
+              1.561072750002495,
+              1.544565916992724,
+              1.5176142080017598,
+              1.519804290990578
+            ],
+            [
+              1.6164132080011768,
+              1.5705894169950625,
+              1.6375735839974368,
+              1.616555917004007
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            7.755468999999994,
+            7.440307000000004,
+            8.44261000000003
+          ],
+          "object_gets": [
+            6084.0,
+            6084.0,
+            6084.0
+          ],
+          "metadata_calls": [
+            7071.0,
+            7072.0,
+            7073.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.7052785420091823,
+            0.8749319589987863,
+            0.8898437920142896
+          ],
+          "job_seconds": [
+            [
+              0.690626791008981,
+              0.6849942499975441,
+              0.7020155830105068,
+              0.7049146669887705
+            ],
+            [
+              0.8704253750038333,
+              0.8741317499952856,
+              0.8735157079936471,
+              0.874384499998996
+            ],
+            [
+              0.8892372499976773,
+              0.8888137080066372,
+              0.8888831670046784,
+              0.8895104580005864
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.4921180000000014,
+            2.6328670000000223,
+            2.654681000000089
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            0.9630424589995528,
+            1.0083617079944815,
+            1.0644771669904003
+          ],
+          "job_seconds": [
+            [
+              0.8524810420058202,
+              0.9586251250002533,
+              0.9622812919988064,
+              0.9479263329994865,
+              0.9316359579970594,
+              0.9536664999905042,
+              0.8713822919962695,
+              0.8536246250005206
+            ],
+            [
+              1.0060898329975316,
+              0.9948091669939458,
+              0.9578885420050938,
+              1.0039299580093939,
+              0.9282254159916192,
+              0.9293384999909904,
+              1.0050971249875147,
+              1.0042819579975912
+            ],
+            [
+              1.0271000830107369,
+              1.06372916699911,
+              1.0140652080008294,
+              1.0516138749953825,
+              1.0613984169904143,
+              1.0119811659969855,
+              1.0560059580020607,
+              1.0637423749867594
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            5.83,
+            6.3100000000000005,
+            6.64
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        },
+        "git-shallow": {
+          "seconds": [
+            1.9246022919978714,
+            1.682531291997293,
+            1.8102657919953344
+          ],
+          "job_seconds": [
+            [
+              1.8792210840038024,
+              1.9239095840021037,
+              1.9130770830088295,
+              1.8971877080039121,
+              1.89114416600205,
+              1.8981907499983208,
+              1.9181680829933612,
+              1.634539083999698
+            ],
+            [
+              1.5205669999995735,
+              1.6649560419900808,
+              1.5183969589998014,
+              1.6520509580004727,
+              1.668232916999841,
+              1.6335434579959838,
+              1.6795359999960056,
+              1.681966249991092
+            ],
+            [
+              1.8032182500028284,
+              1.8082188749976922,
+              1.7226362080109539,
+              1.7921395000012126,
+              1.7881754170084605,
+              1.8032512500067241,
+              1.757802250009263,
+              1.8007701250026003
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            14.040000000000001,
+            13.34,
+            14.39
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            4.0,
+            5.0,
+            4.0
+          ]
+        },
+        "git-partial": {
+          "seconds": [
+            2.30096966700512,
+            2.1829760419932427,
+            2.1401410839898745
+          ],
+          "job_seconds": [
+            [
+              2.298368957999628,
+              2.288387792010326,
+              2.2996175000007497,
+              2.2932030000083614,
+              2.3001969160104636,
+              2.2612604160094634,
+              2.28628783300519,
+              2.1663301670050714
+            ],
+            [
+              2.0317495000053896,
+              2.1741643749992363,
+              1.9374027909943834,
+              2.179037541995058,
+              2.1821794580027927,
+              2.15323012501176,
+              2.1170512499957113,
+              2.1191862920095446
+            ],
+            [
+              2.1169181669974932,
+              2.0725325000094017,
+              2.116610541008413,
+              2.1333554169978015,
+              2.132297624993953,
+              2.093811334008933,
+              1.8748032079893164,
+              2.139627290991484
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            19.209999999999997,
+            18.17,
+            17.91
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            5.0,
+            5.0,
+            4.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            2.231674208000186,
+            2.2707598749984754,
+            2.241096625002683
+          ],
+          "job_seconds": [
+            [
+              2.0713325000106124,
+              2.169535332999658,
+              2.228422665997641,
+              2.1323692909936653,
+              2.132574333998491,
+              2.138059290999081,
+              2.2284432080050465,
+              2.16977812499681
+            ],
+            [
+              2.2384035830036737,
+              2.2432518749992596,
+              2.225635709008202,
+              2.2664268749940675,
+              2.2373771669954294,
+              2.266178417004994,
+              2.2388997079979163,
+              2.27018591700471
+            ],
+            [
+              2.2216706670005806,
+              2.1868562500021653,
+              2.205231375002768,
+              2.2245434999931604,
+              2.231995999987703,
+              2.2377617079910124,
+              1.908933792001335,
+              2.2325577500014333
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            15.99,
+            16.290000000000003,
+            15.23
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            4.0,
+            5.0,
+            6.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            3.131906249996973,
+            2.7213678330008406,
+            2.695080457997392
+          ],
+          "job_seconds": [
+            [
+              3.084316624997882,
+              3.100790957993013,
+              3.1231463750009425,
+              3.1185472500073956,
+              3.0433935830078553,
+              3.1164671670121606,
+              3.071911999999429,
+              3.116965709006763
+            ],
+            [
+              2.5574865420057904,
+              2.7193735409964575,
+              2.713061957998434,
+              2.7141839579999214,
+              2.4977359159966,
+              2.6791375000029802,
+              2.655678875002195,
+              2.6244672080065357
+            ],
+            [
+              2.6372171249968233,
+              2.6892024589906214,
+              2.6667111669958103,
+              2.669608165990212,
+              2.557109458008199,
+              2.6846180830034427,
+              2.4580519589944743,
+              2.3962039159960113
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            21.54735400000001,
+            16.815795999999956,
+            16.65950500000004
+          ],
+          "object_gets": [
+            12168.0,
+            12168.0,
+            12168.0
+          ],
+          "metadata_calls": [
+            14142.0,
+            14142.0,
+            14143.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            2.4268656249914784,
+            2.4942839589930372,
+            2.3454344579949975
+          ],
+          "job_seconds": [
+            [
+              2.4240478339925176,
+              2.4051837920123944,
+              2.410552417000872,
+              2.4245577909896383,
+              2.4226967499998864,
+              2.4155303340085084,
+              2.4009126249875408,
+              2.4201880830078153
+            ],
+            [
+              2.454602874990087,
+              2.4551880420040106,
+              2.490439332992537,
+              2.4842479579965584,
+              2.4910573749948526,
+              2.4837320829974487,
+              2.457405959008611,
+              2.491885374998674
+            ],
+            [
+              2.343292499994277,
+              2.341402250007377,
+              2.338185375003377,
+              2.343092084003729,
+              2.342021999997087,
+              2.3433669170044595,
+              2.344695874999161,
+              2.3434599580068607
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            17.218039999999995,
+            17.348148000000045,
+            12.867034999999944
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            6.0,
+            5.0,
+            5.0
+          ]
+        }
+      },
+      "commit:apps/web:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.45180416699440684,
+            0.5673826249985723,
+            0.5666246250038967
+          ],
+          "job_seconds": [
+            [
+              0.451562083006138
+            ],
+            [
+              0.5671614589955425
+            ],
+            [
+              0.5663812080019852
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.44,
+            0.55,
+            0.56
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.5772487909998745,
+            0.5778057919960702,
+            0.5837007499940228
+          ],
+          "job_seconds": [
+            [
+              0.5770200410042889
+            ],
+            [
+              0.5775704589905217
+            ],
+            [
+              0.5834652500052471
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.56,
+            0.56,
+            0.58
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            1.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.9008358749997569,
+            0.8751138340012403,
+            0.8816759170003934
+          ],
+          "job_seconds": [
+            [
+              0.9005707500036806
+            ],
+            [
+              0.8748628329922212
+            ],
+            [
+              0.8814263329986716
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.304375000000057,
+            1.3882749999999715,
+            1.4764130000000433
+          ],
+          "object_gets": [
+            1521.0,
+            1521.0,
+            1521.0
+          ],
+          "metadata_calls": [
+            1742.0,
+            1742.0,
+            1742.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.2315313330036588,
+            0.23431283299578354,
+            0.23274429199227598
+          ],
+          "job_seconds": [
+            [
+              0.23123020799539518
+            ],
+            [
+              0.2340829169988865
+            ],
+            [
+              0.23248950000561308
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.2589120000000517,
+            0.26629999999992976,
+            0.26030299999989
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            29.0,
+            30.0,
+            30.0
+          ]
+        }
+      },
+      "commit:apps/web:concurrency=4": {
+        "git-mirror": {
+          "seconds": [
+            0.7434267090138746,
+            0.7913262500078417,
+            0.83257929199317
+          ],
+          "job_seconds": [
+            [
+              0.7428467080026167,
+              0.7422992079955293,
+              0.7420859580015531,
+              0.742390458995942
+            ],
+            [
+              0.7903444169933209,
+              0.7907575410063146,
+              0.7902510830026586,
+              0.7903053750051185
+            ],
+            [
+              0.8291821250022622,
+              0.8299509170028614,
+              0.8270261249999749,
+              0.8313416669989238
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.99,
+            3.1500000000000004,
+            2.7699999999999996
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.7666962090006564,
+            0.6861817500030156,
+            0.7818449159967713
+          ],
+          "job_seconds": [
+            [
+              0.7661314169963589,
+              0.7657626250002068,
+              0.7656430839997483,
+              0.765859167004237
+            ],
+            [
+              0.6841003750014352,
+              0.6842839590099175,
+              0.6840961249981774,
+              0.6857020000024932
+            ],
+            [
+              0.7788330409966875,
+              0.777623959002085,
+              0.7812409579928499,
+              0.7814875000040047
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            3.1,
+            2.7699999999999996,
+            3.12
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            2.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            1.5329387079982553,
+            1.9504963330109604,
+            1.6000937079952564
+          ],
+          "job_seconds": [
+            [
+              1.5297066249913769,
+              1.5113762080000015,
+              1.5297411250066943,
+              1.510421375001897
+            ],
+            [
+              1.9437691250059288,
+              1.9442174580035498,
+              1.9473070419917349,
+              1.9459705420013051
+            ],
+            [
+              1.594226000001072,
+              1.5847634590027155,
+              1.5996123329969123,
+              1.591553375008516
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            6.433462000000012,
+            8.520330999999985,
+            6.94382100000008
+          ],
+          "object_gets": [
+            6084.0,
+            6084.0,
+            6084.0
+          ],
+          "metadata_calls": [
+            6963.0,
+            6961.0,
+            6963.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.3439221250009723,
+            0.33422245900146663,
+            0.3390091249893885
+          ],
+          "job_seconds": [
+            [
+              0.33960195899999235,
+              0.34075175000180025,
+              0.34222058299928904,
+              0.342330999992555
+            ],
+            [
+              0.3277922499983106,
+              0.3335368749976624,
+              0.33046537499467377,
+              0.33303333300864324
+            ],
+            [
+              0.33844133400998544,
+              0.3380837500008056,
+              0.33592329200473614,
+              0.33147016700240783
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.1950519999999831,
+            1.3394539999999897,
+            1.2380720000000511
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            120.0,
+            114.0,
+            116.0
+          ]
+        }
+      },
+      "commit:apps/web:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            1.0110314160119742,
+            1.1186423750041286,
+            1.21898937500373
+          ],
+          "job_seconds": [
+            [
+              0.9706234999903245,
+              1.0102242499997374,
+              0.8870518750045449,
+              0.8863950829982059,
+              0.969674958003452,
+              0.9697891249961685,
+              0.9682389999943553,
+              0.9699798749934416
+            ],
+            [
+              1.1166839170036837,
+              0.8906879170099273,
+              0.8862502499978291,
+              1.116913542005932,
+              1.1151346249971539,
+              1.1164699999935692,
+              1.1164401249989169,
+              1.1181313340057386
+            ],
+            [
+              1.2069941660010954,
+              1.205797665999853,
+              1.2072004999936325,
+              1.20674045899068,
+              1.1997862499993062,
+              1.2016510829998879,
+              1.2059850840014406,
+              1.2073557089897804
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            7.5600000000000005,
+            8.41,
+            9.69
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            3.0,
+            4.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            1.127172625012463,
+            1.255761459004134,
+            1.1571435839869082
+          ],
+          "job_seconds": [
+            [
+              1.122212208007113,
+              1.1172331669949926,
+              1.116818249996868,
+              1.1194036249944475,
+              1.1161128749954514,
+              1.0493341670080554,
+              1.1171461659978377,
+              1.1212880829989444
+            ],
+            [
+              1.2447831669996958,
+              1.2500504580093548,
+              1.2543759999971371,
+              1.2542667080124374,
+              1.2494556660094531,
+              1.2444063340080902,
+              1.2499750420101918,
+              1.2544805409997934
+            ],
+            [
+              1.1520798749988899,
+              1.1243609590019332,
+              1.1509002079983475,
+              1.1419959170016227,
+              1.1140941250050673,
+              1.123067082997295,
+              1.1195527499949094,
+              1.1365353750006761
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.48,
+            10.0,
+            9.15
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            3.0,
+            3.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            2.5696675409999443,
+            2.692099292005878,
+            2.7645589590101736
+          ],
+          "job_seconds": [
+            [
+              2.568879416998243,
+              2.566468499993789,
+              2.5643034579989035,
+              2.5283658339903923,
+              2.5325419169967063,
+              2.5033628749952186,
+              2.560226874993532,
+              2.498021207997226
+            ],
+            [
+              2.661917250006809,
+              2.67958808298863,
+              2.681137834006222,
+              2.6889344160008477,
+              2.6513823330024024,
+              2.6616571659978945,
+              2.6712126250058645,
+              2.6201984169892967
+            ],
+            [
+              2.7635369170020567,
+              2.7596656669920776,
+              2.7603315000014845,
+              2.716056707999087,
+              2.760596207997878,
+              2.723973667001701,
+              2.756070167000871,
+              2.6859721659857314
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            15.159926000000025,
+            15.42253300000006,
+            14.985273000000053
+          ],
+          "object_gets": [
+            12168.0,
+            12168.0,
+            12168.0
+          ],
+          "metadata_calls": [
+            13922.0,
+            13920.0,
+            13922.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.6960575830016751,
+            0.6912529169931076,
+            0.6813250420091208
+          ],
+          "job_seconds": [
+            [
+              0.691339417011477,
+              0.693049624998821,
+              0.6702055830101017,
+              0.682275541999843,
+              0.6862092500086874,
+              0.6948693340091268,
+              0.6907187080068979,
+              0.6872391669894569
+            ],
+            [
+              0.6448812500020722,
+              0.6730746249959338,
+              0.6577557499986142,
+              0.6846359589981148,
+              0.6904305829957593,
+              0.6862865410075756,
+              0.6902358329971321,
+              0.6891154170007212
+            ],
+            [
+              0.6804817920055939,
+              0.6805093750008382,
+              0.6729952919995412,
+              0.6786591249983758,
+              0.6804853339999681,
+              0.6758905829919968,
+              0.6784892919968115,
+              0.6605220830097096
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            4.6740200000000485,
+            4.786298999999998,
+            4.627402000000061
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            228.0,
+            227.0,
+            233.0
+          ]
+        }
+      }
+    }
+  },
+  "seven_wave_confirmation": {
+    "method": "Concurrent CI workloads against a pinned Git mirror and a production Scion server.\n\nRuns sequential, randomized waves: implementations never compete with each other.\nGit uses a ready shared mirror (shared clones), plus fresh shallow/filtered clones.\nScion uses direct access and optionally one shared, prewarmed node daemon.\nAll setup needed by each checkout job is timed; fixture/service setup and validation are not.\n",
+    "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "concurrency": [
+      1,
+      8
+    ],
+    "runs": 7,
+    "summary": {
+      "checkout:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.10199862498848233,
+          "median_jobs_per_second": 9.804053732223545,
+          "job_p50_seconds": 0.10175604099640623,
+          "job_p95_seconds": 0.10818016600387637,
+          "median_accounted_cpu_seconds": 0.07,
+          "wave_range_seconds": [
+            0.09968104099971242,
+            0.10842925000179093
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.3568466669967165,
+          "median_jobs_per_second": 2.8023240581624975,
+          "job_p50_seconds": 0.35646229100530036,
+          "job_p95_seconds": 0.45010404200002085,
+          "median_accounted_cpu_seconds": 0.33,
+          "wave_range_seconds": [
+            0.3421362910012249,
+            0.45035320799797773
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.10973641600867268,
+          "median_jobs_per_second": 9.112745215963388,
+          "job_p50_seconds": 0.10951345799549017,
+          "job_p95_seconds": 0.1192576250032289,
+          "median_accounted_cpu_seconds": 0.13963299999999323,
+          "wave_range_seconds": [
+            0.10678404099598993,
+            0.11945470899809152
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.043535624994547106,
+          "median_jobs_per_second": 22.969694362381414,
+          "job_p50_seconds": 0.04329633399902377,
+          "job_p95_seconds": 0.04648454100242816,
+          "median_accounted_cpu_seconds": 0.051817000000110344,
+          "wave_range_seconds": [
+            0.042561082998872735,
+            0.04672704200493172
+          ]
+        }
+      },
+      "checkout:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 0.3333322499966016,
+          "median_jobs_per_second": 24.00007800049819,
+          "job_p50_seconds": 0.32302099999651546,
+          "job_p95_seconds": 0.5445205419964623,
+          "median_accounted_cpu_seconds": 2.2399999999999998,
+          "wave_range_seconds": [
+            0.32391037499473896,
+            0.698188583002775
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 1.547461750000366,
+          "median_jobs_per_second": 5.169756215297799,
+          "job_p50_seconds": 1.5103402704990003,
+          "job_p95_seconds": 1.6239320000022417,
+          "median_accounted_cpu_seconds": 11.67,
+          "wave_range_seconds": [
+            1.5095097080047708,
+            1.6370031670085154
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.2830158340075286,
+          "median_jobs_per_second": 28.26696968406082,
+          "job_p50_seconds": 0.2539668544923188,
+          "job_p95_seconds": 0.28780616700532846,
+          "median_accounted_cpu_seconds": 1.1112780000000453,
+          "wave_range_seconds": [
+            0.2614995409967378,
+            0.29395391599973664
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.2162981659930665,
+          "median_jobs_per_second": 36.98598165763663,
+          "job_p50_seconds": 0.195877666992601,
+          "job_p95_seconds": 0.22148645798733924,
+          "median_accounted_cpu_seconds": 0.9972389999999675,
+          "wave_range_seconds": [
+            0.1918323749996489,
+            0.2247638749977341
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.4242869159934344,
+          "median_jobs_per_second": 2.356895681448434,
+          "job_p50_seconds": 0.4240568329987582,
+          "job_p95_seconds": 0.5422577090066625,
+          "median_accounted_cpu_seconds": 0.41000000000000003,
+          "wave_range_seconds": [
+            0.4151109170052223,
+            0.5426335410011234
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.4385295420070179,
+          "median_jobs_per_second": 2.2803480819634196,
+          "job_p50_seconds": 0.43824733400833793,
+          "job_p95_seconds": 0.6253963339986512,
+          "median_accounted_cpu_seconds": 0.42000000000000004,
+          "wave_range_seconds": [
+            0.4197661250072997,
+            0.6259449579956708
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.1580885000003036,
+          "median_jobs_per_second": 6.3255708036832505,
+          "job_p50_seconds": 0.15783937500964385,
+          "job_p95_seconds": 0.24793870800931472,
+          "median_accounted_cpu_seconds": 0.16026499999998123,
+          "wave_range_seconds": [
+            0.15151774999685585,
+            0.24828708299901336
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.10701470899221022,
+          "median_jobs_per_second": 9.344509828763742,
+          "job_p50_seconds": 0.10672000001068227,
+          "job_p95_seconds": 0.2122419160004938,
+          "median_accounted_cpu_seconds": 0.10746700000004239,
+          "wave_range_seconds": [
+            0.09760233300039545,
+            0.21259562500927132
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 1.0596226250054315,
+          "median_jobs_per_second": 7.54985766744929,
+          "job_p50_seconds": 1.053246624993335,
+          "job_p95_seconds": 1.1181039579969365,
+          "median_accounted_cpu_seconds": 8.46,
+          "wave_range_seconds": [
+            1.043500125000719,
+            1.119821791013237
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 1.058796916011488,
+          "median_jobs_per_second": 7.555745468296395,
+          "job_p50_seconds": 1.054355124499125,
+          "job_p95_seconds": 1.0893088330049068,
+          "median_accounted_cpu_seconds": 8.33,
+          "wave_range_seconds": [
+            1.0357265419879695,
+            1.0912997919949703
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.33009241698891856,
+          "median_jobs_per_second": 24.23563701637098,
+          "job_p50_seconds": 0.31842737500119256,
+          "job_p95_seconds": 0.37779212500026915,
+          "median_accounted_cpu_seconds": 1.1083020000000159,
+          "wave_range_seconds": [
+            0.3208262499974808,
+            0.3796323749993462
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.21954720800567884,
+          "median_jobs_per_second": 36.43863236827439,
+          "job_p50_seconds": 0.21230749950336758,
+          "job_p95_seconds": 0.22641358300461434,
+          "median_accounted_cpu_seconds": 0.5351830000000851,
+          "wave_range_seconds": [
+            0.20626487499976065,
+            0.23042000000714324
+          ]
+        }
+      }
+    },
+    "validation": {
+      "git-mirror:apps/web/src/lib:files": 107,
+      "git-sparse-index:apps/web/src/lib:files": 314,
+      "direct:apps/web/src/lib:files": 107,
+      "daemon:apps/web/src/lib:files": 107,
+      "main_unchanged": true,
+      "all_waves_passed": true
+    },
+    "setup": {
+      "git_receiver_seconds": 0.07112179200339597,
+      "git_commit_graph": true,
+      "git_receiver_refs": 1,
+      "git_mirror_object_bytes": 1594959160,
+      "daemon_prime_seconds:apps/web/src/lib": 0.05238637499860488,
+      "daemon_cache_bytes_after": 123589111
+    },
+    "warmups": 2,
+    "client_sha256": "cd1b6bb894b331487d5058670809ee8e95e62cfa4d93390890d978f6be7cc7b3",
+    "workspace_revision_at_run": "8714571aaea62b5984514b1d6c19c80ad005e533",
+    "containers": [
+      "scion-t3code-sanity-cockroach-1",
+      "scion-t3code-sanity-minio-1"
+    ],
+    "limitations": [
+      "Single machine and one authoritative Scion server; concurrency scaling, not horizontal scaling.",
+      "Operating-system caches are warm; daemon priming is recorded separately, not called cold.",
+      "CPU includes Git child processes and Scion client/server/daemon; dedicated backend CPU is included only with --containers.",
+      "Container CPU snapshots include background work and small observer overhead; container memory includes page cache and is sampled only at wave boundaries.",
+      "RPC payload counters exclude transport framing and TLS; Git pack bytes are on-disk received sizes, not NIC bytes.",
+      "Git shared-clone jobs borrow objects from a ready local mirror; partial clones transfer their own objects.",
+      "git-sparse-index uses cone mode and includes ancestor-directory files; its extra files and bytes are reported.",
+      "Git commits use default durability and push private refs into a disposable local receiver; Scion retains production durability.",
+      "Scion commits remain in the configured server as unreferenced changesets; main is never changed."
+    ],
+    "snapshot": "bf8ffe81a63c82d3de5fbaa9991fd5f30034a452",
+    "commits": 5573,
+    "files": 28068,
+    "raw_waves": {
+      "checkout:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.10199862498848233,
+            0.10842925000179093,
+            0.10269133398833219,
+            0.10043041699100286,
+            0.10354879200167488,
+            0.10144787500030361,
+            0.09968104099971242
+          ],
+          "job_seconds": [
+            [
+              0.10175604099640623
+            ],
+            [
+              0.10818016600387637
+            ],
+            [
+              0.10240320899174549
+            ],
+            [
+              0.10020254099799786
+            ],
+            [
+              0.10330633299599867
+            ],
+            [
+              0.10118866700213403
+            ],
+            [
+              0.0994278750004014
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.07,
+            0.09,
+            0.07,
+            0.07,
+            0.08,
+            0.08,
+            0.07
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            0.0,
+            1.0,
+            0.0,
+            2.0,
+            0.0,
+            0.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.3421362910012249,
+            0.45035320799797773,
+            0.36701350001385435,
+            0.344263040999067,
+            0.3513689579995116,
+            0.3568466669967165,
+            0.36278795899124816
+          ],
+          "job_seconds": [
+            [
+              0.3419232500018552
+            ],
+            [
+              0.45010404200002085
+            ],
+            [
+              0.36680570799217094
+            ],
+            [
+              0.3440722920058761
+            ],
+            [
+              0.3511468750075437
+            ],
+            [
+              0.35646229100530036
+            ],
+            [
+              0.3625272499921266
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.31000000000000005,
+            0.41000000000000003,
+            0.34,
+            0.32,
+            0.33,
+            0.33,
+            0.33
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.11945470899809152,
+            0.10678404099598993,
+            0.10919137499877252,
+            0.11112812500505242,
+            0.10986220800259616,
+            0.10823691700352356,
+            0.10973641600867268
+          ],
+          "job_seconds": [
+            [
+              0.1192576250032289
+            ],
+            [
+              0.10652570800448302
+            ],
+            [
+              0.1089762920018984
+            ],
+            [
+              0.11090158300066832
+            ],
+            [
+              0.10959887500212062
+            ],
+            [
+              0.10797887500666548
+            ],
+            [
+              0.10951345799549017
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.15179900000008617,
+            0.13963299999999323,
+            0.1443860000000723,
+            0.13620800000005717,
+            0.15421800000006103,
+            0.13606500000004873,
+            0.13741400000002502
+          ],
+          "object_gets": [
+            107.0,
+            107.0,
+            107.0,
+            107.0,
+            107.0,
+            107.0,
+            107.0
+          ],
+          "metadata_calls": [
+            126.0,
+            126.0,
+            127.0,
+            127.0,
+            126.0,
+            127.0,
+            126.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.04634829099813942,
+            0.04672704200493172,
+            0.043535624994547106,
+            0.043003958999179304,
+            0.042561082998872735,
+            0.04307537501154002,
+            0.04615816700970754
+          ],
+          "job_seconds": [
+            [
+              0.046123833002639
+            ],
+            [
+              0.04648454100242816
+            ],
+            [
+              0.04329633399902377
+            ],
+            [
+              0.042773624998517334
+            ],
+            [
+              0.042323917004978284
+            ],
+            [
+              0.04284495899628382
+            ],
+            [
+              0.04591295799764339
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.05356700000001212,
+            0.051817000000110344,
+            0.04442300000012665,
+            0.05751599999993971,
+            0.048127999999988166,
+            0.04013300000010077,
+            0.056581000000133205
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      "checkout:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            0.34017583400418516,
+            0.3264910419966327,
+            0.3333322499966016,
+            0.3282961250079097,
+            0.32391037499473896,
+            0.698188583002775,
+            0.34353837500384543
+          ],
+          "job_seconds": [
+            [
+              0.33779791700362694,
+              0.3392051669943612,
+              0.3379958340083249,
+              0.3316800000029616,
+              0.3048054590035463,
+              0.33002679100900423,
+              0.3357463329884922,
+              0.3084586670011049
+            ],
+            [
+              0.30068283299624454,
+              0.3258521660027327,
+              0.2980619169975398,
+              0.30222633299126755,
+              0.32174525001028087,
+              0.32584704100736417,
+              0.30700887501006946,
+              0.3259094590030145
+            ],
+            [
+              0.3324180420022458,
+              0.3307175410009222,
+              0.2993407500034664,
+              0.33243137499084696,
+              0.30664454100769944,
+              0.32809429201006424,
+              0.32454766699811444,
+              0.30297416700341273
+            ],
+            [
+              0.29715141700580716,
+              0.31456066700047813,
+              0.32501283299643546,
+              0.32487150000815745,
+              0.3227598749945173,
+              0.289177209007903,
+              0.29414558300049976,
+              0.3276270829956047
+            ],
+            [
+              0.319342458009487,
+              0.31751858300413005,
+              0.2962911670038011,
+              0.30231124999409076,
+              0.31966449999890756,
+              0.31855758400342893,
+              0.30222995900840033,
+              0.3232821249985136
+            ],
+            [
+              0.2966423330071848,
+              0.3846830419934122,
+              0.29463970799406525,
+              0.2956917080009589,
+              0.4649787499947706,
+              0.61347641699831,
+              0.5445205419964623,
+              0.6975267499947222
+            ],
+            [
+              0.31838550000975374,
+              0.3212559169915039,
+              0.34286199999041855,
+              0.2962878329999512,
+              0.3404493749985704,
+              0.3358073750132462,
+              0.34172804199624807,
+              0.34296024999639485
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            2.32,
+            2.2,
+            2.2199999999999998,
+            2.2399999999999998,
+            2.17,
+            2.27,
+            2.29
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            1.6370031670085154,
+            1.5246184170100605,
+            1.5691049589950126,
+            1.5095097080047708,
+            1.5607641249953303,
+            1.547461750000366,
+            1.5443390419968637
+          ],
+          "job_seconds": [
+            [
+              1.629342958010966,
+              1.4044077500002459,
+              1.6337141249969136,
+              1.621831333002774,
+              1.545882625010563,
+              1.6070144580007764,
+              1.6066072499961592,
+              1.6239320000022417
+            ],
+            [
+              1.520418583007995,
+              1.493588749988703,
+              1.3397134999977425,
+              1.506961291001062,
+              1.3856938749959227,
+              1.4279602910100948,
+              1.489767374994699,
+              1.5081507499999134
+            ],
+            [
+              1.5683522910112515,
+              1.5104633330047363,
+              1.553587417001836,
+              1.553602125000907,
+              1.4002013749995967,
+              1.5433706669864478,
+              1.527150708992849,
+              1.4654901250032708
+            ],
+            [
+              1.5013588330039056,
+              1.4417300000059186,
+              1.4905670410080347,
+              1.4690096249978524,
+              1.309418500008178,
+              1.4546580829919549,
+              1.5000551249977434,
+              1.4060680420079734
+            ],
+            [
+              1.55197387500084,
+              1.4574093330011237,
+              1.5076442919962574,
+              1.5443541249987902,
+              1.5443463749979855,
+              1.5397247500077356,
+              1.3586885839904426,
+              1.525865542003885
+            ],
+            [
+              1.2770106660027523,
+              1.5216360829945188,
+              1.5464001670043217,
+              1.5443914580100682,
+              1.4917775420035468,
+              1.5465183749911375,
+              1.5173222919984255,
+              1.5466564999951515
+            ],
+            [
+              1.51025937499071,
+              1.3487012920086272,
+              1.5435153340076795,
+              1.5435083339980338,
+              1.4316232500132173,
+              1.5044060000072932,
+              1.438546416000463,
+              1.5104211660072906
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            12.23,
+            11.35,
+            11.77,
+            11.29,
+            11.67,
+            11.68,
+            11.479999999999999
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            3.0,
+            6.0,
+            4.0,
+            3.0,
+            3.0,
+            3.0,
+            4.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.28623304099892266,
+            0.29395391599973664,
+            0.27460629200504627,
+            0.2614995409967378,
+            0.2830158340075286,
+            0.29288583299785387,
+            0.2656025000032969
+          ],
+          "job_seconds": [
+            [
+              0.27732970799843315,
+              0.2124409160023788,
+              0.2835224590089638,
+              0.2824198750022333,
+              0.28210991599189583,
+              0.2282238750049146,
+              0.27900433300237637,
+              0.21262112499971408
+            ],
+            [
+              0.21187250000366475,
+              0.1902431669877842,
+              0.28780616700532846,
+              0.19837199999892619,
+              0.28840191700146534,
+              0.28341483300027903,
+              0.28655079200689215,
+              0.2871622499951627
+            ],
+            [
+              0.25903562500025146,
+              0.26051691599423066,
+              0.21905783399415668,
+              0.2168261249898933,
+              0.26490841699705925,
+              0.26866037500440143,
+              0.2647527499939315,
+              0.19116820799536072
+            ],
+            [
+              0.17727037500299048,
+              0.25308724999194965,
+              0.2528687500016531,
+              0.25263220799388364,
+              0.20553854199533816,
+              0.2523711249959888,
+              0.25218095899617765,
+              0.1626217080047354
+            ],
+            [
+              0.2261717920046067,
+              0.2746577499929117,
+              0.21358870799303986,
+              0.2816684169956716,
+              0.19106125000689644,
+              0.254846458992688,
+              0.2619070000073407,
+              0.2824531669903081
+            ],
+            [
+              0.2093175420013722,
+              0.1822459999966668,
+              0.2796609999932116,
+              0.21014087500225287,
+              0.290356375000556,
+              0.2679195419914322,
+              0.28389145800611004,
+              0.2864704170060577
+            ],
+            [
+              0.18317312499857508,
+              0.20792083301057573,
+              0.2115920840005856,
+              0.2643698750034673,
+              0.263132708001649,
+              0.2429893750086194,
+              0.24517720799485687,
+              0.2590830840053968
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.2270600000000786,
+            1.4279190000000779,
+            1.1112780000000453,
+            1.007664000000043,
+            1.2499820000000068,
+            1.01380100000001,
+            1.058016999999976
+          ],
+          "object_gets": [
+            856.0,
+            856.0,
+            856.0,
+            856.0,
+            856.0,
+            856.0,
+            856.0
+          ],
+          "metadata_calls": [
+            1008.0,
+            1009.0,
+            1009.0,
+            1008.0,
+            1009.0,
+            1009.0,
+            1009.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.2097618749976391,
+            0.2224344580026809,
+            0.20229037500394043,
+            0.2162981659930665,
+            0.2247638749977341,
+            0.22102954200818203,
+            0.1918323749996489
+          ],
+          "job_seconds": [
+            [
+              0.208287500005099,
+              0.19795962500211317,
+              0.18701037499704398,
+              0.18763299999409355,
+              0.18345412499911617,
+              0.20459066699550021,
+              0.17394945801061112,
+              0.19854024999949615
+            ],
+            [
+              0.22167695799726062,
+              0.1986479170009261,
+              0.2216773749969434,
+              0.19591779199254233,
+              0.22148645798733924,
+              0.19583754199265968,
+              0.2012727499968605,
+              0.18970004099537618
+            ],
+            [
+              0.19716070900904015,
+              0.17902650000178255,
+              0.17574437499570195,
+              0.17208029200264718,
+              0.19582379100029357,
+              0.19807833299273625,
+              0.1757133339997381,
+              0.17569491699396167
+            ],
+            [
+              0.17896941700018942,
+              0.21104058300261386,
+              0.19383591700170655,
+              0.20670170900120866,
+              0.18494208400079515,
+              0.19282891700277105,
+              0.2137336250016233,
+              0.18600795899692457
+            ],
+            [
+              0.20103412499884143,
+              0.2124170829920331,
+              0.1979020419967128,
+              0.212134250003146,
+              0.21567258400318678,
+              0.21509666700148955,
+              0.1987393329909537,
+              0.20137079199776053
+            ],
+            [
+              0.1994663330115145,
+              0.18683345800673123,
+              0.21919020799396094,
+              0.19806162499298807,
+              0.21339766700111795,
+              0.21190495800692588,
+              0.18721591599751264,
+              0.19345033400168177
+            ],
+            [
+              0.16193154199572746,
+              0.18517945799976587,
+              0.19041587499668822,
+              0.16443400000571273,
+              0.17209662499953993,
+              0.16238666701246984,
+              0.1871117919945391,
+              0.16147920799267013
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.9917270000000943,
+            0.9658259999999042,
+            1.0452010000000158,
+            1.0599490000000333,
+            0.9972389999999675,
+            0.9292570000001255,
+            1.0504520000000597
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=1": {
+        "git-mirror": {
+          "seconds": [
+            0.4151109170052223,
+            0.4153814580058679,
+            0.42057866700633895,
+            0.5042591659876052,
+            0.5426335410011234,
+            0.4242869159934344,
+            0.438298915993073
+          ],
+          "job_seconds": [
+            [
+              0.4148387500026729
+            ],
+            [
+              0.41512304099160247
+            ],
+            [
+              0.42035100000794046
+            ],
+            [
+              0.503915125009371
+            ],
+            [
+              0.5422577090066625
+            ],
+            [
+              0.4240568329987582
+            ],
+            [
+              0.4380093749932712
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.41000000000000003,
+            0.41000000000000003,
+            0.41000000000000003,
+            0.47000000000000003,
+            0.53,
+            0.41000000000000003,
+            0.43000000000000005
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            1.0,
+            1.0,
+            2.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            0.4258189999964088,
+            0.4264139589940896,
+            0.4197661250072997,
+            0.6259449579956708,
+            0.5437747499963734,
+            0.44882012499147095,
+            0.4385295420070179
+          ],
+          "job_seconds": [
+            [
+              0.42550283299351577
+            ],
+            [
+              0.4261492920049932
+            ],
+            [
+              0.41950933400949
+            ],
+            [
+              0.6253963339986512
+            ],
+            [
+              0.5435226670088014
+            ],
+            [
+              0.44858020900574047
+            ],
+            [
+              0.43824733400833793
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.41000000000000003,
+            0.4,
+            0.41000000000000003,
+            0.54,
+            0.53,
+            0.43000000000000005,
+            0.42000000000000004
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            1.0,
+            1.0,
+            1.0,
+            2.0,
+            1.0,
+            2.0,
+            1.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.15230645801057108,
+            0.15418595800292678,
+            0.15151774999685585,
+            0.24828708299901336,
+            0.16951729198626708,
+            0.21494245799840428,
+            0.1580885000003036
+          ],
+          "job_seconds": [
+            [
+              0.1520455830032006
+            ],
+            [
+              0.1539582500117831
+            ],
+            [
+              0.15123566699912772
+            ],
+            [
+              0.24793870800931472
+            ],
+            [
+              0.16925045900279656
+            ],
+            [
+              0.21465462500054855
+            ],
+            [
+              0.15783937500964385
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.149602999999928,
+            0.1472689999999659,
+            0.1471130000000187,
+            0.2723059999999953,
+            0.349552999999986,
+            0.24850300000000858,
+            0.16026499999998123
+          ],
+          "object_gets": [
+            107.0,
+            107.0,
+            107.0,
+            107.0,
+            107.0,
+            107.0,
+            107.0
+          ],
+          "metadata_calls": [
+            159.0,
+            161.0,
+            160.0,
+            161.0,
+            160.0,
+            161.0,
+            160.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.10027291699952912,
+            0.10701470899221022,
+            0.10242750000907108,
+            0.18878304200188722,
+            0.21259562500927132,
+            0.1342855409893673,
+            0.09760233300039545
+          ],
+          "job_seconds": [
+            [
+              0.10000595799647272
+            ],
+            [
+              0.10672000001068227
+            ],
+            [
+              0.10217874999216292
+            ],
+            [
+              0.18848358299874235
+            ],
+            [
+              0.2122419160004938
+            ],
+            [
+              0.13395599999057595
+            ],
+            [
+              0.097316083003534
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.06194599999997763,
+            0.21293300000002802,
+            0.10746700000004239,
+            0.17528799999993283,
+            0.16130199999993722,
+            0.10582599999998621,
+            0.06734899999998589
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            40.0,
+            39.0,
+            39.0,
+            39.0,
+            39.0,
+            38.0,
+            38.0
+          ]
+        }
+      },
+      "commit:apps/web/src/lib:concurrency=8": {
+        "git-mirror": {
+          "seconds": [
+            1.0544654580007773,
+            1.0488688329933211,
+            1.061943666994921,
+            1.0806316250091186,
+            1.0596226250054315,
+            1.119821791013237,
+            1.043500125000719
+          ],
+          "job_seconds": [
+            [
+              1.0480027079902356,
+              1.0426924159983173,
+              1.0458293330011657,
+              1.013393957997323,
+              1.016486332999193,
+              1.0426932080008555,
+              1.0469700829999056,
+              1.0481362499995157
+            ],
+            [
+              1.0016329579957528,
+              1.0368163329985691,
+              1.0357043330004672,
+              1.0480805409897584,
+              0.9994694170018192,
+              1.0458450830046786,
+              1.0348488750023535,
+              1.037000457989052
+            ],
+            [
+              1.057473792010569,
+              1.0607662080001319,
+              1.056658041998162,
+              1.0562520410021534,
+              1.0571809999964898,
+              1.059957833000226,
+              1.055813291008235,
+              1.0603106249909615
+            ],
+            [
+              1.0793056660040747,
+              1.0731979580014013,
+              1.077052000007825,
+              1.0769390409986954,
+              1.0758374159922823,
+              1.0780926250008633,
+              1.072756166002364,
+              1.079110375008895
+            ],
+            [
+              1.0556569170003058,
+              1.054588541999692,
+              1.0541897919902112,
+              1.0402539170027012,
+              1.0523034579964587,
+              1.051472332997946,
+              1.0556526250002207,
+              1.0439283750019968
+            ],
+            [
+              1.118867416997091,
+              1.1153679999988526,
+              1.1155643329984741,
+              1.1145613330008928,
+              1.1152420830039773,
+              1.1156321250018664,
+              1.1181039579969365,
+              1.1192464159976225
+            ],
+            [
+              1.022051249994547,
+              1.0392858749983134,
+              1.0326519579975866,
+              1.0332782499899622,
+              1.02347300000838,
+              1.0344572920002975,
+              1.032676791990525,
+              1.0230232500034617
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.14,
+            8.16,
+            8.46,
+            8.59,
+            8.51,
+            8.930000000000001,
+            8.280000000000001
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            2.0,
+            2.0,
+            3.0,
+            2.0,
+            3.0,
+            2.0,
+            2.0
+          ]
+        },
+        "git-sparse-index": {
+          "seconds": [
+            1.05624354199972,
+            1.0482480420032516,
+            1.0810828340036096,
+            1.0357265419879695,
+            1.0721948340069503,
+            1.058796916011488,
+            1.0912997919949703
+          ],
+          "job_seconds": [
+            [
+              1.0502788750018226,
+              1.0486975830135634,
+              1.0501444169931347,
+              1.0427631249913247,
+              1.050513415990281,
+              1.0491324579925276,
+              1.050626917000045,
+              1.055609707997064
+            ],
+            [
+              1.0253431250021094,
+              1.0378904169920133,
+              1.0145917920017382,
+              1.01166629200452,
+              1.005021040997235,
+              1.038400207995437,
+              1.007414207997499,
+              1.0190025829942897
+            ],
+            [
+              1.0794992089940934,
+              1.0631085829954827,
+              1.076091709008324,
+              1.075534666000749,
+              1.0703500410018023,
+              1.068689333013026,
+              1.0764035409956705,
+              1.0744651660061209
+            ],
+            [
+              1.028663625009358,
+              1.0319431249954505,
+              1.0283747909998056,
+              1.0216523749986663,
+              1.028642499994021,
+              1.0295312919915887,
+              1.0242539999890141,
+              1.035114500002237
+            ],
+            [
+              1.0665727089944994,
+              1.0634477920102654,
+              1.0674544170033187,
+              1.0614935829944443,
+              1.0676055419899058,
+              1.0697167079924839,
+              1.0621915829979116,
+              1.0711711659969296
+            ],
+            [
+              1.0488473329896806,
+              1.0531005410011858,
+              1.0473657920083497,
+              1.040519125002902,
+              1.0447942079917993,
+              1.0579931250103982,
+              1.0574722080054926,
+              1.057638333993964
+            ],
+            [
+              1.090353874998982,
+              1.0893088330049068,
+              1.08568895800272,
+              1.0862954589974834,
+              1.0823661250033183,
+              1.0868736249976791,
+              1.083689624996623,
+              1.0901804580062162
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            8.26,
+            7.670000000000001,
+            8.600000000000001,
+            8.18,
+            8.43,
+            8.33,
+            8.73
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            5.0,
+            2.0,
+            2.0,
+            3.0,
+            3.0,
+            2.0,
+            3.0
+          ]
+        },
+        "direct": {
+          "seconds": [
+            0.34760358299536165,
+            0.32516675000078976,
+            0.33009241698891856,
+            0.3796323749993462,
+            0.33342762499523815,
+            0.32231058400066104,
+            0.3208262499974808
+          ],
+          "job_seconds": [
+            [
+              0.3409200000023702,
+              0.3110860830056481,
+              0.3380928330007009,
+              0.34421179100172594,
+              0.34232112499012146,
+              0.3237901250104187,
+              0.3181001670018304,
+              0.31114879199594725
+            ],
+            [
+              0.30438779201358557,
+              0.30154695799865294,
+              0.29710929200518876,
+              0.3187545830005547,
+              0.32012779198703356,
+              0.32343404200219084,
+              0.3012396669946611,
+              0.3235554169950774
+            ],
+            [
+              0.3285473329888191,
+              0.32592508298694156,
+              0.3007089999882737,
+              0.32259758400323335,
+              0.3214326669985894,
+              0.30470012499426957,
+              0.3178809579985682,
+              0.3042997079901397
+            ],
+            [
+              0.3380876669980353,
+              0.37865749999764375,
+              0.3729973750014324,
+              0.3250387089938158,
+              0.37779212500026915,
+              0.3714114169997629,
+              0.37795758299762383,
+              0.3570899170008488
+            ],
+            [
+              0.32772120799927507,
+              0.2853456250013551,
+              0.31028345800586976,
+              0.32542775000911206,
+              0.300014624997857,
+              0.2909636669937754,
+              0.31350624999322463,
+              0.3322559160005767
+            ],
+            [
+              0.2872992500051623,
+              0.30347262500436045,
+              0.3188512499909848,
+              0.3199285840091761,
+              0.3035895420034649,
+              0.3033404169982532,
+              0.2872111250035232,
+              0.3209024160023546
+            ],
+            [
+              0.2879355420009233,
+              0.3106269169948064,
+              0.30001891701249406,
+              0.28406779099896085,
+              0.2910914169915486,
+              0.31466645799810067,
+              0.3072098749980796,
+              0.32016620801005047
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            1.1083020000000159,
+            1.040117999999958,
+            1.1720519999999772,
+            1.4743640000001017,
+            1.2084329999999932,
+            1.0834029999999177,
+            1.1014809999999682
+          ],
+          "object_gets": [
+            856.0,
+            856.0,
+            856.0,
+            856.0,
+            856.0,
+            856.0,
+            856.0
+          ],
+          "metadata_calls": [
+            1274.0,
+            1274.0,
+            1274.0,
+            1274.0,
+            1274.0,
+            1277.0,
+            1274.0
+          ]
+        },
+        "daemon": {
+          "seconds": [
+            0.21954720800567884,
+            0.23042000000714324,
+            0.21718512500228826,
+            0.2186214589892188,
+            0.22727524999936577,
+            0.20626487499976065,
+            0.22333370900014415
+          ],
+          "job_seconds": [
+            [
+              0.2138509590004105,
+              0.18508945898793172,
+              0.2176544579997426,
+              0.20974500000011176,
+              0.2054783750063507,
+              0.19013891599024646,
+              0.21480133400473278,
+              0.21890254199388437
+            ],
+            [
+              0.20304570799635258,
+              0.22641358300461434,
+              0.22324908399605192,
+              0.22582858400710393,
+              0.22704674999113195,
+              0.22598824999295175,
+              0.22496395900088828,
+              0.2297935829992639
+            ],
+            [
+              0.2122085830051219,
+              0.21240641600161325,
+              0.20775874999526422,
+              0.21642795800289605,
+              0.19168625000747852,
+              0.18626683299953584,
+              0.19124037500296254,
+              0.1864765409991378
+            ],
+            [
+              0.21685304200218525,
+              0.21372499999415595,
+              0.17649529200571124,
+              0.19071866599551868,
+              0.21351720800157636,
+              0.20803729200270027,
+              0.2178052090021083,
+              0.19669987499946728
+            ],
+            [
+              0.18139287499070633,
+              0.21708754199789837,
+              0.19078716699732468,
+              0.2190058329870226,
+              0.21928541699890047,
+              0.20261787499475759,
+              0.21651241600920912,
+              0.22049345800769515
+            ],
+            [
+              0.17706695800006855,
+              0.19518870899628382,
+              0.20166804200562183,
+              0.20222870899306145,
+              0.19891929200093728,
+              0.20229379199736286,
+              0.19622104200243484,
+              0.20254320799722336
+            ],
+            [
+              0.21657762500399258,
+              0.21405029098968953,
+              0.18889958399813622,
+              0.21778941700176802,
+              0.21785487500892486,
+              0.21385920800094027,
+              0.21541762500419281,
+              0.18137870800273959
+            ]
+          ],
+          "accounted_cpu_seconds": [
+            0.4612499999999872,
+            0.7393340000000049,
+            0.5247350000001169,
+            0.5465170000000049,
+            0.5349410000000708,
+            0.5351830000000851,
+            0.7049520000000021
+          ],
+          "object_gets": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "metadata_calls": [
+            309.0,
+            306.0,
+            306.0,
+            308.0,
+            306.0,
+            307.0,
+            306.0
+          ]
+        }
+      }
+    }
+  },
+  "hill_climb": {
+    "baseline": {
+      "method": "Concurrent CI workloads against a pinned Git mirror and a production Scion server.\n\nRuns sequential, randomized waves: implementations never compete with each other.\nGit uses a ready shared mirror (shared clones), plus fresh shallow/filtered clones.\nScion uses direct access and optionally one shared, prewarmed node daemon.\nAll setup needed by each checkout job is timed; fixture/service setup and validation are not.\n",
+      "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "concurrency": [
+        1,
+        4,
+        8
+      ],
+      "runs": 3,
+      "summary": {
+        "checkout:apps/web:concurrency=1": {
+          "daemon": {
+            "median_wave_seconds": 0.42815312500169966,
+            "median_jobs_per_second": 2.335612988918463,
+            "job_p50_seconds": 0.4279382499953499,
+            "job_p95_seconds": 0.46620733400050085,
+            "median_accounted_cpu_seconds": 0.5102030000000005,
+            "wave_range_seconds": [
+              0.4203885830065701,
+              0.4663959169993177
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=4": {
+          "daemon": {
+            "median_wave_seconds": 0.7852614160074154,
+            "median_jobs_per_second": 5.093845079435594,
+            "job_p50_seconds": 0.782917707998422,
+            "job_p95_seconds": 0.9471891249995679,
+            "median_accounted_cpu_seconds": 3.1424489999999654,
+            "wave_range_seconds": [
+              0.7610876249964349,
+              0.9489509169943631
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=8": {
+          "daemon": {
+            "median_wave_seconds": 2.5135767920000944,
+            "median_jobs_per_second": 3.1827155730676,
+            "job_p50_seconds": 2.500703521502146,
+            "job_p95_seconds": 2.7999013750086306,
+            "median_accounted_cpu_seconds": 17.861276999999973,
+            "wave_range_seconds": [
+              2.4667485840036534,
+              2.800637666005059
+            ]
+          }
+        }
+      },
+      "validation": {
+        "git-mirror:apps/web/src/lib:files": 107,
+        "git-shallow:apps/web/src/lib:files": 107,
+        "git-partial:apps/web/src/lib:files": 107,
+        "git-sparse-index:apps/web/src/lib:files": 314,
+        "direct:apps/web/src/lib:files": 107,
+        "daemon:apps/web/src/lib:files": 107,
+        "git-mirror:apps/web:files": 1521,
+        "git-shallow:apps/web:files": 1521,
+        "git-partial:apps/web:files": 1521,
+        "git-sparse-index:apps/web:files": 1538,
+        "direct:apps/web:files": 1521,
+        "daemon:apps/web:files": 1521,
+        "main_unchanged": true,
+        "all_waves_passed": true
+      },
+      "setup": {
+        "git_receiver_seconds": 0.04433095900458284,
+        "git_mirror_object_bytes": 1594959160,
+        "daemon_prime_seconds:apps/web/src/lib": 0.07173370799864642,
+        "daemon_prime_seconds:apps/web": 0.6921052499965299,
+        "daemon_cache_bytes_after": 123589111
+      },
+      "warmups": 2,
+      "client_sha256": "0bd03d4757bb3e78f6d36250f00c0fbfd5709e86df2e439d1241f629ac805bd5",
+      "workspace_revision_at_run": "8714571aaea62b5984514b1d6c19c80ad005e533",
+      "containers": [
+        "scion-t3code-sanity-cockroach-1",
+        "scion-t3code-sanity-minio-1"
+      ],
+      "limitations": [
+        "Single machine and one authoritative Scion server; concurrency scaling, not horizontal scaling.",
+        "Operating-system caches are warm; daemon priming is recorded separately, not called cold.",
+        "CPU includes Git child processes and Scion client/server/daemon; dedicated backend CPU is included only with --containers.",
+        "Container CPU snapshots include background work and small observer overhead; container memory includes page cache and is sampled only at wave boundaries.",
+        "RPC payload counters exclude transport framing and TLS; Git pack bytes are on-disk received sizes, not NIC bytes.",
+        "Git shared-clone jobs borrow objects from a ready local mirror; partial clones transfer their own objects.",
+        "git-sparse-index uses cone mode and includes ancestor-directory files; its extra files and bytes are reported.",
+        "Git commits use default durability and push private refs into a disposable local receiver; Scion retains production durability.",
+        "Scion commits remain in the configured server as unreferenced changesets; main is never changed."
+      ],
+      "snapshot": "bf8ffe81a63c82d3de5fbaa9991fd5f30034a452",
+      "commits": 5573,
+      "files": 28068,
+      "raw_waves": {
+        "checkout:apps/web:concurrency=1": {
+          "daemon": {
+            "seconds": [
+              0.4203885830065701,
+              0.4663959169993177,
+              0.42815312500169966
+            ],
+            "job_seconds": [
+              [
+                0.4201995839976007
+              ],
+              [
+                0.46620733400050085
+              ],
+              [
+                0.4279382499953499
+              ]
+            ],
+            "accounted_cpu_seconds": [
+              0.5102030000000005,
+              0.536075000000004,
+              0.5092839999999813
+            ],
+            "object_gets": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "metadata_calls": [
+              1.0,
+              2.0,
+              1.0
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=4": {
+          "daemon": {
+            "seconds": [
+              0.7610876249964349,
+              0.7852614160074154,
+              0.9489509169943631
+            ],
+            "job_seconds": [
+              [
+                0.7579028329928406,
+                0.7593443750083679,
+                0.7579622080083936,
+                0.7607114590064157
+              ],
+              [
+                0.7811555410007713,
+                0.7847964579996187,
+                0.7810903750068974,
+                0.7846798749960726
+              ],
+              [
+                0.9466160000010859,
+                0.938993957999628,
+                0.9448833339993143,
+                0.9471891249995679
+              ]
+            ],
+            "accounted_cpu_seconds": [
+              3.1451460000000275,
+              2.965876999999945,
+              3.1424489999999654
+            ],
+            "object_gets": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "metadata_calls": [
+              3.0,
+              1.0,
+              2.0
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=8": {
+          "daemon": {
+            "seconds": [
+              2.4667485840036534,
+              2.5135767920000944,
+              2.800637666005059
+            ],
+            "job_seconds": [
+              [
+                2.4651803339947946,
+                2.450281624987838,
+                2.4561437500087777,
+                2.4565984580112854,
+                2.4512308339908486,
+                2.4637576670065755,
+                2.4636038330063457,
+                2.464848500007065
+              ],
+              [
+                2.490326416998869,
+                2.496179209003458,
+                2.5052278340008343,
+                2.493082582994248,
+                2.5128489160124445,
+                2.511181999987457,
+                2.489206165992073,
+                2.51106833400263
+              ],
+              [
+                2.7973495420010295,
+                2.7717554999981076,
+                2.768881959011196,
+                2.786611624993384,
+                2.770841207995545,
+                2.7999013750086306,
+                2.7735999160067877,
+                2.8000564170069993
+              ]
+            ],
+            "accounted_cpu_seconds": [
+              17.786546000000023,
+              18.045470000000016,
+              17.861276999999973
+            ],
+            "object_gets": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "metadata_calls": [
+              5.0,
+              5.0,
+              6.0
+            ]
+          }
+        }
+      },
+      "sample_selection": "Only the three daemon large-checkout concurrency cases used for the hill climb; all final and confirmation samples are retained separately."
+    },
+    "retained_stat_optimization": {
+      "method": "Concurrent CI workloads against a pinned Git mirror and a production Scion server.\n\nRuns sequential, randomized waves: implementations never compete with each other.\nGit uses a ready shared mirror (shared clones), plus fresh shallow/filtered clones.\nScion uses direct access and optionally one shared, prewarmed node daemon.\nAll setup needed by each checkout job is timed; fixture/service setup and validation are not.\n",
+      "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "concurrency": [
+        1,
+        4,
+        8
+      ],
+      "runs": 3,
+      "summary": {
+        "checkout:apps/web:concurrency=1": {
+          "daemon": {
+            "median_wave_seconds": 0.36835266700654756,
+            "median_jobs_per_second": 2.7147896284465474,
+            "job_p50_seconds": 0.36816070800705347,
+            "job_p95_seconds": 0.37079791600990575,
+            "median_accounted_cpu_seconds": 0.44835400000004344,
+            "wave_range_seconds": [
+              0.3645725000096718,
+              0.37099004100309685
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=4": {
+          "daemon": {
+            "median_wave_seconds": 0.6811145410028985,
+            "median_jobs_per_second": 5.87272735964534,
+            "job_p50_seconds": 0.6532463960102177,
+            "job_p95_seconds": 0.7513938749907538,
+            "median_accounted_cpu_seconds": 2.655418000000057,
+            "wave_range_seconds": [
+              0.6222762090037577,
+              0.7518698750063777
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=8": {
+          "daemon": {
+            "median_wave_seconds": 2.2053470829996513,
+            "median_jobs_per_second": 3.6275469116265473,
+            "job_p50_seconds": 2.1914474585064454,
+            "job_p95_seconds": 2.2275699579913635,
+            "median_accounted_cpu_seconds": 15.568398000000036,
+            "wave_range_seconds": [
+              2.2014056670013815,
+              2.2291574999981094
+            ]
+          }
+        }
+      },
+      "validation": {
+        "git-mirror:apps/web:files": 1521,
+        "git-sparse-index:apps/web:files": 1538,
+        "direct:apps/web:files": 1521,
+        "daemon:apps/web:files": 1521,
+        "main_unchanged": true,
+        "all_waves_passed": true
+      },
+      "setup": {
+        "git_receiver_seconds": 0.05889391699747648,
+        "git_mirror_object_bytes": 1594959160,
+        "daemon_prime_seconds:apps/web": 0.35113312500470784,
+        "daemon_cache_bytes_after": 123589111
+      },
+      "warmups": 2,
+      "client_sha256": "cd1b6bb894b331487d5058670809ee8e95e62cfa4d93390890d978f6be7cc7b3",
+      "workspace_revision_at_run": "8714571aaea62b5984514b1d6c19c80ad005e533",
+      "containers": [
+        "scion-t3code-sanity-cockroach-1",
+        "scion-t3code-sanity-minio-1"
+      ],
+      "limitations": [
+        "Single machine and one authoritative Scion server; concurrency scaling, not horizontal scaling.",
+        "Operating-system caches are warm; daemon priming is recorded separately, not called cold.",
+        "CPU includes Git child processes and Scion client/server/daemon; dedicated backend CPU is included only with --containers.",
+        "Container CPU snapshots include background work and small observer overhead; container memory includes page cache and is sampled only at wave boundaries.",
+        "RPC payload counters exclude transport framing and TLS; Git pack bytes are on-disk received sizes, not NIC bytes.",
+        "Git shared-clone jobs borrow objects from a ready local mirror; partial clones transfer their own objects.",
+        "git-sparse-index uses cone mode and includes ancestor-directory files; its extra files and bytes are reported.",
+        "Git commits use default durability and push private refs into a disposable local receiver; Scion retains production durability.",
+        "Scion commits remain in the configured server as unreferenced changesets; main is never changed."
+      ],
+      "snapshot": "bf8ffe81a63c82d3de5fbaa9991fd5f30034a452",
+      "commits": 5573,
+      "files": 28068,
+      "raw_waves": {
+        "checkout:apps/web:concurrency=1": {
+          "daemon": {
+            "seconds": [
+              0.36835266700654756,
+              0.3645725000096718,
+              0.37099004100309685
+            ],
+            "job_seconds": [
+              [
+                0.36816070800705347
+              ],
+              [
+                0.3643900409952039
+              ],
+              [
+                0.37079791600990575
+              ]
+            ],
+            "accounted_cpu_seconds": [
+              0.44835400000004344,
+              0.46075000000002264,
+              0.4440039999999823
+            ],
+            "object_gets": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "metadata_calls": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=4": {
+          "daemon": {
+            "seconds": [
+              0.6811145410028985,
+              0.7518698750063777,
+              0.6222762090037577
+            ],
+            "job_seconds": [
+              [
+                0.6807052079966525,
+                0.6766751670074882,
+                0.679578750001383,
+                0.6787657499953639
+              ],
+              [
+                0.6278613329923246,
+                0.6298176250129472,
+                0.7513938749907538,
+                0.6836454169970239
+              ],
+              [
+                0.6206106250028824,
+                0.6196815419971244,
+                0.6166850000008708,
+                0.6171615839994047
+              ]
+            ],
+            "accounted_cpu_seconds": [
+              2.674326000000023,
+              2.3156310000000646,
+              2.655418000000057
+            ],
+            "object_gets": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "metadata_calls": [
+              2.0,
+              1.0,
+              2.0
+            ]
+          }
+        },
+        "checkout:apps/web:concurrency=8": {
+          "daemon": {
+            "seconds": [
+              2.2014056670013815,
+              2.2291574999981094,
+              2.2053470829996513
+            ],
+            "job_seconds": [
+              [
+                2.1557631670002593,
+                2.1958354999951553,
+                2.198692749996553,
+                2.168744541995693,
+                2.1534265000082087,
+                2.197054708012729,
+                2.1901655420078896,
+                2.156870874998276
+              ],
+              [
+                2.2260162500024308,
+                2.2275699579913635,
+                2.1967334580112947,
+                1.7882476249942556,
+                2.2284425830002874,
+                2.116569417004939,
+                2.166833625000436,
+                2.173787084000651
+              ],
+              [
+                2.192729375005001,
+                2.1986411249963567,
+                2.117682458003401,
+                2.117366291990038,
+                2.1948644170042826,
+                2.1400967090012273,
+                2.200522082988755,
+                2.2048375829908764
+              ]
+            ],
+            "accounted_cpu_seconds": [
+              15.910147999999946,
+              14.559371000000027,
+              15.568398000000036
+            ],
+            "object_gets": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "metadata_calls": [
+              6.0,
+              4.0,
+              6.0
+            ]
+          }
+        }
+      },
+      "sample_selection": "Only the three daemon large-checkout concurrency cases used for the hill climb; all final and confirmation samples are retained separately."
+    },
+    "rejected_compressed_daemon": {
+      "checkout:apps/web:concurrency=1": {
+        "git-mirror": {
+          "median_wave_seconds": 0.27107666700612754,
+          "median_jobs_per_second": 3.6889932691159864,
+          "job_p50_seconds": 0.2708548330119811,
+          "job_p95_seconds": 0.27464829199016094,
+          "median_accounted_cpu_seconds": 0.21000000000000002,
+          "wave_range_seconds": [
+            0.24150200000440236,
+            0.27483454201137647
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 0.6930774579959689,
+          "median_jobs_per_second": 1.442840173869594,
+          "job_p50_seconds": 0.6928742500022054,
+          "job_p95_seconds": 0.7001998339983402,
+          "median_accounted_cpu_seconds": 1.15,
+          "wave_range_seconds": [
+            0.685534167001606,
+            0.7004390000074636
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 1.138262542008306,
+          "median_jobs_per_second": 0.8785319406502116,
+          "job_p50_seconds": 1.138047208005446,
+          "job_p95_seconds": 1.17930004200025,
+          "median_accounted_cpu_seconds": 2.17,
+          "wave_range_seconds": [
+            1.1323415000078967,
+            1.1794989580084803
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 0.6038782499963418,
+          "median_jobs_per_second": 1.6559629362475927,
+          "job_p50_seconds": 0.6036913340067258,
+          "job_p95_seconds": 0.6802708340110257,
+          "median_accounted_cpu_seconds": 0.58,
+          "wave_range_seconds": [
+            0.6007515000092098,
+            0.6804588329978287
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 0.8791014999878826,
+          "median_jobs_per_second": 1.1375250753340587,
+          "job_p50_seconds": 0.8789010409964249,
+          "job_p95_seconds": 0.9113744589994894,
+          "median_accounted_cpu_seconds": 1.7042249999999906,
+          "wave_range_seconds": [
+            0.8678743329946883,
+            0.9115763750014594
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.36928137500945013,
+          "median_jobs_per_second": 2.7079621873006983,
+          "job_p50_seconds": 0.36908999999286607,
+          "job_p95_seconds": 0.37742958299349993,
+          "median_accounted_cpu_seconds": 0.45864100000002267,
+          "wave_range_seconds": [
+            0.3681134579965146,
+            0.37760554200212937
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=4": {
+        "git-mirror": {
+          "median_wave_seconds": 0.4686957919911947,
+          "median_jobs_per_second": 8.534320274151613,
+          "job_p50_seconds": 0.46360700000514043,
+          "job_p95_seconds": 0.4723035000060918,
+          "median_accounted_cpu_seconds": 1.42,
+          "wave_range_seconds": [
+            0.4575970000005327,
+            0.4727197500033071
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 1.0487857919943053,
+          "median_jobs_per_second": 3.8139341994649363,
+          "job_p50_seconds": 1.0394391035079025,
+          "job_p95_seconds": 1.132405625001411,
+          "median_accounted_cpu_seconds": 5.32,
+          "wave_range_seconds": [
+            1.0299716660083504,
+            1.1329208329989342
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 1.5004276250110706,
+          "median_jobs_per_second": 2.665906661089692,
+          "job_p50_seconds": 1.4966401045021485,
+          "job_p95_seconds": 1.604103290999774,
+          "median_accounted_cpu_seconds": 9.04,
+          "wave_range_seconds": [
+            1.49584520800272,
+            1.6043930830055615
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 1.0282690419990104,
+          "median_jobs_per_second": 3.8900325076633493,
+          "job_p50_seconds": 1.0276857915014261,
+          "job_p95_seconds": 1.0377038339938736,
+          "median_accounted_cpu_seconds": 3.45,
+          "wave_range_seconds": [
+            0.9776367500016931,
+            1.0380597089970252
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 1.6321549999993294,
+          "median_jobs_per_second": 2.4507476312002496,
+          "job_p50_seconds": 1.6253648130004876,
+          "job_p95_seconds": 1.6932050839968724,
+          "median_accounted_cpu_seconds": 8.600495000000024,
+          "wave_range_seconds": [
+            1.6280774170008954,
+            1.6961603749950882
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 0.8738365409953985,
+          "median_jobs_per_second": 4.577515144243737,
+          "job_p50_seconds": 0.8715860625015921,
+          "job_p95_seconds": 0.8879248750017723,
+          "median_accounted_cpu_seconds": 2.6496120000000176,
+          "wave_range_seconds": [
+            0.6777702079998562,
+            0.8884849169990048
+          ]
+        }
+      },
+      "checkout:apps/web:concurrency=8": {
+        "git-mirror": {
+          "median_wave_seconds": 1.0796028330078116,
+          "median_jobs_per_second": 7.410132462983372,
+          "job_p50_seconds": 1.0516573959976085,
+          "job_p95_seconds": 1.1183759580017067,
+          "median_accounted_cpu_seconds": 6.5,
+          "wave_range_seconds": [
+            1.060082042007707,
+            1.1226135419856291
+          ]
+        },
+        "git-shallow": {
+          "median_wave_seconds": 1.822693292007898,
+          "median_jobs_per_second": 4.389109256657831,
+          "job_p50_seconds": 1.800664541493461,
+          "job_p95_seconds": 2.0031851670064498,
+          "median_accounted_cpu_seconds": 14.14,
+          "wave_range_seconds": [
+            1.7283123749948572,
+            2.00972129200818
+          ]
+        },
+        "git-partial": {
+          "median_wave_seconds": 2.274221416999353,
+          "median_jobs_per_second": 3.5176873897157024,
+          "job_p50_seconds": 2.1733357914999942,
+          "job_p95_seconds": 2.3802810000051977,
+          "median_accounted_cpu_seconds": 19.45,
+          "wave_range_seconds": [
+            2.1161700840020785,
+            2.3817892499937443
+          ]
+        },
+        "git-sparse-index": {
+          "median_wave_seconds": 2.3453229580045445,
+          "median_jobs_per_second": 3.4110440835860776,
+          "job_p50_seconds": 2.32399856250413,
+          "job_p95_seconds": 2.5224808329949155,
+          "median_accounted_cpu_seconds": 16.720000000000002,
+          "wave_range_seconds": [
+            2.280567459005397,
+            2.5254694589966675
+          ]
+        },
+        "direct": {
+          "median_wave_seconds": 2.564246166992234,
+          "median_jobs_per_second": 3.119825273789413,
+          "job_p50_seconds": 2.5196349999969243,
+          "job_p95_seconds": 2.647730249998858,
+          "median_accounted_cpu_seconds": 17.55652099999997,
+          "wave_range_seconds": [
+            2.408486125001218,
+            2.654802582997945
+          ]
+        },
+        "daemon": {
+          "median_wave_seconds": 2.5000937080039876,
+          "median_jobs_per_second": 3.1998800582506965,
+          "job_p50_seconds": 2.492221062493627,
+          "job_p95_seconds": 2.5401210830023047,
+          "median_accounted_cpu_seconds": 16.867686000000003,
+          "wave_range_seconds": [
+            2.4823313750093803,
+            2.5434819999936735
+          ]
+        }
+      }
+    },
+    "decision": "Retain post-rename fstat; reject compressed full-object responses over the local socket because they did not improve on the retained variant.",
+    "comparability": "Exploratory baseline/iteration runs inherited all Git refs and had no prepared commit graph. Final and seven-wave confirmation use a main-only receiver with commit graph. Only Scion timings are used to assess the runtime optimization."
+  },
+  "binary_sha256": {
+    "before/scion": "0bd03d4757bb3e78f6d36250f00c0fbfd5709e86df2e439d1241f629ac805bd5",
+    "before/scion-daemon": "b3d8d15b8e17b719e3c2180b692518cf73a9c3874bff0d6728a369246e1d4062",
+    "before/scion-server": "bb01521cd253388f48603b99c19f5f8c8eb6398383b5fca91d9d09ec1ea4568c",
+    "iteration1/scion": "cd1b6bb894b331487d5058670809ee8e95e62cfa4d93390890d978f6be7cc7b3"
+  },
+  "checks": {
+    "working_copy_tests_passed": 144,
+    "ignored_full_scale_tests": 4,
+    "strict_clippy_changed_crates": "passed",
+    "formatting": "passed"
+  },
+  "full_resource_reports": "/private/tmp/scion-scaling"
+}
